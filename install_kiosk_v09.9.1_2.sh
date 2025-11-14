@@ -3070,6 +3070,8 @@ let lastMediaCheck=Date.now();
 let keyboardOpenTime=0;
 let keyboardLastUsed=0;
 let inactivityExtensionUntil=0;
+let inactivityExtensionTabIndex=-1;
+let inactivityExtensionUrl='';
 let manualNavigationMode=false;
 let programmaticNavigation=false;
 
@@ -3122,21 +3124,73 @@ function loadConfig(){
 function markActivity(){
   const now=Date.now();
   const timeSinceLastActivity=now-lastUserInteraction;
-  
+
   if(timeSinceLastActivity>5000){
     console.log('[ACTIVITY] User interaction detected');
   }
-  
+
   lastUserInteraction=now;
   userRecentlyActive=true;
-  
+
   if(promptWindow&&!promptWindow.isDestroyed()){
     console.log('[ACTIVITY] Closing inactivity prompt');
     promptWindow.close();
     promptWindow=null;
   }
-  
-  inactivityExtensionUntil=0;
+
+  // Note: inactivityExtensionUntil is NOT cleared here - extensions should only
+  // be cancelled when user navigates to a different URL, not on normal page interaction
+}
+
+function checkAndCancelExtensionOnNavigation(viewIndex,newUrl){
+  // Cancel extension if user manually navigates to a different URL
+  if(inactivityExtensionUntil===0){
+    return; // No active extension
+  }
+
+  const currentTabIdx=viewIndexToTabIndex(viewIndex);
+
+  // If user switched to a different tab, cancel extension
+  if(currentTabIdx!==inactivityExtensionTabIndex){
+    console.log('[EXTENSION] Cancelled - user switched from tab '+inactivityExtensionTabIndex+' to tab '+currentTabIdx);
+    inactivityExtensionUntil=0;
+    inactivityExtensionTabIndex=-1;
+    inactivityExtensionUrl='';
+    return;
+  }
+
+  // If no URL tracking, don't cancel (shouldn't happen)
+  if(!inactivityExtensionUrl||!newUrl){
+    return;
+  }
+
+  try{
+    const extensionUrl=new URL(inactivityExtensionUrl);
+    const currentUrl=new URL(newUrl);
+
+    // Check based on navigation mode
+    if(allowNavigation==='restricted'){
+      // In restricted mode, any URL change should cancel extension
+      if(currentUrl.href!==extensionUrl.href){
+        console.log('[EXTENSION] Cancelled - URL changed from '+extensionUrl.href+' to '+currentUrl.href);
+        inactivityExtensionUntil=0;
+        inactivityExtensionTabIndex=-1;
+        inactivityExtensionUrl='';
+      }
+    }else if(allowNavigation==='same-origin'){
+      // In same-origin mode, changing origin should cancel extension
+      if(currentUrl.origin!==extensionUrl.origin){
+        console.log('[EXTENSION] Cancelled - origin changed from '+extensionUrl.origin+' to '+currentUrl.origin);
+        inactivityExtensionUntil=0;
+        inactivityExtensionTabIndex=-1;
+        inactivityExtensionUrl='';
+      }
+    }
+    // In unrestricted mode, don't cancel on URL changes within the same tab
+  }catch(e){
+    // If URL parsing fails, don't cancel
+    console.log('[EXTENSION] URL parsing error:',e.message);
+  }
 }
 
 function markKeyboardActivity(){
@@ -3432,25 +3486,30 @@ function rotateToNextSite(){
 
 function attachView(i){
   closeHTMLKeyboard();
-  
+
   if(!mainWindow||!views[i]||showingHidden)return;
-  
+
   currentIndex=i;
   mainWindow.setTopBrowserView(views[i]);
   const[w,h]=mainWindow.getContentSize();
   views[i].setBounds({x:0,y:0,width:w,height:h});
-  
+
   const tabIdx=viewIndexToTabIndex(i);
   if(tabIdx>=0&&tabs[tabIdx]){
     const configuredUrl=tabs[tabIdx].url;
     const currentUrl=views[i].webContents.getURL();
-    
+
     if(currentUrl&&!currentUrl.startsWith(configuredUrl)){
       programmaticNavigation=true;
       views[i].webContents.loadURL(configuredUrl);
     }
   }
-  
+
+  // Check if switching tabs should cancel an active extension
+  if(currentUrl){
+    checkAndCancelExtensionOnNavigation(i,currentUrl);
+  }
+
   views[i].webContents.focus();
   siteStartTime=Date.now();
 }
@@ -3498,8 +3557,10 @@ function returnToHome(){
   manualNavigationMode=false;
   currentIndex=homeViewIdx;
   attachView(currentIndex);
-  
+
   inactivityExtensionUntil=0;
+  inactivityExtensionTabIndex=-1;
+  inactivityExtensionUrl='';
   markActivity();
 }
 
@@ -3536,18 +3597,35 @@ function showInactivityPrompt(){
       promptWindow.close();
     }
     promptWindow=null;
-    
+
     if(minutes===-1){
       inactivityExtensionUntil=0;
+      inactivityExtensionTabIndex=-1;
+      inactivityExtensionUrl='';
       returnToHome();
     }else if(minutes===0){
       inactivityExtensionUntil=0;
+      inactivityExtensionTabIndex=-1;
+      inactivityExtensionUrl='';
       markActivity();
     }else{
       const now=Date.now();
       inactivityExtensionUntil=now+(minutes*60*1000);
       lastUserInteraction=now;
+
+      // Track which tab and URL the extension was granted for
+      const currentTabIdx=viewIndexToTabIndex(currentIndex);
+      inactivityExtensionTabIndex=currentTabIdx;
+      if(currentTabIdx>=0&&views[currentIndex]){
+        try{
+          inactivityExtensionUrl=views[currentIndex].webContents.getURL();
+        }catch(e){
+          inactivityExtensionUrl='';
+        }
+      }
+
       console.log('[PROMPT] Extended until: '+new Date(inactivityExtensionUntil).toLocaleTimeString());
+      console.log('[PROMPT] Extension granted for tab '+currentTabIdx+' at URL: '+inactivityExtensionUrl);
     }
   });
 }
@@ -3843,11 +3921,13 @@ function createWindow(){
         markActivity();
       }
     });
-    view.webContents.on('did-navigate',()=>{
+    view.webContents.on('did-navigate',(event,url)=>{
       if(programmaticNavigation){
         programmaticNavigation=false;
       }else{
         markActivity();
+        // Check if we should cancel an active extension due to URL change
+        checkAndCancelExtensionOnNavigation(i,url);
       }
     });
     
