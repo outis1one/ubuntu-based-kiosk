@@ -552,7 +552,8 @@ configure_timezone() {
     echo " 18. Enter timezone manually"
     echo "  0. Keep current ($current_tz)"
     echo
-    read -r -p "Choose [0-18]: " tz_choice
+    local max_option=18
+    read -r -p "Choose [0-$max_option]: " tz_choice
     
     local new_tz=""
     case "$tz_choice" in
@@ -788,7 +789,8 @@ configure_sites() {
                 echo "  6. Clear all, start over"
                 echo "  0. Return to menu"
                 echo
-                read -r -p "Choose [0-6]: " site_choice
+                local max_option=6
+                read -r -p "Choose [0-$max_option]: " site_choice
                 
                 case "$site_choice" in
                     1)
@@ -930,7 +932,8 @@ configure_home_url() {
     echo "  2. Disable Home URL"
     echo "  0. Cancel"
     echo
-    read -r -p "Choose [0-2]: " home_choice
+    local max_option=2
+    read -r -p "Choose [0-$max_option]: " home_choice
     
     case "$home_choice" in
         1)
@@ -1751,7 +1754,8 @@ configure_power_display_quiet() {
         echo "  6. Test schedules & system"
         echo "  0. Return"
         echo
-        read -r -p "Choose [0-6]: " choice
+        local max_option=6
+        read -r -p "Choose [0-$max_option]: " choice
         
         case "$choice" in
             1)
@@ -2314,7 +2318,8 @@ configure_electron_reload() {
         echo "  0. Return"
     fi
     echo
-    read -r -p "Choose [0-3]: " choice
+    local max_option=3
+    read -r -p "Choose [0-$max_option]: " choice
     
     case "$choice" in
         0) return ;;
@@ -2407,7 +2412,8 @@ custom_electron_reload_schedule() {
     echo "  3. Specific weekday"
     echo "  0. Cancel"
     echo
-    read -r -p "Choose [0-3]: " custom_choice
+    local max_option=3
+    read -r -p "Choose [0-$max_option]: " custom_choice
     
     local schedule=""
     local description=""
@@ -2587,7 +2593,8 @@ show_testing_menu() {
         echo "  7. Run All Tests"
         echo "  0. Return"
         echo
-        read -r -p "Choose [0-7]: " choice
+        local max_option=7
+        read -r -p "Choose [0-$max_option]: " choice
         
         case "$choice" in
             1) test_display_control ;;
@@ -5655,7 +5662,8 @@ addon_cups() {
         echo "  3. Complete uninstall (purge)"
         echo "  0. Return"
         echo
-        read -r -p "Choose [0-3]: " action
+        local max_option=3
+        read -r -p "Choose [0-$max_option]: " action
         
         case "$action" in
             2) reconfigure_cups ;;
@@ -5671,7 +5679,8 @@ addon_cups() {
         echo "  2. Complete uninstall (purge)"
         echo "  0. Return"
         echo
-        read -r -p "Choose [0-2]: " action
+        local max_option=2
+        read -r -p "Choose [0-$max_option]: " action
         
         case "$action" in
             1)
@@ -5812,7 +5821,8 @@ addon_jitsi_intercom() {
         echo "  4. Remove Jitsi"
         echo "  0. Return"
         echo
-        read -r -p "Choose [0-5]: " action
+        local max_option=4
+        read -r -p "Choose [0-$max_option]: " action
         
         case "$action" in
             2)
@@ -6004,7 +6014,8 @@ addon_talkkonnect_intercom() {
         echo "  2. Install talkkonnect only (connect to existing server)"
         echo "  0. Return"
         echo
-        read -r -p "Choose [0-2]: " choice
+        local max_option=2
+        read -r -p "Choose [0-$max_option]: " choice
         
         case "$choice" in
             1) install_murmur_and_talkkonnect ;;
@@ -6584,7 +6595,8 @@ addon_vnc() {
         echo "  3. Uninstall"
         echo "  0. Return"
         echo
-        read -r -p "Choose [0-3]: " action
+        local max_option=3
+        read -r -p "Choose [0-$max_option]: " action
         
         case "$action" in
             2)
@@ -6674,7 +6686,8 @@ addon_wireguard() {
         echo "  4. Uninstall"
         echo "  0. Return"
         echo
-        read -r -p "Choose [0-5]: " action
+        local max_option=4
+        read -r -p "Choose [0-$max_option]: " action
         
         case "$action" in
             2) sudo wg show all; pause ;;
@@ -6765,7 +6778,8 @@ addon_tailscale() {
         echo "  5. Uninstall"
         echo "  0. Return"
         echo
-        read -r -p "Choose [0-5]: " action
+        local max_option=5
+        read -r -p "Choose [0-$max_option]: " action
         
         case "$action" in
             2)
@@ -6851,7 +6865,8 @@ addon_netbird() {
         echo "  4. Uninstall"
         echo "  0. Return"
         echo
-        read -r -p "Choose [0-5]: " action
+        local max_option=4
+        read -r -p "Choose [0-$max_option]: " action
         
         case "$action" in
             2)
@@ -6932,7 +6947,8 @@ addon_onscreen_keyboard() {
         echo "  1. Install HTML Keyboard"
         echo "  0. Return"
         echo
-        read -r -p "Choose [0-1]: " choice
+        local max_option=1
+        read -r -p "Choose [0-$max_option]: " choice
         
         case "$choice" in
             1) install_html_keyboard ;;
@@ -6946,7 +6962,8 @@ addon_onscreen_keyboard() {
         echo "  5. Uninstall"
         echo "  0. Return"
         echo
-        read -r -p "Choose [0-5]: " choice
+        local max_option=5
+        read -r -p "Choose [0-$max_option]: " choice
         
         case "$choice" in
             1) toggle_keyboard_autoshow ;;
@@ -7800,7 +7817,8 @@ view_logs() {
     echo "  4. System journal (last 100 lines)"
     echo "  0. Return"
     echo
-    read -r -p "Choose [0-4]: " choice
+    local max_option=4
+    read -r -p "Choose [0-$max_option]: " choice
     
     case "$choice" in
         1) 
@@ -7916,7 +7934,8 @@ show_main_menu() {
         echo "  4. Restart Kiosk Display"
         echo "  0. Exit"
         echo
-        read -r -p "Choose [0-4]: " choice
+        local max_option=4
+        read -r -p "Choose [0-$max_option]: " choice
         
         case "$choice" in
             1) core_menu ;;
@@ -7949,7 +7968,8 @@ core_menu() {
         echo "  8. Complete uninstall"
         echo "  0. Return"
         echo
-        read -r -p "Choose [0-8]: " choice
+        local max_option=8
+        read -r -p "Choose [0-$max_option]: " choice
         
         case "$choice" in
             1) configure_timezone; pause ;;
@@ -7984,7 +8004,8 @@ addons_menu() {
         echo "  6. Remote Access (VNC/VPN)"
         echo "  0. Return"
         echo
-        read -r -p "Choose [0-6]: " choice
+        local max_option=6
+        read -r -p "Choose [0-$max_option]: " choice
         
         case "$choice" in
             1) addon_lms_squeezelite ;;
@@ -8012,7 +8033,8 @@ remote_access_menu() {
         echo "  4. Netbird VPN"
         echo "  0. Return"
         echo
-        read -r -p "Choose [0-4]: " choice
+        local max_option=4
+        read -r -p "Choose [0-$max_option]: " choice
         
         case "$choice" in
             1) addon_vnc ;;
@@ -8225,7 +8247,8 @@ advanced_menu() {
         echo " 10. Network Test"
         echo "  0. Return"
         echo
-        read -r -p "Choose [0-10]: " choice
+        local max_option=10
+        read -r -p "Choose [0-$max_option]: " choice
         
         case "$choice" in
             1) manual_electron_update ;;
