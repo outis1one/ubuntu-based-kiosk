@@ -3129,14 +3129,19 @@ function markActivity(){
   
   lastUserInteraction=now;
   userRecentlyActive=true;
-  
+
   if(promptWindow&&!promptWindow.isDestroyed()){
     console.log('[ACTIVITY] Closing inactivity prompt');
     promptWindow.close();
     promptWindow=null;
   }
-  
-  inactivityExtensionUntil=0;
+
+  // CRITICAL FIX: Don't clear time extensions on user activity!
+  // Extensions should only be cleared when:
+  // 1. They naturally expire
+  // 2. User explicitly returns home
+  // 3. User chooses "Return to Home" from prompt
+  // Do NOT clear here - user activity during extension should be allowed!
 }
 
 function markKeyboardActivity(){
