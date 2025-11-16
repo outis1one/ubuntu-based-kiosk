@@ -127,6 +127,39 @@ validate_yes_no() {
     esac
 }
 
+# Dynamic menu counter helpers
+# Makes menu numbering fully automatic - add/remove items without changing prompts
+#
+# SIMPLE MENUS (no conditionals):
+#   start_menu
+#   add_option "First option"
+#   add_option "Second option"
+#   add_option "Third option"
+#   show_menu_prompt
+#
+# COMPLEX MENUS (with conditionals):
+#   start_menu
+#   add_option "Always shown"
+#   [[ $condition ]] && add_option "Conditional option"
+#   show_menu_prompt
+#
+# The prompt will automatically show [0-N] where N = number of items added
+
+start_menu() {
+    menu_count=0
+}
+
+add_option() {
+    ((menu_count++))
+    echo "  $menu_count. $1"
+}
+
+show_menu_prompt() {
+    echo "  0. Return"
+    echo
+    read -r -p "Choose [0-$menu_count]: " choice
+}
+
 # Ask yes/no with better error messages
 ask_yes_no() {
     local prompt="$1"
@@ -552,8 +585,7 @@ configure_timezone() {
     echo " 18. Enter timezone manually"
     echo "  0. Keep current ($current_tz)"
     echo
-    local max_option=18
-    read -r -p "Choose [0-$max_option]: " tz_choice
+    read -r -p "Choose [0-18]: " tz_choice
     
     local new_tz=""
     case "$tz_choice" in
@@ -781,16 +813,15 @@ configure_sites() {
                 echo
                 
                 echo "Options:"
-                echo "  1. Keep all sites as-is"
-                echo "  2. Update durations"
-                echo "  3. Add more sites"
-                echo "  4. Delete a site"
-                echo "  5. Configure Home URL"
-                echo "  6. Clear all, start over"
-                echo "  0. Return to menu"
-                echo
-                local max_option=6
-                read -r -p "Choose [0-$max_option]: " site_choice
+                start_menu
+                add_option "Keep all sites as-is"
+                add_option "Update durations"
+                add_option "Add more sites"
+                add_option "Delete a site"
+                add_option "Configure Home URL"
+                add_option "Clear all, start over"
+                show_menu_prompt
+                site_choice=$choice
                 
                 case "$site_choice" in
                     1)
@@ -928,12 +959,11 @@ configure_home_url() {
     echo
     
     echo "Options:"
-    echo "  1. Enable/Change Home URL"
-    echo "  2. Disable Home URL"
-    echo "  0. Cancel"
-    echo
-    local max_option=2
-    read -r -p "Choose [0-$max_option]: " home_choice
+    start_menu
+    add_option "Enable/Change Home URL"
+    add_option "Disable Home URL"
+    show_menu_prompt
+    home_choice=$choice
     
     case "$home_choice" in
         1)
@@ -1745,17 +1775,15 @@ configure_power_display_quiet() {
         echo
         
         echo "Options:"
-        echo "  1. Configure power schedule"
+        start_menu
+        add_option "Configure power schedule"
         $rtc_available || echo "     (Not available)"
-        echo "  2. Configure display schedule"
-        echo "  3. Configure quiet hours"
-        echo "  4. Configure Electron reload"
-        echo "  5. Remove all schedules"
-        echo "  6. Test schedules & system"
-        echo "  0. Return"
-        echo
-        local max_option=6
-        read -r -p "Choose [0-$max_option]: " choice
+        add_option "Configure display schedule"
+        add_option "Configure quiet hours"
+        add_option "Configure Electron reload"
+        add_option "Remove all schedules"
+        add_option "Test schedules & system"
+        show_menu_prompt
         
         case "$choice" in
             1)
@@ -5657,13 +5685,12 @@ addon_cups() {
         echo "  Admin interface: http://${cups_ip}:631"
         echo
         echo "Options:"
-        echo "  1. Keep as-is"
-        echo "  2. Reconfigure for network access"
-        echo "  3. Complete uninstall (purge)"
-        echo "  0. Return"
-        echo
-        local max_option=3
-        read -r -p "Choose [0-$max_option]: " action
+        start_menu
+        add_option "Keep as-is"
+        add_option "Reconfigure for network access"
+        add_option "Complete uninstall (purge)"
+        show_menu_prompt
+        action=$choice
         
         case "$action" in
             2) reconfigure_cups ;;
@@ -5675,12 +5702,11 @@ addon_cups() {
         echo "Status: ⚠ Installed but not running"
         echo
         echo "Options:"
-        echo "  1. Start CUPS"
-        echo "  2. Complete uninstall (purge)"
-        echo "  0. Return"
-        echo
-        local max_option=2
-        read -r -p "Choose [0-$max_option]: " action
+        start_menu
+        add_option "Start CUPS"
+        add_option "Complete uninstall (purge)"
+        show_menu_prompt
+        action=$choice
         
         case "$action" in
             1)
@@ -7811,14 +7837,12 @@ view_logs() {
     clear
     echo " ═══ VIEW LOGS ═══"
     echo
-    echo "  1. Electron log (last 50 lines)"
-    echo "  2. LightDM log (last 50 lines)"
-    echo "  3. PTT service log (last 50 lines)"
-    echo "  4. System journal (last 100 lines)"
-    echo "  0. Return"
-    echo
-    local max_option=4
-    read -r -p "Choose [0-$max_option]: " choice
+    start_menu
+    add_option "Electron log (last 50 lines)"
+    add_option "LightDM log (last 50 lines)"
+    add_option "PTT service log (last 50 lines)"
+    add_option "System journal (last 100 lines)"
+    show_menu_prompt
     
     case "$choice" in
         1) 
@@ -7926,16 +7950,14 @@ show_main_menu() {
         show_system_status
         show_addon_status
         show_schedule_status
-        
+
         echo "Main Menu:"
-        echo "  1. Core Settings"
-        echo "  2. Addons"
-        echo "  3. Advanced"
-        echo "  4. Restart Kiosk Display"
-        echo "  0. Exit"
-        echo
-        local max_option=4
-        read -r -p "Choose [0-$max_option]: " choice
+        start_menu
+        add_option "Core Settings"
+        add_option "Addons"
+        add_option "Advanced"
+        add_option "Restart Kiosk Display"
+        show_menu_prompt
         
         case "$choice" in
             1) core_menu ;;
@@ -7958,18 +7980,16 @@ core_menu() {
         show_current_config
         echo
         echo "Options:"
-        echo "  1. Timezone"
-        echo "  2. Touch controls"
-        echo "  3. Navigation security"
-        echo "  4. Sites"
-        echo "  5. WiFi"
-        echo "  6. Power/Display/Quiet Hours"
-        echo "  7. Full reinstall"
-        echo "  8. Complete uninstall"
-        echo "  0. Return"
-        echo
-        local max_option=8
-        read -r -p "Choose [0-$max_option]: " choice
+        start_menu
+        add_option "Timezone"
+        add_option "Touch controls"
+        add_option "Navigation security"
+        add_option "Sites"
+        add_option "WiFi"
+        add_option "Power/Display/Quiet Hours"
+        add_option "Full reinstall"
+        add_option "Complete uninstall"
+        show_menu_prompt
         
         case "$choice" in
             1) configure_timezone; pause ;;
@@ -7994,18 +8014,16 @@ addons_menu() {
         echo
         
         show_addon_status
-        
+
         echo "Available Addons:"
-        echo "  1. LMS Server / Squeezelite Player"
-        echo "  2. CUPS Printing"
-        echo "  3. Jitsi Intercom (web-based)"
-        echo "  4. talkkonnect/Murmur Intercom (native audio)"
-        echo "  5. On-Screen Keyboard"
-        echo "  6. Remote Access (VNC/VPN)"
-        echo "  0. Return"
-        echo
-        local max_option=6
-        read -r -p "Choose [0-$max_option]: " choice
+        start_menu
+        add_option "LMS Server / Squeezelite Player"
+        add_option "CUPS Printing"
+        add_option "Jitsi Intercom (web-based)"
+        add_option "talkkonnect/Murmur Intercom (native audio)"
+        add_option "On-Screen Keyboard"
+        add_option "Remote Access (VNC/VPN)"
+        show_menu_prompt
         
         case "$choice" in
             1) addon_lms_squeezelite ;;
@@ -8027,14 +8045,12 @@ remote_access_menu() {
         echo "════════════════════════════════════════════════════════════"
         echo
         echo "Options:"
-        echo "  1. VNC Remote Desktop"
-        echo "  2. WireGuard VPN"
-        echo "  3. Tailscale VPN"
-        echo "  4. Netbird VPN"
-        echo "  0. Return"
-        echo
-        local max_option=4
-        read -r -p "Choose [0-$max_option]: " choice
+        start_menu
+        add_option "VNC Remote Desktop"
+        add_option "WireGuard VPN"
+        add_option "Tailscale VPN"
+        add_option "Netbird VPN"
+        show_menu_prompt
         
         case "$choice" in
             1) addon_vnc ;;
@@ -8237,18 +8253,16 @@ advanced_menu() {
         echo
         
         echo "Options:"
-        echo "  1. Manual Electron Update"
-        echo "  2. System Diagnostics"
-        echo "  3. View Logs"
-        echo "  4. Audio Diagnostics"
-        echo "  5. Fix Squeezelite Audio"
-        echo "  6. Factory Reset Config"
-        echo "  9. Emergency Hotspot"
-        echo " 10. Network Test"
-        echo "  0. Return"
-        echo
-        local max_option=10
-        read -r -p "Choose [0-$max_option]: " choice
+        start_menu
+        add_option "Manual Electron Update"
+        add_option "System Diagnostics"
+        add_option "View Logs"
+        add_option "Audio Diagnostics"
+        add_option "Fix Squeezelite Audio"
+        add_option "Factory Reset Config"
+        add_option "Emergency Hotspot"  # Was option 9
+        add_option "Network Test"  # Was option 10
+        show_menu_prompt
         
         case "$choice" in
             1) manual_electron_update ;;
@@ -8257,8 +8271,8 @@ advanced_menu() {
             4) audio_diagnostics ;;
             5) fix_squeezelite_audio ;;
             6) factory_reset ;;
-            9) configure_emergency_hotspot ;;
-            10) network_test ;;
+            7) configure_emergency_hotspot ;;
+            8) network_test ;;
             0) return ;;
         esac
     done
