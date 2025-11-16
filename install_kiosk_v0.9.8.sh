@@ -15,7 +15,12 @@
 #   * Button changed from "🏠 Return to home now" to "🔄 Return to rotation"
 #   * If not on home page: returns to home page, then starts rotation
 #   * If on home page: just starts the rotation
-#   * Allows time extensions even on home screen (e.g., viewing recipes)
+# - Consistent inactivity prompt UX across ALL sites
+#   * Prompt appears on ANY site where user has interacted (tap, swipe, scroll)
+#   * Auto-rotation to recipe → user taps → prompt appears after timeout ✅
+#   * User swiping through photos → keeps resetting timer, no prompt ✅
+#   * Auto-rotation with no interaction → no prompt, keeps rotating ✅
+#   * Works on home page, timed sites, and manual sites consistently
 # - Fixed site edit menu not returning to configuration menu
 #   * Edit site URL flow now completes properly
 # - Time extension features work correctly
@@ -3505,6 +3510,7 @@ let keyboardLastUsed=0;
 let inactivityExtensionUntil=0;
 let manualNavigationMode=false;
 let programmaticNavigation=false;
+let userInteractedWithCurrentSite=false;  // v0.9.8: Track if user touched current site
 
 let mediaIsPlaying=false;
 let userRecentlyActive=false;
@@ -3568,14 +3574,21 @@ function loadConfig(){
 function markActivity(){
   const now=Date.now();
   const timeSinceLastActivity=now-lastUserInteraction;
-  
+
   if(timeSinceLastActivity>5000){
     console.log('[ACTIVITY] User interaction detected');
   }
-  
+
   lastUserInteraction=now;
   userRecentlyActive=true;
   lastLockoutCheck=now;  // Reset lockout timer on activity
+
+  // v0.9.8: Mark that user has interacted with this site
+  // This triggers inactivity prompt logic for ANY site (not just manual/home)
+  if(!userInteractedWithCurrentSite){
+    console.log('[ACTIVITY] 🖐️ User touched this site - inactivity timer active');
+    userInteractedWithCurrentSite=true;
+  }
 
   if(promptWindow&&!promptWindow.isDestroyed()){
     console.log('[ACTIVITY] Closing inactivity prompt');
@@ -3800,15 +3813,17 @@ function startMasterTimer(){
       }
     }
     
-// 7. INACTIVITY CHECK (works on ALL pages including home!)
+// 7. INACTIVITY CHECK (works on ALL pages where user has interacted!)
     if(homeTabIndex>=0&&!showingHidden){
       const homeViewIdx=getHomeViewIndex();
       const currentTabIdx=viewIndexToTabIndex(currentIndex);
       const isOnHomePage=(homeViewIdx>=0&&currentIndex===homeViewIdx);
 
-      // v0.9.8: Show inactivity prompt on ALL pages (including home)
-      // This allows users to extend time even when viewing recipes, etc.
-      if(manualNavigationMode||isOnHomePage){
+      // v0.9.8: Show inactivity prompt on ANY site where user has interacted
+      // - Auto-rotates to recipe → user taps → prompt appears after timeout
+      // - User keeps swiping through photos → keeps resetting, no prompt
+      // - No user interaction → no prompt, just keeps rotating
+      if(userInteractedWithCurrentSite){
         const idleTime=now-lastUserInteraction;
 
         // CRITICAL FIX: Use absolute time check for extensions
@@ -3930,6 +3945,11 @@ function attachView(i){
   
   views[i].webContents.focus();
   siteStartTime=Date.now();
+
+  // v0.9.8: Clear interaction flag when site changes
+  // Will be set back to true if user manually swiped here (markActivity called after)
+  // Will stay false if auto-rotated (no user interaction yet)
+  userInteractedWithCurrentSite=false;
 }
 
 function nextTab(){
