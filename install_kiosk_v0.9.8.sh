@@ -363,7 +363,7 @@ show_system_status() {
 }
 
 show_addon_status() {
-    echo " ╔══ INSTALLED ADDONS ══╗"
+    echo " == INSTALLED ADDONS =="
     echo
     
     local any_addon=false
@@ -371,25 +371,14 @@ show_addon_status() {
     # LMS/Squeezelite - FAST CHECK (just check if files exist)
     local lms_active=false
     local sq_active=false
-    
+
     if [[ -f /lib/systemd/system/logitechmediaserver.service ]] || \
        [[ -f /lib/systemd/system/lyrionmusicserver.service ]]; then
         lms_active=true
         any_addon=true
     fi
-    
+
     if [[ -f /etc/systemd/system/squeezelite.service ]]; then
-        sq_active=true
-        any_addon=true
-    fi
-    
-    # Check if services are actually running
-    if is_service_active logitechmediaserver || is_service_enabled logitechmediaserver || \
-       is_service_active lyrionmusicserver || is_service_enabled lyrionmusicserver; then
-        lms_active=true
-        any_addon=true
-    fi
-    if is_service_active squeezelite || is_service_enabled squeezelite; then
         sq_active=true
         any_addon=true
     fi
@@ -410,13 +399,10 @@ show_addon_status() {
         fi
         
         echo "$status_text"
-        
-        # Squeezelite player name
-        if is_service_active squeezelite || is_service_enabled squeezelite; then
-            local player_name="Unknown"
-            if [[ -f /usr/local/bin/squeezelite-start.sh ]]; then
-                player_name=$(grep '^PLAYER_NAME=' /usr/local/bin/squeezelite-start.sh 2>/dev/null | cut -d'=' -f2 | tr -d '"' || echo "Unknown")
-            fi
+
+        # Squeezelite player name - only if service file exists
+        if $sq_active && [[ -f /usr/local/bin/squeezelite-start.sh ]]; then
+            local player_name=$(grep '^PLAYER_NAME=' /usr/local/bin/squeezelite-start.sh 2>/dev/null | cut -d'=' -f2 | tr -d '"' || echo "Unknown")
             if [[ "$player_name" != "Unknown" ]]; then
                 echo "  Player: $player_name"
             fi
@@ -452,12 +438,12 @@ show_addon_status() {
         else
             tk_status="${tk_status}✓ Client only"
         fi
-        
-        if systemctl is-active --quiet mumble-server 2>/dev/null; then
+
+        if $murmur_installed; then
             local tk_ip=$(get_ip_address)
             tk_status="${tk_status} (${tk_ip}:64738)"
         fi
-        
+
         echo "$tk_status"
     fi
 
@@ -1569,6 +1555,53 @@ add_new_sites() {
         [[ "$use_home_url" == "true" ]] && echo "  Home included in rotation (${home_duration}s)"
     else
         echo "✓ Auto-rotation DISABLED (all sites manual)"
+    fi
+
+    # Session Lockout Configuration
+    echo
+    echo "════════════════════════════════════════"
+    echo "SESSION LOCKOUT (Password Protection)"
+    echo "════════════════════════════════════════"
+    echo
+    echo "Lock the kiosk with a password after inactivity."
+    echo "  • After X minutes idle → screen locks"
+    echo "  • Password required to unlock"
+    echo
+    if ask_yes_no "Enable session lockout?" "n"; then
+        echo
+        read -r -p "Lockout timeout in minutes [30]: " lockout_min
+        lockout_min="${lockout_min:-30}"
+        LOCKOUT_TIMEOUT=$((lockout_min * 60))
+
+        echo
+        echo "Set a password for unlocking the kiosk:"
+        echo "(This is separate from your system password)"
+        echo
+        while true; do
+            read -r -s -p "Enter lockout password: " pass1
+            echo
+            read -r -s -p "Confirm password: " pass2
+            echo
+
+            if [[ "$pass1" == "$pass2" ]]; then
+                if [[ -n "$pass1" ]]; then
+                    LOCKOUT_PASSWORD="$pass1"
+                    LOCKOUT_ENABLED="true"
+                    log_success "Session lockout enabled (${lockout_min} min timeout)"
+                    break
+                else
+                    log_error "Password cannot be empty"
+                    echo
+                fi
+            else
+                log_error "Passwords don't match, try again"
+                echo
+            fi
+        done
+    else
+        echo "✓ Session lockout disabled"
+        LOCKOUT_ENABLED="false"
+        LOCKOUT_PASSWORD=""
     fi
 }
 
@@ -3747,10 +3780,10 @@ function startMasterTimer(){
     clearInterval(masterTimer);
   }
   
-  console.log('[TIMER] ╔═══ MASTER TIMER STARTED ════╗');
+  console.log('[TIMER] === MASTER TIMER STARTED ====');
   console.log('[TIMER] Home tab index:',homeTabIndex);
   console.log('[TIMER] Inactivity timeout:',inactivityTimeout/1000,'seconds');
-  console.log('[TIMER] ╚═══════════════════════════════════╝');
+  console.log('[TIMER] =================================');
   
   siteStartTime=Date.now();
   lastUserInteraction=Date.now();
@@ -3814,7 +3847,9 @@ function startMasterTimer(){
     }
     
 // 7. INACTIVITY CHECK (works on ALL pages where user has interacted!)
-    if(homeTabIndex>=0&&!showingHidden){
+    // v0.9.8 FIX: Show prompt even without Home URL configured
+    // The prompt allows user to continue or return to rotation
+    if(!showingHidden){
       const homeViewIdx=getHomeViewIndex();
       const currentTabIdx=viewIndexToTabIndex(currentIndex);
       const isOnHomePage=(homeViewIdx>=0&&currentIndex===homeViewIdx);
@@ -3823,7 +3858,8 @@ function startMasterTimer(){
       // - Auto-rotates to recipe → user taps → prompt appears after timeout
       // - User keeps swiping through photos → keeps resetting, no prompt
       // - No user interaction → no prompt, just keeps rotating
-      if(userInteractedWithCurrentSite){
+      // - Works with OR without Home URL configured
+      if(userInteractedWithCurrentSite&&inactivityTimeout>0){
         const idleTime=now-lastUserInteraction;
 
         // CRITICAL FIX: Use absolute time check for extensions
@@ -3861,9 +3897,6 @@ function startMasterTimer(){
           }
         }
       }
-    }else{
-      if(homeTabIndex<0)console.log('[INACTIVITY-DEBUG] ✗ No home tab configured');
-      if(showingHidden)console.log('[INACTIVITY-DEBUG] ✗ Showing hidden tabs');
     }
 
 // 8. LOCKOUT CHECK (session lock after extended inactivity)
@@ -3994,9 +4027,8 @@ function getHomeViewIndex(){
 
 function returnToHome(){
   const homeViewIdx=getHomeViewIndex();
-  if(homeViewIdx<0)return;
 
-  console.log('[HOME] 🔄 RETURNING TO ROTATION (via home) → manualNavigationMode=FALSE');
+  console.log('[HOME] 🔄 RETURNING TO ROTATION → manualNavigationMode=FALSE');
 
   if(showingHidden){
     showingHidden=false;
@@ -4009,11 +4041,18 @@ function returnToHome(){
   }
 
   // v0.9.8: "Return to Rotation" behavior
-  // If NOT on home page: go to home page first
-  // Then restart rotation by setting manualNavigationMode=false
-  // If already on home page: just restart the rotation
+  // If Home URL configured: go to home page and restart rotation
+  // If NO Home URL: just restart rotation from first site
   manualNavigationMode=false;
-  currentIndex=homeViewIdx;
+
+  if(homeViewIdx>=0){
+    // Home URL is configured - go to home page
+    currentIndex=homeViewIdx;
+  }else{
+    // No Home URL - restart from first site
+    currentIndex=0;
+  }
+
   attachView(currentIndex);
 
   // CRITICAL FIX: Don't clear extensions unless explicitly requested
@@ -8920,7 +8959,7 @@ audio_diagnostics() {
 
 fix_squeezelite_audio() {
     clear
-    echo "╔══ FIX SQUEEZELITE AUDIO ══╗"
+    echo "== FIX SQUEEZELITE AUDIO =="
     echo
     
     echo "This will attempt to fix Squeezelite audio issues by:"
