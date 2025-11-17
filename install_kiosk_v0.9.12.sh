@@ -1,9 +1,22 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk (UBK) v0.9.11         ###
+###   Ubuntu Based Kiosk (UBK) v0.9.12         ###
 ################################################################################
 #
-# RELEASE v0.9.11 - Media Playback Clarifications
+# RELEASE v0.9.12 - Rotation and Media Bug Fixes
+#
+# What's in v0.9.12:
+# - Fixed inactivity popup appearing on every rotated site
+#   * userInteractedWithCurrentSite now resets when switching sites
+#   * Each site independently tracks whether user has interacted with it
+#   * Popup only appears on sites where user actually touched/interacted
+# - Fixed rotation not resuming after "I'm still here" response
+#   * Clicking "I'm still here" on inactivity prompt now resumes rotation
+#   * User acknowledgement indicates they're done with current activity
+# - Fixed rotation stuck after media playback ends
+#   * After media grace period (30s), rotation automatically resumes
+#   * Prevents black screen when media stops playing
+#   * Normal rotation behavior resumes after media ends
 #
 # What's in v0.9.11:
 # - Clarified media playback behavior in comments
@@ -3583,7 +3596,7 @@ const path=require('path');
 const os=require('os');
 
 const CONFIG_FILE=path.join(__dirname,'config.json');
-const VERSION='0.9.10';
+const VERSION='0.9.12';
 
 let mainWindow,views=[],hiddenViews=[],tabs=[],currentIndex=0,showingHidden=false;
 let pinWindow=null,promptWindow=null,htmlKeyboardWindow=null;
@@ -3889,6 +3902,13 @@ function startMasterTimer(){
       return;
     }
 
+    // v0.9.11: After media grace period expires, resume rotation
+    // This prevents being stuck on a black screen after media ends
+    if(timeSinceMediaStopped>=MEDIA_GRACE_PERIOD&&timeSinceMediaStopped<MEDIA_GRACE_PERIOD+2000&&manualNavigationMode){
+      console.log('[MEDIA] Grace period expired - resuming rotation');
+      manualNavigationMode=false;
+    }
+
     // 5. USER ACTIVITY CHECK
     const timeSinceInteraction=now-lastUserInteraction;
     userRecentlyActive=timeSinceInteraction<USER_ACTIVITY_PAUSE;
@@ -4056,13 +4076,10 @@ function attachView(i,isAutoRotation){
   views[i].webContents.focus();
   siteStartTime=Date.now();
 
-  // v0.9.9 CRITICAL FIX: Only reset interaction flag on MANUAL navigation
-  // Don't reset during auto-rotation - this allows inactivity prompt to work on rotation sites!
-  // Auto-rotation: user taps site A → rotates to site B after 30s → inactivity prompt can still appear
-  // Manual swipe: user deliberately navigated, reset the flag (will be set again by markActivity())
-  if(!isAutoRotation){
-    userInteractedWithCurrentSite=false;
-  }
+  // v0.9.11 FIX: Always reset interaction flag when switching sites
+  // Each site should independently track whether user has interacted with it
+  // This prevents inactivity prompts from appearing on sites user never touched
+  userInteractedWithCurrentSite=false;
 }
 
 function nextTab(){
@@ -4201,9 +4218,10 @@ function showInactivityPrompt(){
       inactivityExtensionUntil=0;
       returnToHome();
     }else if(minutes===0){
-      // v0.9.9: User chose "I'm still here" - don't reset lockout timer
-      // This is a prompt response, not actual interaction with content
+      // v0.9.11: User chose "I'm still here" - resume rotation
+      // User acknowledged the prompt, so they're done with current activity
       inactivityExtensionUntil=0;
+      manualNavigationMode=false;  // Resume rotation
       markActivity();  // Resets inactivity timer but NOT lockout timer
     }else{
       // User chose a time extension - grant it!
