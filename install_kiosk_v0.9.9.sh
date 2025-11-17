@@ -1,11 +1,25 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk (UBK) v0.9.8          ###
+###   Ubuntu Based Kiosk (UBK) v0.9.9          ###
 ################################################################################
 #
-# RELEASE v0.9.8 - Password Lock & Bug Fixes
+# RELEASE v0.9.9 - Menu Reorganization & Inactivity Popup Fixes
 #
-# What's in v0.9.8:
+# What's in v0.9.9:
+# - Moved Session Lockout configuration from Sites menu to Core Settings menu
+#   * Now accessible as option 7 in Core Settings
+#   * Makes password protection easier to find and configure
+# - Fixed inactivity popup not appearing on rotation sites
+#   * Popup now appears on ALL sites where user has interacted (not just manual sites)
+#   * Inactivity check now happens BEFORE rotation check
+#   * Prevents rotation from interrupting the inactivity prompt
+#   * Rotation pauses while inactivity prompt is displayed
+# - Fixed session lockout being interrupted by rotation
+#   * Rotation now pauses completely when session is locked
+#   * Inactivity prompts won't appear while session is locked
+#   * Password lockout screen stays visible until correct password entered
+#
+# Previous features (v0.9.8):
 # - Added password-protected session lockout
 #   * Configurable lockout password (separate from sudo user)
 #   * Auto-lock after configurable timeout (default 30 minutes)
@@ -26,7 +40,7 @@
 # - Time extension features work correctly
 # - HTML on-screen keyboard (non-interfering)
 #
-# Previous features (v0.9.9.1):
+# Previous features (v0.9.7 and earlier):
 #   * Screen blanking disabled
 #   * Jitsi audio keep-alive
 #   * PTT spacebar hardcoded
@@ -73,7 +87,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="0.9.8"
+SCRIPT_VERSION="0.9.9"
 KIOSK_USER="kiosk"
 BUILD_USER="${SUDO_USER:-$(whoami)}"
 KIOSK_HOME="/home/${KIOSK_USER}"
@@ -828,11 +842,10 @@ configure_sites() {
                 add_option "Edit a site URL"
                 add_option "Reorder sites"
                 add_option "Configure Home URL"
-                add_option "Configure Session Lockout"
                 add_option "Clear all, start over"
                 show_menu_prompt
                 site_choice=$choice
-                
+
                 case "$site_choice" in
                     1)
                         log_success "Keeping existing sites"
@@ -871,11 +884,6 @@ configure_sites() {
                         continue
                         ;;
                     8)
-                        configure_lockout
-                        save_config
-                        continue
-                        ;;
-                    9)
                         URLS=()
                         DURS=()
                         USERS=()
@@ -3527,7 +3535,7 @@ const path=require('path');
 const os=require('os');
 
 const CONFIG_FILE=path.join(__dirname,'config.json');
-const VERSION='0.9.9.1';
+const VERSION='0.9.9';
 
 let mainWindow,views=[],hiddenViews=[],tabs=[],currentIndex=0,showingHidden=false;
 let pinWindow=null,promptWindow=null,htmlKeyboardWindow=null;
@@ -3820,41 +3828,21 @@ function startMasterTimer(){
     // 5. USER ACTIVITY CHECK
     const timeSinceInteraction=now-lastUserInteraction;
     userRecentlyActive=timeSinceInteraction<USER_ACTIVITY_PAUSE;
-    
+
     if(userRecentlyActive){
       return;
     }
-    
-    // 6. SITE ROTATION
-    if(!showingHidden&&views.length>1){
-      const currentTabIdx=viewIndexToTabIndex(currentIndex);
 
-      if(currentTabIdx>=0&&tabs[currentTabIdx]){
-        const siteDuration=parseInt(tabs[currentTabIdx].duration)||0;
-
-        if(siteDuration>0){
-          const timeOnSite=now-siteStartTime;
-
-          // CRITICAL FIX: Don't auto-rotate if time extension is active
-          const hasActiveExtension=(inactivityExtensionUntil>0&&now<inactivityExtensionUntil);
-
-          if(timeOnSite>=siteDuration*1000&&!hasActiveExtension){
-            rotateToNextSite();
-            return;
-          }
-        }
-      }
-    }
-    
-// 7. INACTIVITY CHECK (works on ALL pages where user has interacted!)
-    // v0.9.8 FIX: Show prompt even without Home URL configured
+    // 6. INACTIVITY CHECK (works on ALL pages where user has interacted!)
+    // v0.9.9 FIX: Check inactivity BEFORE rotation to ensure prompt appears on rotation sites
     // The prompt allows user to continue or return to rotation
-    if(!showingHidden){
+    // Don't show inactivity prompt if session is locked
+    if(!showingHidden&&!sessionLocked){
       const homeViewIdx=getHomeViewIndex();
       const currentTabIdx=viewIndexToTabIndex(currentIndex);
       const isOnHomePage=(homeViewIdx>=0&&currentIndex===homeViewIdx);
 
-      // v0.9.8: Show inactivity prompt on ANY site where user has interacted
+      // v0.9.9: Show inactivity prompt on ANY site where user has interacted
       // - Auto-rotates to recipe → user taps → prompt appears after timeout
       // - User keeps swiping through photos → keeps resetting, no prompt
       // - No user interaction → no prompt, just keeps rotating
@@ -3894,6 +3882,29 @@ function startMasterTimer(){
             const location=isOnHomePage?'home page':'other page';
             console.log('[INACTIVITY] 🔔 *** SHOWING PROMPT (on '+location+') ***');
             showInactivityPrompt();
+            return;  // Don't rotate while showing prompt
+          }
+        }
+      }
+    }
+
+    // 7. SITE ROTATION
+    // v0.9.9: Don't rotate if inactivity prompt is showing or session is locked
+    if(!showingHidden&&views.length>1&&(!promptWindow||promptWindow.isDestroyed())&&!sessionLocked){
+      const currentTabIdx=viewIndexToTabIndex(currentIndex);
+
+      if(currentTabIdx>=0&&tabs[currentTabIdx]){
+        const siteDuration=parseInt(tabs[currentTabIdx].duration)||0;
+
+        if(siteDuration>0){
+          const timeOnSite=now-siteStartTime;
+
+          // CRITICAL FIX: Don't auto-rotate if time extension is active
+          const hasActiveExtension=(inactivityExtensionUntil>0&&now<inactivityExtensionUntil);
+
+          if(timeOnSite>=siteDuration*1000&&!hasActiveExtension){
+            rotateToNextSite();
+            return;
           }
         }
       }
@@ -8761,10 +8772,11 @@ core_menu() {
         add_option "Sites"
         add_option "WiFi"
         add_option "Power/Display/Quiet Hours"
+        add_option "Session Lockout"
         add_option "Full reinstall"
         add_option "Complete uninstall"
         show_menu_prompt
-        
+
         case "$choice" in
             1) configure_timezone; pause ;;
             2) configure_touch_controls; save_config ;;
@@ -8772,8 +8784,9 @@ core_menu() {
             4) configure_sites ;;
             5) configure_wifi ;;
             6) configure_power_display_quiet ;;
-            7) full_reinstall; return ;;
-            8) complete_uninstall; return ;;
+            7) configure_lockout; save_config ;;
+            8) full_reinstall; return ;;
+            9) complete_uninstall; return ;;
             0) return ;;
         esac
     done
