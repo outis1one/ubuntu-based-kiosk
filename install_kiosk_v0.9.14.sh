@@ -1,21 +1,24 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk (UBK) v0.9.13         ###
+###   Ubuntu Based Kiosk (UBK) v0.9.14         ###
 ################################################################################
 #
-# RELEASE v0.9.13 - Fix Interaction Tracking and Media Recovery
+# RELEASE v0.9.14 - Restore Simpler Working Logic
 #
-# What's in v0.9.13:
-# - Fixed inactivity popup appearing on home page without user interaction
-#   * markActivity() now only sets userInteractedWithCurrentSite for ACTUAL touches
-#   * System events (prompt responses, app init) don't trigger interaction flag
-#   * Popup only appears after user has physically touched the screen
-#   * Home page no longer shows popup immediately on startup
-# - Fixed media playback black screen issue
-#   * Improved rotation resume logic after media grace period
-#   * Removed narrow 2-second time window that could be missed
-#   * manualNavigationMode now reliably resets after media ends + inactivity
-#   * Rotation properly resumes when user walks away after media stops
+# What's in v0.9.14:
+# - Reverted to simpler, working logic from v09.9.1_7
+#   * Removed userInteractedWithCurrentSite flag completely
+#   * Removed rotation-blocking logic from markActivity()
+#   * Sites rotate freely based on time - NO blocking
+# - Inactivity prompts only appear in two scenarios:
+#   * On the home page (after configured timeout)
+#   * When user manually swiped to a different site
+# - Manual swipe behavior restored:
+#   * Swiping to next/prev site sets manualNavigationMode=true
+#   * Inactivity prompt will show after timeout on that site
+#   * "Return to Rotation" resets manualNavigationMode=false
+# - Media playback works normally - rotation happens freely
+# - Much simpler, cleaner code with fewer edge cases
 #
 # What's in v0.9.12:
 # - Fixed rotation not resuming after "I'm still here" response
@@ -3602,7 +3605,7 @@ const path=require('path');
 const os=require('os');
 
 const CONFIG_FILE=path.join(__dirname,'config.json');
-const VERSION='0.9.13';
+const VERSION='0.9.14';
 
 let mainWindow,views=[],hiddenViews=[],tabs=[],currentIndex=0,showingHidden=false;
 let pinWindow=null,promptWindow=null,htmlKeyboardWindow=null;
@@ -3618,7 +3621,6 @@ let keyboardLastUsed=0;
 let inactivityExtensionUntil=0;
 let manualNavigationMode=false;
 let programmaticNavigation=false;
-let userInteractedWithCurrentSite=false;  // v0.9.8: Track if user touched current site
 
 let mediaIsPlaying=false;
 let userRecentlyActive=false;
@@ -3690,25 +3692,11 @@ function markActivity(resetLockoutTimer){
   lastUserInteraction=now;
   userRecentlyActive=true;
 
-  // v0.9.13: Only set interaction flags for ACTUAL user interaction
-  // This includes touches, scrolls, typing - any real content interaction
-  // Does NOT include prompt responses or programmatic navigation
+  // v0.9.14: Restore simpler logic from v09.9.1_7
+  // Reset lockout timer if requested
   if(resetLockoutTimer){
     lastLockoutCheck=now;
     console.log('[ACTIVITY] Lockout timer reset');
-
-    // v0.9.10: User interaction pauses rotation
-    if(!manualNavigationMode){
-      console.log('[ACTIVITY] 🛑 User interacted with content - pausing rotation');
-      manualNavigationMode=true;
-    }
-
-    // v0.9.13: Mark that user has interacted with this site
-    // ONLY set this for actual user touches, not system events
-    if(!userInteractedWithCurrentSite){
-      console.log('[ACTIVITY] 🖐️ User touched this site - inactivity timer active');
-      userInteractedWithCurrentSite=true;
-    }
   }
 
   if(promptWindow&&!promptWindow.isDestroyed()){
@@ -3916,29 +3904,38 @@ function startMasterTimer(){
       return;
     }
 
-    // v0.9.13: After media grace period AND user inactivity, resume rotation
-    // This prevents being stuck on a black screen after media ends
-    // Only reset if no recent user activity (user walked away after media ended)
-    if(manualNavigationMode&&timeSinceMediaStopped>=MEDIA_GRACE_PERIOD){
-      console.log('[MEDIA] Grace period expired + no activity - resuming rotation');
-      manualNavigationMode=false;
+    // 6. SITE ROTATION
+    // v0.9.14: Restore simple rotation from v09.9.1_7 - just rotate based on time
+    if(!showingHidden&&views.length>1){
+      const currentTabIdx=viewIndexToTabIndex(currentIndex);
+
+      if(currentTabIdx>=0&&tabs[currentTabIdx]){
+        const siteDuration=parseInt(tabs[currentTabIdx].duration)||0;
+
+        if(siteDuration>0){
+          const timeOnSite=now-siteStartTime;
+
+          // CRITICAL FIX: Don't auto-rotate if time extension is active
+          const hasActiveExtension=(inactivityExtensionUntil>0&&now<inactivityExtensionUntil);
+
+          if(timeOnSite>=siteDuration*1000&&!hasActiveExtension){
+            rotateToNextSite();
+            return;
+          }
+        }
+      }
     }
 
-    // 6. INACTIVITY CHECK (works on ALL pages where user has interacted!)
-    // v0.9.9 FIX: Check inactivity BEFORE rotation to ensure prompt appears on rotation sites
-    // The prompt allows user to continue or return to rotation
-    // Don't show inactivity prompt if session is locked
-    if(!showingHidden&&!sessionLocked){
+    // 7. INACTIVITY CHECK (works on home page OR manual navigation)
+    // v0.9.14: Restore simpler logic from v09.9.1_7
+    // Inactivity prompt ONLY appears on home page or when user manually navigated
+    if(homeTabIndex>=0&&!showingHidden&&!sessionLocked){
       const homeViewIdx=getHomeViewIndex();
       const currentTabIdx=viewIndexToTabIndex(currentIndex);
       const isOnHomePage=(homeViewIdx>=0&&currentIndex===homeViewIdx);
 
-      // v0.9.9: Show inactivity prompt on ANY site where user has interacted
-      // - Auto-rotates to recipe → user taps → prompt appears after timeout
-      // - User keeps swiping through photos → keeps resetting, no prompt
-      // - No user interaction → no prompt, just keeps rotating
-      // - Works with OR without Home URL configured
-      if(userInteractedWithCurrentSite&&inactivityTimeout>0){
+      // Only check if we're in manual mode OR on home page
+      if(manualNavigationMode||isOnHomePage){
         const idleTime=now-lastUserInteraction;
 
         // CRITICAL FIX: Use absolute time check for extensions
@@ -3973,35 +3970,12 @@ function startMasterTimer(){
             const location=isOnHomePage?'home page':'other page';
             console.log('[INACTIVITY] 🔔 *** SHOWING PROMPT (on '+location+') ***');
             showInactivityPrompt();
-            return;  // Don't rotate while showing prompt
           }
         }
       }
     }
 
-    // 7. SITE ROTATION
-    // v0.9.10: Don't rotate if inactivity prompt is showing, session is locked, or user manually navigated
-    if(!showingHidden&&views.length>1&&(!promptWindow||promptWindow.isDestroyed())&&!sessionLocked&&!manualNavigationMode){
-      const currentTabIdx=viewIndexToTabIndex(currentIndex);
-
-      if(currentTabIdx>=0&&tabs[currentTabIdx]){
-        const siteDuration=parseInt(tabs[currentTabIdx].duration)||0;
-
-        if(siteDuration>0){
-          const timeOnSite=now-siteStartTime;
-
-          // CRITICAL FIX: Don't auto-rotate if time extension is active
-          const hasActiveExtension=(inactivityExtensionUntil>0&&now<inactivityExtensionUntil);
-
-          if(timeOnSite>=siteDuration*1000&&!hasActiveExtension){
-            rotateToNextSite();
-            return;
-          }
-        }
-      }
-    }
-
-// 8. LOCKOUT CHECK (session lock after extended inactivity)
+    // 8. LOCKOUT CHECK (session lock after extended inactivity)
     // v0.9.9: Use lastLockoutCheck instead of lastUserInteraction
     // This ensures lockout timer is independent from inactivity prompts
     if(lockoutEnabled&&!sessionLocked){
@@ -4082,61 +4056,40 @@ function attachView(i,isAutoRotation){
 
   views[i].webContents.focus();
   siteStartTime=Date.now();
-
-  // v0.9.11 FIX: Always reset interaction flag when switching sites
-  // Each site should independently track whether user has interacted with it
-  // This prevents inactivity prompts from appearing on sites user never touched
-  userInteractedWithCurrentSite=false;
 }
 
 function nextTab(){
   if(!views.length||showingHidden)return;
+  console.log('[MANUAL] User switched tab forward → manualNavigationMode=TRUE');
 
-  // v0.9.10: Clear time extension when user manually switches tabs
+  // CRITICAL FIX: Clear time extension when user manually switches tabs
   // If user granted time on one page, then manually left, they're done with it
   if(inactivityExtensionUntil>0){
     console.log('[MANUAL] ⏰ Clearing time extension - user manually switched tabs');
     inactivityExtensionUntil=0;
   }
 
+  manualNavigationMode=true;
   currentIndex=(currentIndex+1)%views.length;
   attachView(currentIndex);
-  markActivity(true);  // Actual user interaction - reset lockout timer
-
-  // v0.9.10: Manual swipe RESUMES rotation on new page
-  // This is navigation, not content interaction - set AFTER markActivity
-  manualNavigationMode=false;
-
-  // v0.9.10: Manual swipe counts as interaction with new page
-  // This ensures inactivity prompt will fire even on 0-time pages
-  // If user swipes to page B but never touches it, prompt still appears after timeout
-  userInteractedWithCurrentSite=true;
-  console.log('[MANUAL] User switched tab forward → manualNavigationMode=FALSE (rotation will resume)');
+  markActivity(true);
 }
 
 function prevTab(){
   if(!views.length||showingHidden)return;
+  console.log('[MANUAL] User switched tab backward → manualNavigationMode=TRUE');
 
-  // v0.9.10: Clear time extension when user manually switches tabs
+  // CRITICAL FIX: Clear time extension when user manually switches tabs
   // If user granted time on one page, then manually left, they're done with it
   if(inactivityExtensionUntil>0){
     console.log('[MANUAL] ⏰ Clearing time extension - user manually switched tabs');
     inactivityExtensionUntil=0;
   }
 
+  manualNavigationMode=true;
   currentIndex=(currentIndex-1+views.length)%views.length;
   attachView(currentIndex);
-  markActivity(true);  // Actual user interaction - reset lockout timer
-
-  // v0.9.10: Manual swipe RESUMES rotation on new page
-  // This is navigation, not content interaction - set AFTER markActivity
-  manualNavigationMode=false;
-
-  // v0.9.10: Manual swipe counts as interaction with new page
-  // This ensures inactivity prompt will fire even on 0-time pages
-  // If user swipes to page B but never touches it, prompt still appears after timeout
-  userInteractedWithCurrentSite=true;
-  console.log('[MANUAL] User switched tab backward → manualNavigationMode=FALSE (rotation will resume)');
+  markActivity(true);
 }
 
 function getHomeViewIndex(){
@@ -4225,10 +4178,9 @@ function showInactivityPrompt(){
       inactivityExtensionUntil=0;
       returnToHome();
     }else if(minutes===0){
-      // v0.9.11: User chose "I'm still here" - resume rotation
-      // User acknowledged the prompt, so they're done with current activity
+      // v0.9.14: User chose "I'm still here" - don't change manualNavigationMode
+      // This is a prompt response, not actual interaction with content
       inactivityExtensionUntil=0;
-      manualNavigationMode=false;  // Resume rotation
       markActivity();  // Resets inactivity timer but NOT lockout timer
     }else{
       // User chose a time extension - grant it!
