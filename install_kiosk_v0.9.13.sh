@@ -1,22 +1,28 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk (UBK) v0.9.12         ###
+###   Ubuntu Based Kiosk (UBK) v0.9.13         ###
 ################################################################################
 #
-# RELEASE v0.9.12 - Rotation and Media Bug Fixes
+# RELEASE v0.9.13 - Fix Interaction Tracking and Media Recovery
+#
+# What's in v0.9.13:
+# - Fixed inactivity popup appearing on home page without user interaction
+#   * markActivity() now only sets userInteractedWithCurrentSite for ACTUAL touches
+#   * System events (prompt responses, app init) don't trigger interaction flag
+#   * Popup only appears after user has physically touched the screen
+#   * Home page no longer shows popup immediately on startup
+# - Fixed media playback black screen issue
+#   * Improved rotation resume logic after media grace period
+#   * Removed narrow 2-second time window that could be missed
+#   * manualNavigationMode now reliably resets after media ends + inactivity
+#   * Rotation properly resumes when user walks away after media stops
 #
 # What's in v0.9.12:
-# - Fixed inactivity popup appearing on every rotated site
-#   * userInteractedWithCurrentSite now resets when switching sites
-#   * Each site independently tracks whether user has interacted with it
-#   * Popup only appears on sites where user actually touched/interacted
 # - Fixed rotation not resuming after "I'm still here" response
 #   * Clicking "I'm still here" on inactivity prompt now resumes rotation
 #   * User acknowledgement indicates they're done with current activity
-# - Fixed rotation stuck after media playback ends
-#   * After media grace period (30s), rotation automatically resumes
-#   * Prevents black screen when media stops playing
-#   * Normal rotation behavior resumes after media ends
+# - Fixed userInteractedWithCurrentSite resetting properly when switching sites
+#   * Each site independently tracks whether user has interacted with it
 #
 # What's in v0.9.11:
 # - Clarified media playback behavior in comments
@@ -3596,7 +3602,7 @@ const path=require('path');
 const os=require('os');
 
 const CONFIG_FILE=path.join(__dirname,'config.json');
-const VERSION='0.9.12';
+const VERSION='0.9.13';
 
 let mainWindow,views=[],hiddenViews=[],tabs=[],currentIndex=0,showingHidden=false;
 let pinWindow=null,promptWindow=null,htmlKeyboardWindow=null;
@@ -3684,7 +3690,7 @@ function markActivity(resetLockoutTimer){
   lastUserInteraction=now;
   userRecentlyActive=true;
 
-  // v0.9.10: When user actually interacts with content, pause rotation
+  // v0.9.13: Only set interaction flags for ACTUAL user interaction
   // This includes touches, scrolls, typing - any real content interaction
   // Does NOT include prompt responses or programmatic navigation
   if(resetLockoutTimer){
@@ -3696,13 +3702,13 @@ function markActivity(resetLockoutTimer){
       console.log('[ACTIVITY] 🛑 User interacted with content - pausing rotation');
       manualNavigationMode=true;
     }
-  }
 
-  // v0.9.8: Mark that user has interacted with this site
-  // This triggers inactivity prompt logic for ANY site (not just manual/home)
-  if(!userInteractedWithCurrentSite){
-    console.log('[ACTIVITY] 🖐️ User touched this site - inactivity timer active');
-    userInteractedWithCurrentSite=true;
+    // v0.9.13: Mark that user has interacted with this site
+    // ONLY set this for actual user touches, not system events
+    if(!userInteractedWithCurrentSite){
+      console.log('[ACTIVITY] 🖐️ User touched this site - inactivity timer active');
+      userInteractedWithCurrentSite=true;
+    }
   }
 
   if(promptWindow&&!promptWindow.isDestroyed()){
@@ -3902,19 +3908,20 @@ function startMasterTimer(){
       return;
     }
 
-    // v0.9.11: After media grace period expires, resume rotation
-    // This prevents being stuck on a black screen after media ends
-    if(timeSinceMediaStopped>=MEDIA_GRACE_PERIOD&&timeSinceMediaStopped<MEDIA_GRACE_PERIOD+2000&&manualNavigationMode){
-      console.log('[MEDIA] Grace period expired - resuming rotation');
-      manualNavigationMode=false;
-    }
-
     // 5. USER ACTIVITY CHECK
     const timeSinceInteraction=now-lastUserInteraction;
     userRecentlyActive=timeSinceInteraction<USER_ACTIVITY_PAUSE;
 
     if(userRecentlyActive){
       return;
+    }
+
+    // v0.9.13: After media grace period AND user inactivity, resume rotation
+    // This prevents being stuck on a black screen after media ends
+    // Only reset if no recent user activity (user walked away after media ended)
+    if(manualNavigationMode&&timeSinceMediaStopped>=MEDIA_GRACE_PERIOD){
+      console.log('[MEDIA] Grace period expired + no activity - resuming rotation');
+      manualNavigationMode=false;
     }
 
     // 6. INACTIVITY CHECK (works on ALL pages where user has interacted!)
