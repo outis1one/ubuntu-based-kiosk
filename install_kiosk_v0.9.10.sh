@@ -4053,36 +4053,42 @@ function attachView(i,isAutoRotation){
 
 function nextTab(){
   if(!views.length||showingHidden)return;
-  console.log('[MANUAL] User switched tab forward → manualNavigationMode=TRUE');
 
-  // CRITICAL FIX: Clear time extension when user manually switches tabs
+  // v0.9.10: Clear time extension when user manually switches tabs
   // If user granted time on one page, then manually left, they're done with it
   if(inactivityExtensionUntil>0){
     console.log('[MANUAL] ⏰ Clearing time extension - user manually switched tabs');
     inactivityExtensionUntil=0;
   }
 
-  manualNavigationMode=true;
   currentIndex=(currentIndex+1)%views.length;
   attachView(currentIndex);
   markActivity(true);  // Actual user interaction - reset lockout timer
+
+  // v0.9.10: Manual swipe RESUMES rotation on new page
+  // This is navigation, not content interaction - set AFTER markActivity
+  manualNavigationMode=false;
+  console.log('[MANUAL] User switched tab forward → manualNavigationMode=FALSE (rotation will resume)');
 }
 
 function prevTab(){
   if(!views.length||showingHidden)return;
-  console.log('[MANUAL] User switched tab backward → manualNavigationMode=TRUE');
 
-  // CRITICAL FIX: Clear time extension when user manually switches tabs
+  // v0.9.10: Clear time extension when user manually switches tabs
   // If user granted time on one page, then manually left, they're done with it
   if(inactivityExtensionUntil>0){
     console.log('[MANUAL] ⏰ Clearing time extension - user manually switched tabs');
     inactivityExtensionUntil=0;
   }
 
-  manualNavigationMode=true;
   currentIndex=(currentIndex-1+views.length)%views.length;
   attachView(currentIndex);
   markActivity(true);  // Actual user interaction - reset lockout timer
+
+  // v0.9.10: Manual swipe RESUMES rotation on new page
+  // This is navigation, not content interaction - set AFTER markActivity
+  manualNavigationMode=false;
+  console.log('[MANUAL] User switched tab backward → manualNavigationMode=FALSE (rotation will resume)');
 }
 
 function getHomeViewIndex(){
