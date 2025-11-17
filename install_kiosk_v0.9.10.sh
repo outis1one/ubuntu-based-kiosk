@@ -1,9 +1,32 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk (UBK) v0.9.9          ###
+###   Ubuntu Based Kiosk (UBK) v0.9.10         ###
 ################################################################################
 #
-# RELEASE v0.9.9 - Menu Reorganization & Inactivity Popup Fixes
+# RELEASE v0.9.10 - Rotation Logic Fixes
+#
+# What's in v0.9.10:
+# - Fixed rotation logic to properly handle user interaction
+#   * Rotation now pauses when user interacts with any URL (touch, scroll, type)
+#   * Manual navigation mode prevents auto-rotation until "Return to Rotation" is clicked
+#   * User interaction with content sets manual navigation mode = true
+#   * "Return to Rotation" button resets manual navigation mode = false
+# - Fixed return to rotation with no rotation URLs
+#   * If home URL exists but all URLs have 0 time (no rotation)
+#   * "Return to Rotation" still returns to home URL properly
+#   * Inactivity prompt will fire on the home URL in this scenario
+# - Time extensions continue to be honored
+#   * When user selects time extension, rotation pauses for that duration
+#   * User can still interact with content during extension period
+#   * Extension expires naturally or user can return to rotation manually
+# - Return to rotation popup only appears on interacted URL
+#   * Popup shown only on sites where user has touched/interacted
+#   * Already working correctly from v0.9.9
+# - Password/lock session takes precedence
+#   * On boot: password required before any interaction
+#   * After schedule time: password required
+#   * After lockout timeout: password required
+#   * All other functionality blocked until password entered
 #
 # What's in v0.9.9:
 # - Moved Session Lockout configuration from Sites menu to Core Settings menu
@@ -101,7 +124,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="0.9.9"
+SCRIPT_VERSION="0.9.10"
 KIOSK_USER="kiosk"
 BUILD_USER="${SUDO_USER:-$(whoami)}"
 KIOSK_HOME="/home/${KIOSK_USER}"
@@ -3549,7 +3572,7 @@ const path=require('path');
 const os=require('os');
 
 const CONFIG_FILE=path.join(__dirname,'config.json');
-const VERSION='0.9.9';
+const VERSION='0.9.10';
 
 let mainWindow,views=[],hiddenViews=[],tabs=[],currentIndex=0,showingHidden=false;
 let pinWindow=null,promptWindow=null,htmlKeyboardWindow=null;
@@ -3637,11 +3660,18 @@ function markActivity(resetLockoutTimer){
   lastUserInteraction=now;
   userRecentlyActive=true;
 
-  // v0.9.9: Only reset lockout timer for actual user interaction (swipes, touches)
-  // NOT for inactivity prompt responses - this allows lockout to work independently
+  // v0.9.10: When user actually interacts with content, pause rotation
+  // This includes touches, scrolls, typing - any real content interaction
+  // Does NOT include prompt responses or programmatic navigation
   if(resetLockoutTimer){
     lastLockoutCheck=now;
     console.log('[ACTIVITY] Lockout timer reset');
+
+    // v0.9.10: User interaction pauses rotation
+    if(!manualNavigationMode){
+      console.log('[ACTIVITY] 🛑 User interacted with content - pausing rotation');
+      manualNavigationMode=true;
+    }
   }
 
   // v0.9.8: Mark that user has interacted with this site
@@ -3909,8 +3939,8 @@ function startMasterTimer(){
     }
 
     // 7. SITE ROTATION
-    // v0.9.9: Don't rotate if inactivity prompt is showing or session is locked
-    if(!showingHidden&&views.length>1&&(!promptWindow||promptWindow.isDestroyed())&&!sessionLocked){
+    // v0.9.10: Don't rotate if inactivity prompt is showing, session is locked, or user manually navigated
+    if(!showingHidden&&views.length>1&&(!promptWindow||promptWindow.isDestroyed())&&!sessionLocked&&!manualNavigationMode){
       const currentTabIdx=viewIndexToTabIndex(currentIndex);
 
       if(currentTabIdx>=0&&tabs[currentTabIdx]){
@@ -4076,9 +4106,11 @@ function returnToHome(){
     promptWindow=null;
   }
 
-  // v0.9.8: "Return to Rotation" behavior
+  // v0.9.10: "Return to Rotation" behavior
   // If Home URL configured: go to home page and restart rotation
   // If NO Home URL: just restart rotation from first site
+  // Special case: If home URL exists but NO rotation (all URLs have 0 time),
+  //               still return to home - the inactivity prompt will fire there
   manualNavigationMode=false;
 
   if(homeViewIdx>=0){
