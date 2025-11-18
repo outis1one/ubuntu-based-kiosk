@@ -1,9 +1,24 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk (UBK) v0.9.14         ###
+###   Ubuntu Based Kiosk (UBK) v0.9.15         ###
 ################################################################################
 #
-# RELEASE v0.9.14 - Restore Simpler Working Logic
+# RELEASE v0.9.15 - Proper Interaction-Based Rotation Pause
+#
+# What's in v0.9.15:
+# - User interaction PAUSES rotation on that site
+#   * Any touch, click, scroll, or keyboard input pauses rotation
+#   * After 1 minute of inactivity, "Return to Rotation" popup appears
+#   * If no response to popup (15 sec), auto-returns to rotation (prevents stuck kiosk)
+#   * User can extend time with 15/30/60/120 minute options
+# - Works on ALL sites including home URL
+#   * Even if all sites have 0 time, popup still works (returns to home)
+#   * Ensures rotation will restart even on home URL after interaction
+# - Exception: Media playback prevents popup and rotation
+#   * Media check every 3 seconds (not every second - performance)
+# - Changed default inactivity timeout from 2 minutes to 1 minute
+# - Restored userInteractedWithCurrentSite flag (removed in v0.9.14)
+# - Rotation blocked while user has interacted until timeout/extension expires
 #
 # What's in v0.9.14:
 # - Reverted to simpler, working logic from v09.9.1_7
@@ -157,7 +172,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="0.9.10"
+SCRIPT_VERSION="0.9.15"
 KIOSK_USER="kiosk"
 BUILD_USER="${SUDO_USER:-$(whoami)}"
 KIOSK_HOME="/home/${KIOSK_USER}"
@@ -173,7 +188,7 @@ declare -a DURS=()
 declare -a USERS=()
 declare -a PASSES=()
 HOME_TAB_INDEX=-1
-INACTIVITY_TIMEOUT=60
+INACTIVITY_TIMEOUT=60  # v0.9.15: Changed from 120 to 60 seconds (1 minute)
 LOCKOUT_ENABLED="false"
 LOCKOUT_PASSWORD=""
 LOCKOUT_TIMEOUT=1800  # 30 minutes in seconds
@@ -848,7 +863,7 @@ configure_sites() {
         
         if sudo -u "$KIOSK_USER" test -f "$CONFIG_PATH" 2>/dev/null; then
             HOME_TAB_INDEX=$(sudo -u "$KIOSK_USER" jq -r '.homeTabIndex // -1' "$CONFIG_PATH" 2>/dev/null)
-            INACTIVITY_TIMEOUT=$(sudo -u "$KIOSK_USER" jq -r '.inactivityTimeout // 120' "$CONFIG_PATH" 2>/dev/null)
+            INACTIVITY_TIMEOUT=$(sudo -u "$KIOSK_USER" jq -r '.inactivityTimeout // 60' "$CONFIG_PATH" 2>/dev/null)
             
             local tab_count=$(sudo -u "$KIOSK_USER" jq -r '.tabs | length' "$CONFIG_PATH" 2>/dev/null || echo "0")
             if [[ "$tab_count" -gt 0 ]]; then
@@ -959,7 +974,7 @@ configure_sites() {
                         USERS=()
                         PASSES=()
                         HOME_TAB_INDEX=-1
-                        INACTIVITY_TIMEOUT=120
+                        INACTIVITY_TIMEOUT=60
                         LOCKOUT_ENABLED="false"
                         LOCKOUT_PASSWORD=""
                         LOCKOUT_TIMEOUT=1800
@@ -1361,10 +1376,10 @@ configure_home_url() {
             
             if [[ "$site_num" =~ ^[0-9]+$ ]] && [[ "$site_num" -ge 1 ]] && [[ "$site_num" -le "${#URLS[@]}" ]]; then
                 HOME_TAB_INDEX=$((site_num - 1))
-                
+
                 echo
-                read -r -p "Inactivity timeout in minutes [2]: " timeout_min
-                timeout_min="${timeout_min:-2}"
+                read -r -p "Inactivity timeout in minutes [1]: " timeout_min
+                timeout_min="${timeout_min:-1}"
                 INACTIVITY_TIMEOUT=$((timeout_min * 60))
                 
                 log_success "Home URL: Site #${site_num} (${timeout_min} min timeout)"
@@ -1374,7 +1389,7 @@ configure_home_url() {
             ;;
         2)
             HOME_TAB_INDEX=-1
-            INACTIVITY_TIMEOUT=120
+            INACTIVITY_TIMEOUT=60
             log_success "Home URL disabled"
             ;;
         0)
@@ -1485,9 +1500,9 @@ add_new_sites() {
     pause
     
     local use_home_url=false
-    local inactivity_minutes=2
+    local inactivity_minutes=1
     local home_duration=180
-    
+
     echo " ═══ HOME URL FEATURE ═══"
     echo
     echo "A HOME URL returns the kiosk to a default screen after inactivity."
@@ -1502,8 +1517,8 @@ add_new_sites() {
     echo
     if ask_yes_no "Enable HOME URL feature?" "n"; then
         use_home_url=true
-        read -r -p "Inactivity timeout in minutes [2]: " inactivity_minutes
-        inactivity_minutes="${inactivity_minutes:-2}"
+        read -r -p "Inactivity timeout in minutes [1]: " inactivity_minutes
+        inactivity_minutes="${inactivity_minutes:-1}"
         read -r -p "Home display duration in seconds [180]: " home_duration
         home_duration="${home_duration:-180}"
         echo "✓ HOME: Returns after ${inactivity_minutes}min, displays ${home_duration}s"
@@ -3605,7 +3620,7 @@ const path=require('path');
 const os=require('os');
 
 const CONFIG_FILE=path.join(__dirname,'config.json');
-const VERSION='0.9.14';
+const VERSION='0.9.15';
 
 let mainWindow,views=[],hiddenViews=[],tabs=[],currentIndex=0,showingHidden=false;
 let pinWindow=null,promptWindow=null,htmlKeyboardWindow=null;
@@ -3626,6 +3641,7 @@ let mediaIsPlaying=false;
 let userRecentlyActive=false;
 let keyboardIsOpen=false;
 let keyboardClosePending=false;
+let userInteractedWithCurrentSite=false;
 
 const USER_ACTIVITY_PAUSE=60000;
 const KEYBOARD_AUTO_CLOSE=30000;
@@ -3637,7 +3653,7 @@ const INACTIVITY_PROMPT_TIMEOUT=15000;
 let lastMediaStateChange=Date.now();
 
 let homeTabIndex=-1;
-let inactivityTimeout=120000;
+let inactivityTimeout=60000;  // v0.9.15: Changed to 1 minute (was 2 minutes)
 let allowNavigation='same-origin';
 let lockoutEnabled=false;
 let lockoutPassword='';
@@ -3657,7 +3673,7 @@ function loadConfig(){
     const config=JSON.parse(data);
     
     homeTabIndex=(config.homeTabIndex!=null)?config.homeTabIndex:-1;
-    inactivityTimeout=(config.inactivityTimeout||120)*1000;
+    inactivityTimeout=(config.inactivityTimeout||60)*1000;  // v0.9.15: Default 60 seconds
     allowNavigation=config.allowNavigation||'same-origin';
     lockoutEnabled=(config.lockoutEnabled===true||config.lockoutEnabled==='true');
     lockoutPassword=config.lockoutPassword||'';
@@ -3692,7 +3708,13 @@ function markActivity(resetLockoutTimer){
   lastUserInteraction=now;
   userRecentlyActive=true;
 
-  // v0.9.14: Restore simpler logic from v09.9.1_7
+  // v0.9.15: Track that user has interacted with current site
+  // This will trigger inactivity popup after timeout
+  if(!userInteractedWithCurrentSite){
+    console.log('[ACTIVITY] User interacted with site - will show popup after inactivity');
+  }
+  userInteractedWithCurrentSite=true;
+
   // Reset lockout timer if requested
   if(resetLockoutTimer){
     lastLockoutCheck=now;
@@ -3905,7 +3927,7 @@ function startMasterTimer(){
     }
 
     // 6. SITE ROTATION
-    // v0.9.14: Restore simple rotation from v09.9.1_7 - just rotate based on time
+    // v0.9.15: Block rotation if user interacted, unless extension expired or media stopped
     if(!showingHidden&&views.length>1){
       const currentTabIdx=viewIndexToTabIndex(currentIndex);
 
@@ -3915,10 +3937,11 @@ function startMasterTimer(){
         if(siteDuration>0){
           const timeOnSite=now-siteStartTime;
 
-          // CRITICAL FIX: Don't auto-rotate if time extension is active
+          // Block rotation if user interacted with site (until timeout or they return to rotation)
           const hasActiveExtension=(inactivityExtensionUntil>0&&now<inactivityExtensionUntil);
+          const userHasInteracted=userInteractedWithCurrentSite;
 
-          if(timeOnSite>=siteDuration*1000&&!hasActiveExtension){
+          if(timeOnSite>=siteDuration*1000&&!hasActiveExtension&&!userHasInteracted){
             rotateToNextSite();
             return;
           }
@@ -3926,16 +3949,12 @@ function startMasterTimer(){
       }
     }
 
-    // 7. INACTIVITY CHECK (works on home page OR manual navigation)
-    // v0.9.14: Restore simpler logic from v09.9.1_7
-    // Inactivity prompt ONLY appears on home page or when user manually navigated
-    if(homeTabIndex>=0&&!showingHidden&&!sessionLocked){
-      const homeViewIdx=getHomeViewIndex();
-      const currentTabIdx=viewIndexToTabIndex(currentIndex);
-      const isOnHomePage=(homeViewIdx>=0&&currentIndex===homeViewIdx);
-
-      // Only check if we're in manual mode OR on home page
-      if(manualNavigationMode||isOnHomePage){
+    // 7. INACTIVITY CHECK
+    // v0.9.15: Show popup on ANY site where user has interacted after inactivity timeout
+    // Exception: Don't show if media is playing
+    if(!showingHidden&&!sessionLocked&&!mediaIsPlaying){
+      // Check if user has interacted with current site
+      if(userInteractedWithCurrentSite){
         const idleTime=now-lastUserInteraction;
 
         // CRITICAL FIX: Use absolute time check for extensions
@@ -3950,9 +3969,10 @@ function startMasterTimer(){
           }
           return;  // Skip timeout check during extension
         }else if(inactivityExtensionUntil>0&&now>=inactivityExtensionUntil){
-          // Extension expired - clear it and check timeout
-          console.log('[INACTIVITY] ⏰ Extension expired - checking timeout');
+          // Extension expired - clear it and allow rotation to resume
+          console.log('[INACTIVITY] ⏰ Extension expired - rotation can resume');
           inactivityExtensionUntil=0;
+          userInteractedWithCurrentSite=false;  // Clear interaction flag so rotation can resume
         }
 
         // Log every 15 seconds
@@ -3961,14 +3981,12 @@ function startMasterTimer(){
           const idleSeconds=Math.floor((idleTime%60000)/1000);
           const timeoutMinutes=Math.floor(effectiveTimeout/60000);
           const timeoutSeconds=Math.floor((effectiveTimeout%60000)/1000);
-          const location=isOnHomePage?'HOME PAGE':'OTHER PAGE';
-          console.log('[INACTIVITY] 🕒 '+location+' IDLE: '+idleMinutes+'m '+idleSeconds+'s / '+timeoutMinutes+'m '+timeoutSeconds+'s');
+          console.log('[INACTIVITY] 🕒 IDLE: '+idleMinutes+'m '+idleSeconds+'s / '+timeoutMinutes+'m '+timeoutSeconds+'s');
         }
 
         if(idleTime>=effectiveTimeout){
           if(!promptWindow||promptWindow.isDestroyed()){
-            const location=isOnHomePage?'home page':'other page';
-            console.log('[INACTIVITY] 🔔 *** SHOWING PROMPT (on '+location+') ***');
+            console.log('[INACTIVITY] 🔔 *** SHOWING POPUP - user inactive for '+Math.floor(idleTime/1000)+'s ***');
             showInactivityPrompt();
           }
         }
@@ -4056,6 +4074,9 @@ function attachView(i,isAutoRotation){
 
   views[i].webContents.focus();
   siteStartTime=Date.now();
+
+  // v0.9.15: Reset interaction flag when site changes
+  userInteractedWithCurrentSite=false;
 }
 
 function nextTab(){
@@ -4157,9 +4178,10 @@ function showInactivityPrompt(){
   // CRITICAL FIX: Store timeout ID so we can cancel it when user responds
   const promptTimeoutId=setTimeout(()=>{
     if(promptWindow&&!promptWindow.isDestroyed()){
-      console.log('[PROMPT] No response - returning home');
+      console.log('[PROMPT] No response - returning to rotation');
       promptWindow.close();
       promptWindow=null;
+      userInteractedWithCurrentSite=false;  // Clear interaction flag
       returnToHome();
     }
   },INACTIVITY_PROMPT_TIMEOUT);
@@ -4174,21 +4196,23 @@ function showInactivityPrompt(){
     promptWindow=null;
 
     if(minutes===-1){
-      // User chose "Return to Rotation" - clear extension and restart rotation
+      // User chose "Return to Rotation" - clear flags and restart rotation
+      console.log('[PROMPT] User chose return to rotation');
       inactivityExtensionUntil=0;
+      userInteractedWithCurrentSite=false;  // Clear interaction flag so rotation resumes
       returnToHome();
     }else if(minutes===0){
-      // v0.9.14: User chose "I'm still here" - don't change manualNavigationMode
-      // This is a prompt response, not actual interaction with content
+      // User chose "I'm still here" - reset timer but keep on current site
+      console.log('[PROMPT] User chose: I\'m still here');
       inactivityExtensionUntil=0;
       markActivity();  // Resets inactivity timer but NOT lockout timer
     }else{
       // User chose a time extension - grant it!
-      // Don't reset lockout timer - they're just buying more time
+      // Keep userInteractedWithCurrentSite=true so rotation stays paused
       const now=Date.now();
       inactivityExtensionUntil=now+(minutes*60*1000);
       lastUserInteraction=now;
-      console.log('[PROMPT] ⏰ Extended until: '+new Date(inactivityExtensionUntil).toLocaleTimeString());
+      console.log('[PROMPT] ⏰ Extended '+minutes+' minutes until: '+new Date(inactivityExtensionUntil).toLocaleTimeString());
     }
   });
 }
@@ -5248,9 +5272,9 @@ echo "[15/27] Creating inactivity prompt..."
 </head>
 <body>
   <div class="container">
-    <h2>👋 Are you still here?</h2>
+    <h2>⏸️ Pause Rotation</h2>
     <div class="message">
-      No activity detected. Choose an option:
+      Would you like to stay on this page?
     </div>
     <div class="countdown" id="countdown">15</div>
     
@@ -5281,9 +5305,9 @@ echo "[15/27] Creating inactivity prompt..."
     </div>
     
     <div class="info">
-      ℹ️ Extensions pause the inactivity timer<br>
-      Media playback (video/audio) automatically pauses the timer<br>
-      Maximum extension: 4 hours (safety timeout)
+      ℹ️ Choose how long to stay on this page<br>
+      Media playback (video/audio) won't trigger this popup<br>
+      Select "Return to rotation" to resume automatic rotation
     </div>
   </div>
   <script>
