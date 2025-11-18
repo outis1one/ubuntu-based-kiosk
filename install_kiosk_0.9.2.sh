@@ -3631,7 +3631,16 @@ function startMasterTimer(){
     if(homeTabIndex>=0&&!showingHidden){
       const homeViewIdx=getHomeViewIndex();
       const currentTabIdx=viewIndexToTabIndex(currentIndex);
-      
+
+      // Don't show inactivity prompt on manual sites (duration=0)
+      if(currentTabIdx>=0&&tabs[currentTabIdx]){
+        const currentSiteDuration=parseInt(tabs[currentTabIdx].duration)||0;
+        if(currentSiteDuration===0){
+          // Manual site - skip return-to-home logic
+          return;
+        }
+      }
+
       if(homeViewIdx>=0&&currentIndex!==homeViewIdx){
         const idleTime=now-lastUserInteraction;
         
@@ -3736,6 +3745,7 @@ function attachView(i){
     // Show on rotation sites (duration > 0), hide on manual sites (duration = 0)
     const siteDuration=parseInt(tabs[tabIdx].duration)||0;
     const shouldShow=siteDuration>0;
+    console.log('[MAIN] Sending pause-button-visibility to tab '+tabIdx+' ('+tabs[tabIdx].url+') - duration='+siteDuration+'s, shouldShow='+shouldShow);
     views[i].webContents.send('pause-button-visibility',shouldShow);
   }
 
@@ -5182,10 +5192,14 @@ window.addEventListener('DOMContentLoaded',()=>{
   // Listen for pause button visibility control from main process
   // Main process controls whether button should be available on this site
   ipcRenderer.on('pause-button-visibility',(event,shouldShow)=>{
+    console.log('[PAUSE-BTN] Visibility update: shouldShow='+shouldShow);
     pauseButtonShouldShow=shouldShow;
     if(!shouldShow){
       // If button should not show on this site, hide it immediately
+      console.log('[PAUSE-BTN] Hiding button (manual site)');
       hidePauseButton();
+    }else{
+      console.log('[PAUSE-BTN] Button enabled - will show on user interaction');
     }
     // If shouldShow is true, button will appear on user interaction
   });
@@ -5194,13 +5208,15 @@ window.addEventListener('DOMContentLoaded',()=>{
   let lastUserInteraction=0;
   const USER_INTERACTION_THROTTLE=100;
 
-  function handleUserInteraction(){
+  function handleUserInteraction(eventType){
     const now=Date.now();
     if(now-lastUserInteraction<USER_INTERACTION_THROTTLE)return;
     lastUserInteraction=now;
 
+    console.log('[PAUSE-BTN] User interaction ('+eventType+') - shouldShow='+pauseButtonShouldShow+', shown='+pauseButtonShown);
     // Only show if this site allows pause button and it's not already shown
     if(pauseButtonShouldShow&&!pauseButtonShown){
+      console.log('[PAUSE-BTN] Showing pause button now');
       showPauseButton();
     }
   }
@@ -5208,7 +5224,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   // Show pause button on any user interaction
   const pauseButtonTriggers=['mousedown','touchstart','keydown'];
   pauseButtonTriggers.forEach(eventType=>{
-    document.addEventListener(eventType,handleUserInteraction,{passive:true,capture:true});
+    document.addEventListener(eventType,()=>handleUserInteraction(eventType),{passive:true,capture:true});
   });
 
   function isTextInput(el){
