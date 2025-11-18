@@ -77,7 +77,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION=" 09.9.1"
+SCRIPT_VERSION="0.9.0"
 KIOSK_USER="kiosk"
 BUILD_USER="${SUDO_USER:-$(whoami)}"
 KIOSK_HOME="/home/${KIOSK_USER}"
@@ -3602,7 +3602,7 @@ function startMasterTimer(){
     }
     
 // 7. HOME RETURN CHECK
-    if(homeTabIndex>=0&&!showingHidden&&manualNavigationMode){
+    if(homeTabIndex>=0&&!showingHidden){
       const homeViewIdx=getHomeViewIndex();
       const currentTabIdx=viewIndexToTabIndex(currentIndex);
       
@@ -3648,7 +3648,6 @@ if(idleTime>=effectiveTimeout){
     }else{
       if(homeTabIndex<0)console.log('[HOME-DEBUG] ✗ No home tab configured');
       if(showingHidden)console.log('[HOME-DEBUG] ✗ Showing hidden tabs');
-      if(!manualNavigationMode)console.log('[HOME-DEBUG] ✗ Not in manual navigation mode');
     }
   },1000);
 }
