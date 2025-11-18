@@ -3733,8 +3733,9 @@ function attachView(i){
     }
 
     // Control pause button visibility based on site duration
+    // Show on rotation sites (duration > 0), hide on manual sites (duration = 0)
     const siteDuration=parseInt(tabs[tabIdx].duration)||0;
-    const shouldShow=siteDuration!==0; // Hide on manual sites (duration=0)
+    const shouldShow=siteDuration>0;
     views[i].webContents.send('pause-button-visibility',shouldShow);
   }
 
@@ -5146,8 +5147,8 @@ window.addEventListener('DOMContentLoaded',()=>{
 
     pauseButton=document.createElement('div');
     pauseButton.id='electron-pause-button';
-    pauseButton.innerHTML='⏸️';
-    pauseButton.title='Pause timers';
+    pauseButton.innerHTML='<div style="display:flex;gap:4px;"><div style="width:6px;height:24px;background:white;border-radius:2px;"></div><div style="width:6px;height:24px;background:white;border-radius:2px;"></div></div>';
+    pauseButton.title='Pause rotation';
     pauseButton.style.cssText=`
       position:fixed;bottom:20px;left:20px;width:60px;height:60px;
       background:rgba(230,126,34,0.95);border:3px solid rgba(255,255,255,0.9);
@@ -8271,11 +8272,28 @@ manual_electron_update() {
         done
     fi
 
-    # Method 3: Check current directory
+    # Method 3: Check current user's home directory
+    if [ -z "$DETECTED_KIOSK_DIR" ]; then
+        local current_user_home="$HOME"
+        if [ -d "$current_user_home/kiosk-app" ] && [ -f "$current_user_home/kiosk-app/main.js" ]; then
+            DETECTED_KIOSK_USER=$(whoami)
+            DETECTED_KIOSK_DIR="$current_user_home/kiosk-app"
+        fi
+    fi
+
+    # Method 4: Check current directory
     if [ -z "$DETECTED_KIOSK_DIR" ]; then
         if [ -f "$PWD/kiosk-app/main.js" ]; then
             DETECTED_KIOSK_USER=$(whoami)
             DETECTED_KIOSK_DIR="$PWD/kiosk-app"
+        fi
+    fi
+
+    # Method 5: Check parent directory
+    if [ -z "$DETECTED_KIOSK_DIR" ]; then
+        if [ -f "$(dirname "$PWD")/kiosk-app/main.js" ]; then
+            DETECTED_KIOSK_USER=$(whoami)
+            DETECTED_KIOSK_DIR="$(dirname "$PWD")/kiosk-app"
         fi
     fi
 
@@ -8286,7 +8304,9 @@ manual_electron_update() {
         echo "Searched locations:"
         echo "  - /home/$KIOSK_USER/kiosk-app"
         echo "  - /home/*/kiosk-app"
+        echo "  - $HOME/kiosk-app"
         echo "  - $PWD/kiosk-app"
+        echo "  - $(dirname "$PWD")/kiosk-app"
         echo ""
         echo "Debug info:"
         echo "  Current user: $(whoami)"
