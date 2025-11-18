@@ -473,7 +473,7 @@ show_system_status() {
 }
 
 show_addon_status() {
-    echo " =-- INSTALLED ADDONS --="
+    echo " --- INSTALLED ADDONS ---"
     echo
     
     local any_addon=false
@@ -3280,7 +3280,15 @@ first_time_install() {
         curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
         sudo apt install -y nodejs
     fi
+
+    # Verify npm is installed
+    if ! command -v npm &>/dev/null; then
+        echo "⚠ npm not found, attempting to install..."
+        sudo apt install -y npm
+    fi
+
     echo "Node.js: $(node -v)"
+    echo "npm: $(npm -v)"
     
     echo "[7-10/27] Core configuration..."
     configure_touch_controls
@@ -3313,7 +3321,7 @@ const CONFIG_FILE=path.join(__dirname,'config.json');
 const VERSION='0.9.1-2';
 
 let mainWindow,views=[],hiddenViews=[],tabs=[],currentIndex=0,showingHidden=false;
-let pinWindow=null,promptWindow=null,htmlKeyboardWindow=null;
+let pinWindow=null,promptWindow=null,pauseWindow=null,htmlKeyboardWindow=null;
 let tabIndexToViewIndex=[];
 let currentHiddenIndex=0;
 
@@ -3536,10 +3544,10 @@ function startMasterTimer(){
     clearInterval(masterTimer);
   }
   
-  console.log('[TIMER] =--- MASTER TIMER STARTED ---==');
+  console.log('[TIMER] --- MASTER TIMER STARTED ---');
   console.log('[TIMER] Home tab index:',homeTabIndex);
   console.log('[TIMER] Inactivity timeout:',inactivityTimeout/1000,'seconds');
-  console.log('[TIMER] =-----------------------------------=');
+  console.log('[TIMER] -----------------------------------');
   
   siteStartTime=Date.now();
   lastUserInteraction=Date.now();
@@ -3706,25 +3714,30 @@ function rotateToNextSite(){
 
 function attachView(i){
   closeHTMLKeyboard();
-  
+
   if(!mainWindow||!views[i]||showingHidden)return;
-  
+
   currentIndex=i;
   mainWindow.setTopBrowserView(views[i]);
   const[w,h]=mainWindow.getContentSize();
   views[i].setBounds({x:0,y:0,width:w,height:h});
-  
+
   const tabIdx=viewIndexToTabIndex(i);
   if(tabIdx>=0&&tabs[tabIdx]){
     const configuredUrl=tabs[tabIdx].url;
     const currentUrl=views[i].webContents.getURL();
-    
+
     if(currentUrl&&!currentUrl.startsWith(configuredUrl)){
       programmaticNavigation=true;
       views[i].webContents.loadURL(configuredUrl);
     }
+
+    // Control pause button visibility based on site duration
+    const siteDuration=parseInt(tabs[tabIdx].duration)||0;
+    const shouldShow=siteDuration!==0; // Hide on manual sites (duration=0)
+    views[i].webContents.send('pause-button-visibility',shouldShow);
   }
-  
+
   views[i].webContents.focus();
   siteStartTime=Date.now();
 }
@@ -3836,9 +3849,9 @@ function showInactivityPrompt(){
 }
 
 function showPauseDialog(){
-  if(promptWindow&&!promptWindow.isDestroyed())return;
+  if(pauseWindow&&!pauseWindow.isDestroyed())return;
 
-  promptWindow=new BrowserWindow({
+  pauseWindow=new BrowserWindow({
     width:800,
     height:600,
     frame:false,
@@ -3848,17 +3861,17 @@ function showPauseDialog(){
     webPreferences:{nodeIntegration:true,contextIsolation:false}
   });
 
-  promptWindow.loadFile(path.join(__dirname,'pause-dialog.html'));
+  pauseWindow.loadFile(path.join(__dirname,'pause-dialog.html'));
 
-  promptWindow.on('closed',()=>{
-    promptWindow=null;
+  pauseWindow.on('closed',()=>{
+    pauseWindow=null;
   });
 
   ipcMain.once('pause-time-selected',(event,minutes)=>{
-    if(promptWindow&&!promptWindow.isDestroyed()){
-      promptWindow.close();
+    if(pauseWindow&&!pauseWindow.isDestroyed()){
+      pauseWindow.close();
     }
-    promptWindow=null;
+    pauseWindow=null;
 
     if(minutes===0){
       // Cancel - do nothing
@@ -5125,6 +5138,8 @@ window.addEventListener('DOMContentLoaded',()=>{
 
   // Pause button functionality
   let pauseButton=null;
+  let pauseButtonShouldShow=false;
+  let pauseButtonShown=false;
 
   function createPauseButton(){
     if(pauseButton)return;
@@ -5136,7 +5151,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     pauseButton.style.cssText=`
       position:fixed;bottom:20px;left:20px;width:60px;height:60px;
       background:rgba(230,126,34,0.95);border:3px solid rgba(255,255,255,0.9);
-      border-radius:50%;display:flex;align-items:center;justify-content:center;
+      border-radius:50%;display:none;align-items:center;justify-content:center;
       font-size:32px;cursor:pointer;z-index:999999;
       box-shadow:0 4px 12px rgba(0,0,0,0.4);user-select:none;
     `;
@@ -5150,10 +5165,50 @@ window.addEventListener('DOMContentLoaded',()=>{
     document.body.appendChild(pauseButton);
   }
 
-  // Create pause button on page load
-  setTimeout(()=>{
-    createPauseButton();
-  },1000);
+  function showPauseButton(){
+    if(!pauseButton)createPauseButton();
+    pauseButton.style.display='flex';
+    pauseButtonShown=true;
+  }
+
+  function hidePauseButton(){
+    if(pauseButton){
+      pauseButton.style.display='none';
+      pauseButtonShown=false;
+    }
+  }
+
+  // Listen for pause button visibility control from main process
+  // Main process controls whether button should be available on this site
+  ipcRenderer.on('pause-button-visibility',(event,shouldShow)=>{
+    pauseButtonShouldShow=shouldShow;
+    if(!shouldShow){
+      // If button should not show on this site, hide it immediately
+      hidePauseButton();
+    }
+    // If shouldShow is true, button will appear on user interaction
+  });
+
+  // Show pause button on user interaction (only if allowed on this site)
+  let lastUserInteraction=0;
+  const USER_INTERACTION_THROTTLE=100;
+
+  function handleUserInteraction(){
+    const now=Date.now();
+    if(now-lastUserInteraction<USER_INTERACTION_THROTTLE)return;
+    lastUserInteraction=now;
+
+    // Only show if this site allows pause button and it's not already shown
+    if(pauseButtonShouldShow&&!pauseButtonShown){
+      showPauseButton();
+    }
+  }
+
+  // Show pause button on any user interaction
+  const pauseButtonTriggers=['mousedown','touchstart','keydown'];
+  pauseButtonTriggers.forEach(eventType=>{
+    document.addEventListener(eventType,handleUserInteraction,{passive:true,capture:true});
+  });
 
   function isTextInput(el){
     if(!el)return false;
@@ -8194,19 +8249,34 @@ manual_electron_update() {
     local DETECTED_KIOSK_USER=""
     local DETECTED_KIOSK_DIR=""
 
-    # Check if kiosk user exists
-    if id "$KIOSK_USER" &>/dev/null 2>&1; then
-        DETECTED_KIOSK_USER="$KIOSK_USER"
-        DETECTED_KIOSK_DIR="$(eval echo ~$KIOSK_USER)/kiosk-app"
-    else
-        # Try to find any user with kiosk-app directory
+    echo "Searching for kiosk installation..."
+
+    # Method 1: Check if default kiosk user exists and has kiosk-app
+    if id "$KIOSK_USER" &>/dev/null; then
+        local kiosk_home=$(eval echo ~$KIOSK_USER)
+        if [ -d "$kiosk_home/kiosk-app" ]; then
+            DETECTED_KIOSK_USER="$KIOSK_USER"
+            DETECTED_KIOSK_DIR="$kiosk_home/kiosk-app"
+        fi
+    fi
+
+    # Method 2: Search all /home directories for kiosk-app
+    if [ -z "$DETECTED_KIOSK_DIR" ]; then
         for user_home in /home/*; do
-            if [ -d "$user_home/kiosk-app" ]; then
+            if [ -d "$user_home/kiosk-app" ] && [ -f "$user_home/kiosk-app/main.js" ]; then
                 DETECTED_KIOSK_USER=$(basename "$user_home")
                 DETECTED_KIOSK_DIR="$user_home/kiosk-app"
                 break
             fi
         done
+    fi
+
+    # Method 3: Check current directory
+    if [ -z "$DETECTED_KIOSK_DIR" ]; then
+        if [ -f "$PWD/kiosk-app/main.js" ]; then
+            DETECTED_KIOSK_USER=$(whoami)
+            DETECTED_KIOSK_DIR="$PWD/kiosk-app"
+        fi
     fi
 
     # Check if we found a kiosk installation
@@ -8216,6 +8286,12 @@ manual_electron_update() {
         echo "Searched locations:"
         echo "  - /home/$KIOSK_USER/kiosk-app"
         echo "  - /home/*/kiosk-app"
+        echo "  - $PWD/kiosk-app"
+        echo ""
+        echo "Debug info:"
+        echo "  Current user: $(whoami)"
+        echo "  Current directory: $PWD"
+        echo "  Kiosk user exists: $(id "$KIOSK_USER" &>/dev/null && echo 'yes' || echo 'no')"
         echo ""
         echo "Please install the kiosk first (Main Menu > Install Kiosk)"
         pause
@@ -8544,7 +8620,7 @@ core_menu() {
         clear
         echo "------------------------------------------------------------"
         echo "   CORE SETTINGS                                             "
-        echo "=------------------------------------------------------------="
+        echo "------------------------------------------------------------"
         echo
         show_current_config
         echo
@@ -8757,7 +8833,7 @@ audio_diagnostics() {
 
 fix_squeezelite_audio() {
     clear
-    echo "=-- FIX SQUEEZELITE AUDIO --="
+    echo "--- FIX SQUEEZELITE AUDIO ---"
     echo
     
     echo "This will attempt to fix Squeezelite audio issues by:"
