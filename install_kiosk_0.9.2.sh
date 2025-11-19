@@ -3315,7 +3315,7 @@ const path=require('path');
 const os=require('os');
 
 const CONFIG_FILE=path.join(__dirname,'config.json');
-const VERSION='0.9.0';
+const VERSION='0.9.2';
 
 let mainWindow,views=[],hiddenViews=[],tabs=[],currentIndex=0,showingHidden=false;
 let pinWindow=null,promptWindow=null,pauseWindow=null,htmlKeyboardWindow=null;
@@ -4202,6 +4202,12 @@ function createWindow(){
           },true);
         });
       `).catch(()=>{});
+
+      // Send pause button visibility on every page load to handle reloads
+      const siteDuration=parseInt(t.duration)||0;
+      const shouldShow=siteDuration>0;
+      view.webContents.send('pause-button-visibility',shouldShow);
+      console.log('[MAIN] Page loaded - resending pause-button-visibility: '+shouldShow+' for '+t.url);
     });
     
     const isHidden=parseInt(t.duration)===-1;
