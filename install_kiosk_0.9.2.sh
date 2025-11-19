@@ -1,30 +1,35 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk (UBK) v0.9.2            ###
+###   Ubuntu Based Kiosk (UBK) v0.9.2          ###
 ################################################################################
 #
-# RELEASE v0.9.2 - Version Update
+# RELEASE v0.9.2 - Pause Button for Rotation Sites
 #
 # What's NEW in v0.9.2:
-# - FIXED: All box drawing characters now use consistent standard characters
-# - FIXED: Pause button time options now match return-to-home (15/30/60/120 min)
-# - FIXED: Site rotation now respects user interaction (pauses 1 min after activity)
-# - FIXED: Manual Electron update now properly detects kiosk directory
-#   * Searches multiple locations for kiosk installation
-#   * Shows detected user and directory path
-#   * Creates backup before updating
-#   * Verifies update completion
+# - NEW: Pause button for timed rotation sites (appears on user interaction)
+# - Pause button appears in bottom-left corner when you interact with a timed site
+# - Auto-hides after 5 seconds of inactivity
+# - Click pause button to select pause duration (15 min, 30 min, 1 hr, 2 hr)
+# - Home return popup now only appears on manual sites (duration = 0)
+# - Timed sites (duration > 0) use pause button instead of home return popup
 #
-# What's in v0.9.1:
-# - NEW: Pause button feature (bottom-left orange button)
-#   * User can pause rotation/inactivity timers
-#   * Select time extension (15/30/60/120 minutes)
-#   * After extension expires, normal rotation/home logic resumes
-#   * Works on all pages including home URL
-# - FIXED: Site rotation timing now consistent with configured durations
-# - FIXED: Manual Electron update (comprehensive backup/update/verify logic)
-# - REMOVED: Box drawing characters from output
-# - IMPROVED: Better rotation/home logic for reliability
+# RELEASE v0.9.1-1 - Home Return Fix for Timed Sites (DEPRECATED)
+#
+# What was in v0.9.1-1:
+# - Attempted fix for home return popup on timed sites
+# - Replaced by v0.9.2 pause button approach
+#
+# RELEASE v0.9.0 - Bug Fixes & Input Validation
+#
+# What's NEW in v0.9.0:
+# - FIXED: Octal time parsing bug (08:00-09:59 would crash)
+# - Added comprehensive input validation functions
+# - Added URL reorder functionality
+# - Improved URL delete with automatic HOME_TAB_INDEX adjustment
+# - Added ask_time(), ask_integer(), ask_url(), ask_menu_choice() validators
+# - Updated site configuration menu to use dynamic validation
+# - README.md with full documentation and licensing
+# - TODO.md tracking remaining features
 #
 # What's in v0.9.9.1.4:
 # - Fixed site rotation during time extensions (now properly pauses rotation)
@@ -88,7 +93,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="0.9.2"
+SCRIPT_VERSION="0.9.0"
 KIOSK_USER="kiosk"
 BUILD_USER="${SUDO_USER:-$(whoami)}"
 KIOSK_HOME="/home/${KIOSK_USER}"
@@ -422,7 +427,7 @@ get_cpu_info() {
 ################################################################################
 
 show_system_status() {
-    echo " -- SYSTEM STATUS --"
+    echo " ══ SYSTEM STATUS ══"
     echo
     
     if is_kiosk_installed; then
@@ -433,7 +438,7 @@ show_system_status() {
     fi
     echo
     
-    echo " -- SYSTEM RESOURCES --"
+    echo " ══ SYSTEM RESOURCES ══"
     
     local ip=$(get_ip_address)
     echo "IP Address:  $ip"
@@ -473,7 +478,7 @@ show_system_status() {
 }
 
 show_addon_status() {
-    echo " --- INSTALLED ADDONS ---"
+    echo " ╔══ INSTALLED ADDONS ══╗"
     echo
     
     local any_addon=false
@@ -597,7 +602,7 @@ show_addon_status() {
     echo
 }
 show_schedule_status() {
-    echo " -- SCHEDULED TASKS --"
+    echo " ══ SCHEDULED TASKS ══"
     echo
     
     local any_schedule=false
@@ -641,7 +646,7 @@ show_schedule_status() {
 
 show_current_config() {
     if sudo -u "$KIOSK_USER" test -f "$CONFIG_PATH" 2>/dev/null; then
-        echo " --- CURRENT CONFIGURATION ---"
+        echo " ═══ CURRENT CONFIGURATION ═══"
         echo
         
         local autoswitch=$(sudo -u "$KIOSK_USER" jq -r '.autoswitch' "$CONFIG_PATH" 2>/dev/null)
@@ -687,7 +692,7 @@ show_current_config() {
 }
 
 configure_timezone() {
-    echo " --- TIMEZONE CONFIGURATION ---"
+    echo " ═══ TIMEZONE CONFIGURATION ═══"
     echo
     local current_tz=$(timedatectl show -p Timezone --value)
     echo "Current timezone: $current_tz"
@@ -802,7 +807,7 @@ configure_timezone() {
 }
 
 configure_touch_controls() {
-    echo " --- TOUCH CONTROLS CONFIGURATION ---"
+    echo " ═══ TOUCH CONTROLS CONFIGURATION ═══"
     echo
     echo "Touch control modes:"
     echo
@@ -838,7 +843,7 @@ configure_touch_controls() {
 }
 
 configure_navigation_security() {
-    echo " --- NAVIGATION SECURITY ---"
+    echo " ═══ NAVIGATION SECURITY ═══"
     echo
     echo "Controls what users can access by clicking links:"
     echo
@@ -878,7 +883,7 @@ configure_navigation_security() {
 
 configure_sites() {
     while true; do
-        echo " --- SITES CONFIGURATION ---"
+        echo " ═══ SITES CONFIGURATION ═══"
         echo
         
         URLS=()
@@ -1081,7 +1086,7 @@ reorder_sites() {
     fi
 
     echo
-    echo " --- REORDER SITES ---"
+    echo " ═══ REORDER SITES ═══"
     echo
     echo "Current order:"
     for idx in "${!URLS[@]}"; do
@@ -1154,7 +1159,7 @@ reorder_sites() {
 
 configure_home_url() {
     echo
-    echo " --- HOME URL CONFIGURATION ---"
+    echo " ═══ HOME URL CONFIGURATION ═══"
     echo
     echo "A HOME URL is where the kiosk returns after inactivity on other tabs."
     echo
@@ -1222,7 +1227,7 @@ configure_home_url() {
 }
 
 add_new_sites() {
-    echo " --- SITE ROTATION SETUP ---"
+    echo " ═══ SITE ROTATION SETUP ═══"
     echo
     echo "HOW AUTO-ROTATION WORKS:"
     echo "────────────────────────────"
@@ -1248,7 +1253,7 @@ add_new_sites() {
     local inactivity_minutes=2
     local home_duration=180
     
-    echo " --- HOME URL FEATURE ---"
+    echo " ═══ HOME URL FEATURE ═══"
     echo
     echo "A HOME URL returns the kiosk to a default screen after inactivity."
     echo
@@ -1272,7 +1277,7 @@ add_new_sites() {
     fi
     echo
     
-    echo " --- ENTER SITES ---"
+    echo " ═══ ENTER SITES ═══"
     echo
     echo "Supported formats:"
     echo "  • example.com → https://example.com"
@@ -1468,7 +1473,7 @@ add_new_sites_simple() {
 ################################################################################
 
 configure_wifi() {
-    echo " -- WIFI CONFIGURATION --"
+    echo " ══ WIFI CONFIGURATION ══"
     echo
     
     # Verify we have necessary tools
@@ -1663,7 +1668,7 @@ WATCHEOF
 
 configure_emergency_hotspot() {
     echo
-    echo "-- EMERGENCY HOTSPOT --"
+    echo "══ EMERGENCY HOTSPOT ══"
     echo
     echo "Creates a WiFi hotspot if no internet connection after boot."
     echo "Allows you to connect and reconfigure the kiosk remotely."
@@ -1966,9 +1971,9 @@ disable_emergency_hotspot() {
 configure_power_display_quiet() {
     while true; do
         clear
-        echo "------------------------------------------------------------"
+        echo "════════════════════════════════════════════════════════════"
         echo "   POWER / DISPLAY / QUIET HOURS                             "
-        echo "------------------------------------------------------------"
+        echo "════════════════════════════════════════════════════════════"
         echo
         
         show_schedule_status
@@ -1982,7 +1987,7 @@ configure_power_display_quiet() {
             rtc_status="⚠ Available but not writable"
         fi
         
-        echo " --- RTC Wake Capability ---"
+        echo " ═══ RTC Wake Capability ═══"
         echo "Status: $rtc_status"
         echo
         if $rtc_available; then
@@ -2041,7 +2046,7 @@ configure_power_display_quiet() {
 
 configure_power_schedule() {
     echo
-    echo " -- POWER SCHEDULING --"
+    echo " ══ POWER SCHEDULING ══"
     echo
     
     # Check if RTC is available
@@ -2192,7 +2197,7 @@ EOF
 
 configure_display_schedule() {
     echo
-    echo " -- DISPLAY SCHEDULING --"
+    echo " ══ DISPLAY SCHEDULING ══"
     echo
     
     # Check if power schedule exists
@@ -2361,7 +2366,7 @@ EOF
 
 configure_quiet_hours() {
     echo
-    echo " -- QUIET HOURS --"
+    echo " ══ QUIET HOURS ══"
     echo
     
     # Show existing schedules for context
@@ -2540,7 +2545,7 @@ EOF
 
 configure_electron_reload() {
     echo
-    echo " -- ELECTRON RELOAD SCHEDULE --"
+    echo " ══ ELECTRON RELOAD SCHEDULE ══"
     echo
     echo "Automatically reload Electron to prevent memory leaks."
     echo "Squeezelite music continues playing during reload."
@@ -2732,7 +2737,7 @@ disable_electron_reload_timer() {
 
 test_display_control() {
     echo
-    echo " --- TEST DISPLAY CONTROL ---"
+    echo " ═══ TEST DISPLAY CONTROL ═══"
     echo
     echo "This will test turning the display off and on."
     echo
@@ -2826,9 +2831,9 @@ remove_all_schedules() {
 show_testing_menu() {
     while true; do
         clear
-        echo "------------------------------------------------------------"
+        echo "════════════════════════════════════════════════════════════"
         echo "   SCHEDULE & SYSTEM TESTING                                 "
-        echo "------------------------------------------------------------"
+        echo "════════════════════════════════════════════════════════════"
         echo
         
         echo "Available Tests:"
@@ -2858,7 +2863,7 @@ show_testing_menu() {
 
 test_quiet_hours() {
     echo
-    echo " --- QUIET HOURS TEST ---"
+    echo " ═══ QUIET HOURS TEST ═══"
     echo
     
     if ! systemctl is-enabled kiosk-quiet-start.timer &>/dev/null; then
@@ -2898,7 +2903,7 @@ test_quiet_hours() {
 
 test_power_schedule() {
     echo
-    echo " --- POWER SCHEDULE TEST ---"
+    echo " ═══ POWER SCHEDULE TEST ═══"
     echo
     
     if ! systemctl is-enabled kiosk-shutdown.timer &>/dev/null; then
@@ -2931,7 +2936,7 @@ test_power_schedule() {
 
 test_keyboard() {
     echo
-    echo " --- KEYBOARD TEST ---"
+    echo " ═══ KEYBOARD TEST ═══"
     echo
     echo "Testing keyboard visibility and function..."
     echo
@@ -2952,7 +2957,7 @@ test_keyboard() {
 
 run_all_tests() {
     echo
-    echo " --- RUNNING ALL TESTS ---"
+    echo " ═══ RUNNING ALL TESTS ═══"
     echo
     
     echo "Test 1/5: Display Control"
@@ -3090,9 +3095,9 @@ save_config() {
 
 full_reinstall() {
     echo ""
-    echo "--------------------------------------------------------------"
+    echo "══════════════════════════════════════════════════════════════"
     echo "  FULL REINSTALL - NUCLEAR OPTION"
-    echo "--------------------------------------------------------------"
+    echo "══════════════════════════════════════════════════════════════"
     echo ""
     echo "⚠️  This will COMPLETELY WIPE:"
     echo "  • All kiosk configuration and sites"
@@ -3211,9 +3216,9 @@ full_reinstall() {
 
 first_time_install() {
     clear
-    echo "------------------------------------------------------------"
+    echo "════════════════════════════════════════════════════════════"
     echo "   Ubuntu Based Kiosk (UBK) v${SCRIPT_VERSION} - Installation          "
-    echo "------------------------------------------------------------"
+    echo "════════════════════════════════════════════════════════════"
     echo
     echo "This will install a HEADLESS KIOSK (no desktop environment):"
     echo
@@ -3280,15 +3285,7 @@ first_time_install() {
         curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
         sudo apt install -y nodejs
     fi
-
-    # Verify npm is installed
-    if ! command -v npm &>/dev/null; then
-        echo "⚠ npm not found, attempting to install..."
-        sudo apt install -y npm
-    fi
-
     echo "Node.js: $(node -v)"
-    echo "npm: $(npm -v)"
     
     echo "[7-10/27] Core configuration..."
     configure_touch_controls
@@ -3318,7 +3315,7 @@ const path=require('path');
 const os=require('os');
 
 const CONFIG_FILE=path.join(__dirname,'config.json');
-const VERSION='0.9.2';
+const VERSION='0.9.0';
 
 let mainWindow,views=[],hiddenViews=[],tabs=[],currentIndex=0,showingHidden=false;
 let pinWindow=null,promptWindow=null,pauseWindow=null,htmlKeyboardWindow=null;
@@ -3367,12 +3364,12 @@ function loadConfig(){
     inactivityTimeout=(config.inactivityTimeout||120)*1000;
     allowNavigation=config.allowNavigation||'same-origin';
     
-    console.log('[CONFIG] ---------------------------');
+    console.log('[CONFIG] ═══════════════════════════');
     console.log('[CONFIG] Home tab index:',homeTabIndex);
     console.log('[CONFIG] Inactivity timeout:',inactivityTimeout/1000,'seconds');
     console.log('[CONFIG] Navigation:',allowNavigation);
     console.log('[CONFIG] Sites:',config.tabs?.length||0);
-    console.log('[CONFIG] ---------------------------');
+    console.log('[CONFIG] ═══════════════════════════');
     
     return config.tabs||[];
   }catch(e){
@@ -3544,10 +3541,10 @@ function startMasterTimer(){
     clearInterval(masterTimer);
   }
   
-  console.log('[TIMER] --- MASTER TIMER STARTED ---');
+  console.log('[TIMER] ╔═══ MASTER TIMER STARTED ════╗');
   console.log('[TIMER] Home tab index:',homeTabIndex);
   console.log('[TIMER] Inactivity timeout:',inactivityTimeout/1000,'seconds');
-  console.log('[TIMER] -----------------------------------');
+  console.log('[TIMER] ╚═══════════════════════════════════╝');
   
   siteStartTime=Date.now();
   lastUserInteraction=Date.now();
@@ -3584,11 +3581,14 @@ function startMasterTimer(){
     // 5. USER ACTIVITY CHECK
     const timeSinceInteraction=now-lastUserInteraction;
     userRecentlyActive=timeSinceInteraction<USER_ACTIVITY_PAUSE;
-
+    
+    if(userRecentlyActive){
+      return;
+    }
+    
     // 6. SITE ROTATION
-    // Rotation respects both pause extension AND user interaction
     if(!showingHidden&&views.length>1){
-      // Skip rotation if user is in an extension period (pause button was used)
+      // Skip rotation if user is in an extension period (they confirmed they're still there)
       if(inactivityExtensionUntil>0&&now<inactivityExtensionUntil){
         // Log every 30 seconds during extension
         if(Math.floor(now/30000)!==Math.floor((now-1000)/30000)){
@@ -3597,52 +3597,42 @@ function startMasterTimer(){
           const remSec=remaining%60;
           console.log('[ROTATION] ⏸ Paused - Extension active: '+remMin+'m '+remSec+'s remaining');
         }
-        // Don't rotate during extension period - skip to return-to-home check
-      }else if(userRecentlyActive){
-        // Don't rotate if user is actively interacting (pause for 1 min after interaction)
-        // This prevents the site from rotating under the user while they're using it
+        // Don't rotate during extension period
         return;
-      }else{
-        // No extension, no recent activity - check if it's time to rotate
-        const currentTabIdx=viewIndexToTabIndex(currentIndex);
+      }
 
-        if(currentTabIdx>=0&&tabs[currentTabIdx]){
-          const siteDuration=parseInt(tabs[currentTabIdx].duration)||0;
+      const currentTabIdx=viewIndexToTabIndex(currentIndex);
 
-          if(siteDuration>0){
-            const timeOnSite=now-siteStartTime;
+      if(currentTabIdx>=0&&tabs[currentTabIdx]){
+        const siteDuration=parseInt(tabs[currentTabIdx].duration)||0;
 
-            if(timeOnSite>=siteDuration*1000){
-              console.log('[ROTATION] Time elapsed: '+Math.floor(timeOnSite/1000)+'s / '+siteDuration+'s - rotating now');
-              rotateToNextSite();
-              return;
-            }
+        if(siteDuration>0){
+          const timeOnSite=now-siteStartTime;
+
+          if(timeOnSite>=siteDuration*1000){
+            rotateToNextSite();
+            // Removed return; to allow HOME RETURN CHECK to run on timed sites
           }
         }
       }
     }
-
-    // User activity already checked above, this blocks only return-to-home
-    if(userRecentlyActive){
-      return;
-    }
     
-// 7. HOME RETURN CHECK
+// 7. HOME RETURN CHECK (manual sites only)
     if(homeTabIndex>=0&&!showingHidden){
       const homeViewIdx=getHomeViewIndex();
       const currentTabIdx=viewIndexToTabIndex(currentIndex);
 
-      // ONLY show inactivity prompt on manual sites (duration=0)
-      // Rotation sites handle their own timing and should NOT show inactivity prompt
-      if(currentTabIdx>=0&&tabs[currentTabIdx]){
-        const currentSiteDuration=parseInt(tabs[currentTabIdx].duration)||0;
-        if(currentSiteDuration>0){
-          // Rotation site - skip return-to-home logic (uses auto-rotation instead)
+      // Only show home return prompt for manual sites (duration = 0)
+      // Timed sites use the pause button instead
+      if(homeViewIdx>=0&&currentIndex!==homeViewIdx&&currentTabIdx>=0&&tabs[currentTabIdx]){
+        const siteDuration=parseInt(tabs[currentTabIdx].duration)||0;
+
+        // Skip home return check for timed rotation sites
+        if(siteDuration>0){
+          // This is a timed site - pause button is used instead
           return;
         }
-      }
 
-      if(homeViewIdx>=0&&currentIndex!==homeViewIdx){
         const idleTime=now-lastUserInteraction;
         
         // CRITICAL FIX: Use absolute time check for extensions
@@ -3724,14 +3714,14 @@ function rotateToNextSite(){
 
 function attachView(i){
   closeHTMLKeyboard();
-
+  
   if(!mainWindow||!views[i]||showingHidden)return;
-
+  
   currentIndex=i;
   mainWindow.setTopBrowserView(views[i]);
   const[w,h]=mainWindow.getContentSize();
   views[i].setBounds({x:0,y:0,width:w,height:h});
-
+  
   const tabIdx=viewIndexToTabIndex(i);
   if(tabIdx>=0&&tabs[tabIdx]){
     const configuredUrl=tabs[tabIdx].url;
@@ -4648,6 +4638,108 @@ sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/keyboard.html" > /dev/null <<'KBHTML'
 </html>
 KBHTML
 
+echo "[14.5/27] Creating pause-dialog.html..."
+sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/pause-dialog.html" > /dev/null <<'PAUSEHTML'
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: rgba(0,0,0,0.9);
+      color: #ecf0f1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      padding: 40px;
+    }
+    .container { text-align: center; max-width: 600px; }
+    h2 { font-size: 32px; margin-bottom: 20px; }
+    .message { font-size: 20px; margin-bottom: 30px; line-height: 1.5; }
+    .options {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 15px;
+      margin: 30px 0;
+    }
+    .btn {
+      padding: 20px 40px;
+      font-size: 18px;
+      cursor: pointer;
+      border: none;
+      border-radius: 12px;
+      font-weight: bold;
+      transition: all 0.2s;
+      color: white;
+    }
+    .btn-extend { background: #e67e22; }
+    .btn-extend:hover { background: #d35400; }
+    .btn-extend:active { background: #ba4a00; }
+
+    .btn-cancel {
+      background: #95a5a6;
+      grid-column: 1 / -1;
+      font-size: 16px;
+      padding: 15px;
+    }
+    .btn-cancel:hover { background: #7f8c8d; }
+
+    .info {
+      font-size: 14px;
+      color: #95a5a6;
+      margin-top: 20px;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>⏸️ Pause Timers</h2>
+    <div class="message">
+      Select how long to pause rotation and inactivity timers:
+    </div>
+
+    <div class="options">
+      <button class="btn btn-extend" onclick="selectTime(15)">
+        🍿 15 minutes
+      </button>
+
+      <button class="btn btn-extend" onclick="selectTime(30)">
+        ⏱️ 30 minutes
+      </button>
+
+      <button class="btn btn-extend" onclick="selectTime(60)">
+        🎬 1 hour
+      </button>
+
+      <button class="btn btn-extend" onclick="selectTime(120)">
+        📺 2 hours
+      </button>
+
+      <button class="btn btn-cancel" onclick="selectTime(0)">
+        ✗ Cancel
+      </button>
+    </div>
+
+    <div class="info">
+      After the time expires, normal rotation and return-to-home logic will resume.
+    </div>
+  </div>
+
+  <script>
+    const {ipcRenderer} = require('electron');
+
+    function selectTime(minutes) {
+      ipcRenderer.send('pause-time-selected', minutes);
+    }
+  </script>
+</body>
+</html>
+PAUSEHTML
+
 echo "[15/27] Creating PIN entry dialog..."
     sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/pin-entry.html" > /dev/null <<'PINHTML'
 <!DOCTYPE html>
@@ -4931,109 +5023,7 @@ echo "[15/27] Creating inactivity prompt..."
 </body>
 </html>
 INACTHTML
-
-echo "[15b/27] Creating pause dialog..."
-    sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/pause-dialog.html" > /dev/null <<'PAUSEHTML'
-<!DOCTYPE html>
-<html>
-<head>
-  <style>
-    * { margin: 0; padding: 0; box-sizing: border-box; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
-      background: rgba(0,0,0,0.9);
-      color: #ecf0f1;
-      display: flex;
-      flex-direction: column;
-      justify-content: center;
-      align-items: center;
-      height: 100vh;
-      padding: 40px;
-    }
-    .container { text-align: center; max-width: 600px; }
-    h2 { font-size: 32px; margin-bottom: 20px; }
-    .message { font-size: 20px; margin-bottom: 30px; line-height: 1.5; }
-    .options {
-      display: grid;
-      grid-template-columns: 1fr 1fr;
-      gap: 15px;
-      margin: 30px 0;
-    }
-    .btn {
-      padding: 20px 40px;
-      font-size: 18px;
-      cursor: pointer;
-      border: none;
-      border-radius: 12px;
-      font-weight: bold;
-      transition: all 0.2s;
-      color: white;
-    }
-    .btn-extend { background: #e67e22; }
-    .btn-extend:hover { background: #d35400; }
-    .btn-extend:active { background: #ba4a00; }
-
-    .btn-cancel {
-      background: #95a5a6;
-      grid-column: 1 / -1;
-      font-size: 16px;
-      padding: 15px;
-    }
-    .btn-cancel:hover { background: #7f8c8d; }
-
-    .info {
-      font-size: 14px;
-      color: #95a5a6;
-      margin-top: 20px;
-      line-height: 1.6;
-    }
-  </style>
-</head>
-<body>
-  <div class="container">
-    <h2>⏸️ Pause Timers</h2>
-    <div class="message">
-      Select how long to pause rotation and inactivity timers:
-    </div>
-
-    <div class="options">
-      <button class="btn btn-extend" onclick="selectTime(15)">
-        🍿 15 minutes
-      </button>
-
-      <button class="btn btn-extend" onclick="selectTime(30)">
-        ⏱️ 30 minutes
-      </button>
-
-      <button class="btn btn-extend" onclick="selectTime(60)">
-        🎬 1 hour
-      </button>
-
-      <button class="btn btn-extend" onclick="selectTime(120)">
-        📺 2 hours
-      </button>
-
-      <button class="btn btn-cancel" onclick="selectTime(0)">
-        ✗ Cancel
-      </button>
-    </div>
-
-    <div class="info">
-      After the time expires, normal rotation and return-to-home logic will resume.
-    </div>
-  </div>
-
-  <script>
-    const {ipcRenderer} = require('electron');
-
-    function selectTime(minutes) {
-      ipcRenderer.send('pause-time-selected', minutes);
-    }
-  </script>
-</body>
-</html>
-PAUSEHTML
-
+    
     echo "1234" | sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/.jitsi-pin" >/dev/null
     sudo -u "$KIOSK_USER" chmod 600 "$KIOSK_DIR/.jitsi-pin"
     log_success "Default PIN: 1234"
@@ -5223,35 +5213,7 @@ window.addEventListener('DOMContentLoaded',()=>{
   function hideKeyboardIcon(){
     if(keyboardIcon)keyboardIcon.style.display='none';
   }
-
-  // Pause button user interaction handler
-  // Show pause button on user interaction (only if allowed on this site)
-  let lastUserInteraction=0;
-  const USER_INTERACTION_THROTTLE=100;
-
-  function handleUserInteraction(eventType){
-    const now=Date.now();
-    if(now-lastUserInteraction<USER_INTERACTION_THROTTLE)return;
-    lastUserInteraction=now;
-
-    console.log('[PAUSE-BTN] User interaction ('+eventType+') - shouldShow='+pauseButtonShouldShow+', shown='+pauseButtonShown);
-    // Show/refresh pause button if allowed on this site
-    if(pauseButtonShouldShow){
-      if(!pauseButtonShown){
-        console.log('[PAUSE-BTN] Showing pause button now');
-      }else{
-        console.log('[PAUSE-BTN] Resetting auto-hide timer');
-      }
-      showPauseButton(); // This will reset the hide timer
-    }
-  }
-
-  // Show pause button on any user interaction
-  const pauseButtonTriggers=['mousedown','touchstart','keydown'];
-  pauseButtonTriggers.forEach(eventType=>{
-    document.addEventListener(eventType,()=>handleUserInteraction(eventType),{passive:true,capture:true});
-  });
-
+  
   function isTextInput(el){
     if(!el)return false;
     const tag=(el.tagName||'').toLowerCase();
@@ -5342,6 +5304,33 @@ window.addEventListener('DOMContentLoaded',()=>{
       }
     }
   },{passive:true});
+
+  // Show pause button on user interaction (for rotation sites only)
+  let lastUserInteraction=0;
+  const USER_INTERACTION_THROTTLE=500;
+
+  function handleUserInteraction(eventType){
+    const now=Date.now();
+    if(now-lastUserInteraction<USER_INTERACTION_THROTTLE)return;
+    lastUserInteraction=now;
+
+    console.log('[PAUSE-BTN] User interaction ('+eventType+') - shouldShow='+pauseButtonShouldShow+', shown='+pauseButtonShown);
+    // Show/refresh pause button if allowed on this site
+    if(pauseButtonShouldShow){
+      if(!pauseButtonShown){
+        console.log('[PAUSE-BTN] Showing pause button now');
+      }else{
+        console.log('[PAUSE-BTN] Resetting auto-hide timer');
+      }
+      showPauseButton(); // This will reset the hide timer
+    }
+  }
+
+  // Show pause button on any user interaction
+  const pauseButtonTriggers=['mousedown','touchstart','keydown'];
+  pauseButtonTriggers.forEach(eventType=>{
+    document.addEventListener(eventType,()=>handleUserInteraction(eventType),{passive:true,capture:true});
+  });
 });
 PRELOAD
 ############################################################################
@@ -5438,16 +5427,14 @@ xset dpms force on
         on_mins=$(( 10#$(echo "$don" | cut -d: -f1) * 60 + 10#$(echo "$don" | cut -d: -f2) ))
 
         # Check if we're in the "display off" window
-        if [[ $off_mins -gt $on_mins ]]; then
-          # Overnight case: off time is after on time (e.g., turn off at 22:00, on at 06:00)
-          # Display is OFF from off_mins to midnight AND from midnight to on_mins
-          if [[ $current_mins -ge $off_mins || $current_mins -lt $on_mins ]]; then
+        if [[ $off_mins -lt $on_mins ]]; then
+          # Normal case: off time is before on time (e.g., 22:00 to 06:00 next day)
+          if [[ $current_mins -ge $off_mins && $current_mins -lt $on_mins ]]; then
             schedule_active=true
           fi
         else
-          # Same-day case: off time is before on time (e.g., turn off at 08:00, on at 17:00)
-          # Display is OFF from off_mins to on_mins
-          if [[ $current_mins -ge $off_mins && $current_mins -lt $on_mins ]]; then
+          # Overnight case: off time is after on time (e.g., 06:00 to 22:00)
+          if [[ $current_mins -ge $off_mins || $current_mins -lt $on_mins ]]; then
             schedule_active=true
           fi
         fi
@@ -5911,9 +5898,9 @@ fi
 addon_lms_squeezelite() {
     while true; do
         clear
-        echo "------------------------------------------------------------"
+        echo "════════════════════════════════════════════════════════════"
         echo "   LMS SERVER / SQUEEZELITE PLAYER                           "
-        echo "------------------------------------------------------------"
+        echo "════════════════════════════════════════════════════════════"
         echo
         
         local lms_installed=false
@@ -6226,9 +6213,9 @@ uninstall_squeezelite() {
 
 addon_cups() {
     clear
-    echo "------------------------------------------------------------"
+    echo "════════════════════════════════════════════════════════════"
     echo "   CUPS PRINTING SUPPORT                                        "
-    echo "------------------------------------------------------------"
+    echo "════════════════════════════════════════════════════════════"
     echo
     
     local cups_installed=false
@@ -6374,9 +6361,9 @@ EOF
 
 addon_jitsi_intercom() {
     clear
-    echo "------------------------------------------------------------"
+    echo "════════════════════════════════════════════════════════════"
     echo "   JITSI INTERCOM (TWO-WAY AUDIO)                            "
-    echo "------------------------------------------------------------"
+    echo "════════════════════════════════════════════════════════════"
     echo
     
     local jitsi_configured=false
@@ -6454,7 +6441,7 @@ addon_jitsi_intercom() {
 
 install_jitsi_intercom() {
     echo
-    echo " -- JITSI SETUP --"
+    echo " ══ JITSI SETUP ══"
     echo
     echo "Choose Jitsi server type:"
     echo "  1. Public Jitsi (meet.jit.si) - Free, no setup"
@@ -6534,9 +6521,9 @@ remove_jitsi_intercom() {
 
 addon_talkkonnect_intercom() {
     clear
-    echo "------------------------------------------------------------"
+    echo "════════════════════════════════════════════════════════════"
     echo "   TALKKONNECT/MURMUR INTERCOM                                   "
-    echo "------------------------------------------------------------"
+    echo "════════════════════════════════════════════════════════════"
     echo
     
     local murmur_installed=false
@@ -6670,7 +6657,7 @@ addon_talkkonnect_intercom() {
 
 install_murmur_server() {
     echo
-    echo " --- INSTALLING MURMUR SERVER ---"
+    echo " ═══ INSTALLING MURMUR SERVER ═══"
     echo
     
     echo "[1/5] Installing mumble-server package..."
@@ -6790,7 +6777,7 @@ install_murmur_and_talkkonnect() {
 
 install_talkkonnect_only() {
     echo
-    echo " --- INSTALLING TALKKONNECT (STANDALONE) ---"
+    echo " ═══ INSTALLING TALKKONNECT (STANDALONE) ═══"
     echo
     
     echo "Enter Murmur/Mumble server details:"
@@ -7109,7 +7096,7 @@ reconfigure_talkkonnect() {
 view_talkkonnect_logs() {
     echo
     echo "Recent talkkonnect logs:"
-    echo "---------------------------------------------------------------"
+    echo "═══════════════════════════════════════════════════════════════"
     sudo journalctl -u talkkonnect -n 50 --no-pager
     echo
     pause
@@ -7160,9 +7147,9 @@ uninstall_talkkonnect() {
 
 addon_vnc() {
     clear
-    echo "------------------------------------------------------------"
+    echo "════════════════════════════════════════════════════════════"
     echo "   VNC REMOTE DESKTOP                                        "
-    echo "------------------------------------------------------------"
+    echo "════════════════════════════════════════════════════════════"
     echo
     
     if is_service_active x11vnc; then
@@ -7249,9 +7236,9 @@ EOF
 
 addon_wireguard() {
     clear
-    echo "------------------------------------------------------------"
+    echo "════════════════════════════════════════════════════════════"
     echo "   WIREGUARD VPN                                             "
-    echo "------------------------------------------------------------"
+    echo "════════════════════════════════════════════════════════════"
     echo
     
     if command -v wg &>/dev/null && sudo wg show 2>/dev/null | grep -q interface; then
@@ -7329,9 +7316,9 @@ configure_wireguard_paste() {
 
 addon_tailscale() {
     clear
-    echo "------------------------------------------------------------"
+    echo "════════════════════════════════════════════════════════════"
     echo "   TAILSCALE VPN                                             "
-    echo "------------------------------------------------------------"
+    echo "════════════════════════════════════════════════════════════"
     echo
     
     if command -v tailscale &>/dev/null; then
@@ -7419,9 +7406,9 @@ addon_tailscale() {
 
 addon_netbird() {
     clear
-    echo "------------------------------------------------------------"
+    echo "════════════════════════════════════════════════════════════"
     echo "   NETBIRD VPN                                               "
-    echo "------------------------------------------------------------"
+    echo "════════════════════════════════════════════════════════════"
     echo
     
     if command -v netbird &>/dev/null; then
@@ -7495,9 +7482,9 @@ addon_netbird() {
 
 addon_onscreen_keyboard() {
     clear
-    echo "------------------------------------------------------------"
+    echo "════════════════════════════════════════════════════════════"
     echo "   HTML ON-SCREEN KEYBOARD                                   "
-    echo "------------------------------------------------------------"
+    echo "════════════════════════════════════════════════════════════"
     echo
     
     local keyboard_installed=false
@@ -8068,11 +8055,11 @@ disable_keyboard_autoshow() {
     sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/preload.js" > /dev/null <<'PRELOAD'
 const {contextBridge,ipcRenderer}=require('electron');
 
-console.log('------------------------------------------------------------');
+console.log('════════════════════════════════════════════════════════════');
 console.log('  Jitsi PTT: SPACEBAR (hold to talk, release to listen)');
 console.log('  Hidden Tab: 3-finger UP swipe (PIN protected)');
 console.log('  Keyboard: 2-finger DOWN swipe (always available)');
-console.log('------------------------------------------------------------');
+console.log('════════════════════════════════════════════════════════════');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   notifyActivity: () => ipcRenderer.send('user-activity'),
@@ -8224,9 +8211,9 @@ view_keyboard_logs() {
 
 ssh_credentials_helper() {
     clear
-    echo "------------------------------------------------------------"
+    echo "════════════════════════════════════════════════════════════"
     echo "   SSH CREDENTIALS HELPER                                    "
-    echo "------------------------------------------------------------"
+    echo "════════════════════════════════════════════════════════════"
     echo
     echo "This helps you paste complex passwords from SSH"
     echo
@@ -8285,173 +8272,33 @@ uninstall_html_keyboard() {
 
 manual_electron_update() {
     clear
+echo ""
+echo "═══ MANUAL ELECTRON UPDATE ═══"
+CURRENT_ELECTRON=$(npm list electron --depth=0 2>/dev/null | grep electron@ | cut -d'@' -f2 | cut -d' ' -f1)
+echo "Current: v${CURRENT_ELECTRON}"
+echo ""
+read -p "Check for updates? (y/n): " CHECK_UPDATES
+
+if [[ "$CHECK_UPDATES" =~ ^[Yy]$ ]]; then
+  echo "Checking npm registry..."
+  LATEST_ELECTRON=$(npm view electron version 2>/dev/null)
+  
+  if [ -z "$LATEST_ELECTRON" ]; then
+    echo "✗ Could not fetch latest version"
+  else
+    echo "Latest: v${LATEST_ELECTRON}"
     echo ""
-    echo "--- MANUAL ELECTRON UPDATE ---"
-    echo ""
-
-    # Detect kiosk user and directory dynamically
-    local DETECTED_KIOSK_USER=""
-    local DETECTED_KIOSK_DIR=""
-
-    echo "Searching for kiosk installation..."
-
-    # Method 1: Check if default kiosk user exists and has kiosk-app
-    if id "$KIOSK_USER" &>/dev/null; then
-        local kiosk_home=$(eval echo ~$KIOSK_USER)
-        if [ -d "$kiosk_home/kiosk-app" ] && [ -f "$kiosk_home/kiosk-app/main.js" ]; then
-            DETECTED_KIOSK_USER="$KIOSK_USER"
-            DETECTED_KIOSK_DIR="$kiosk_home/kiosk-app"
-        fi
-    fi
-
-    # Method 2: Search all /home directories for kiosk-app
-    if [ -z "$DETECTED_KIOSK_DIR" ]; then
-        for user_home in /home/*; do
-            if [ -d "$user_home/kiosk-app" ] && [ -f "$user_home/kiosk-app/main.js" ]; then
-                DETECTED_KIOSK_USER=$(basename "$user_home")
-                DETECTED_KIOSK_DIR="$user_home/kiosk-app"
-                break
-            fi
-        done
-    fi
-
-    # Method 3: Check current user's home directory
-    if [ -z "$DETECTED_KIOSK_DIR" ]; then
-        local current_user_home="$HOME"
-        if [ -d "$current_user_home/kiosk-app" ] && [ -f "$current_user_home/kiosk-app/main.js" ]; then
-            DETECTED_KIOSK_USER=$(whoami)
-            DETECTED_KIOSK_DIR="$current_user_home/kiosk-app"
-        fi
-    fi
-
-    # Method 4: Check current directory
-    if [ -z "$DETECTED_KIOSK_DIR" ]; then
-        if [ -f "$PWD/kiosk-app/main.js" ]; then
-            DETECTED_KIOSK_USER=$(whoami)
-            DETECTED_KIOSK_DIR="$PWD/kiosk-app"
-        fi
-    fi
-
-    # Method 5: Check parent directory
-    if [ -z "$DETECTED_KIOSK_DIR" ]; then
-        local parent_dir="$(dirname "$PWD")"
-        if [ -f "$parent_dir/kiosk-app/main.js" ]; then
-            DETECTED_KIOSK_USER=$(whoami)
-            DETECTED_KIOSK_DIR="$parent_dir/kiosk-app"
-        fi
-    fi
-
-    # Method 6: Check common system locations
-    if [ -z "$DETECTED_KIOSK_DIR" ]; then
-        for sys_dir in /opt/kiosk-app /usr/local/kiosk-app; do
-            if [ -f "$sys_dir/main.js" ]; then
-                DETECTED_KIOSK_USER=$(whoami)
-                DETECTED_KIOSK_DIR="$sys_dir"
-                break
-            fi
-        done
-    fi
-
-    # Method 7: Use systemd service to find kiosk directory
-    if [ -z "$DETECTED_KIOSK_DIR" ]; then
-        if systemctl list-units --all kiosk.service | grep -q kiosk.service; then
-            local service_dir=$(systemctl show -p WorkingDirectory kiosk.service 2>/dev/null | cut -d= -f2)
-            if [ -n "$service_dir" ] && [ -f "$service_dir/main.js" ]; then
-                DETECTED_KIOSK_USER=$(systemctl show -p User kiosk.service 2>/dev/null | cut -d= -f2)
-                DETECTED_KIOSK_DIR="$service_dir"
-            fi
-        fi
-    fi
-
-    # Check if we found a kiosk installation
-    if [ -z "$DETECTED_KIOSK_DIR" ] || [ ! -d "$DETECTED_KIOSK_DIR" ]; then
-        echo "✗ Kiosk installation not found!"
-        echo ""
-        echo "Searched locations:"
-        echo "  1. /home/$KIOSK_USER/kiosk-app"
-        echo "  2. /home/*/kiosk-app (all users)"
-        echo "  3. $HOME/kiosk-app"
-        echo "  4. $PWD/kiosk-app"
-        echo "  5. $(dirname "$PWD")/kiosk-app"
-        echo "  6. /opt/kiosk-app"
-        echo "  7. /usr/local/kiosk-app"
-        echo "  8. systemd kiosk.service location"
-        echo ""
-        echo "Debug info:"
-        echo "  Current user: $(whoami)"
-        echo "  Current directory: $PWD"
-        echo "  HOME: $HOME"
-        echo "  Kiosk user exists: $(id "$KIOSK_USER" &>/dev/null && echo 'yes' || echo 'no')"
-        if id "$KIOSK_USER" &>/dev/null; then
-            echo "  Kiosk user home: $(eval echo ~$KIOSK_USER)"
-        fi
-        echo ""
-        echo "Please install the kiosk first (Main Menu > Install Kiosk)"
-        echo "Or run this script from the directory where kiosk-app is located"
-        pause
-        return 1
-    fi
-
-    echo "Found kiosk installation:"
-    echo "  User: $DETECTED_KIOSK_USER"
-    echo "  Directory: $DETECTED_KIOSK_DIR"
-    echo ""
-
-    # Get current version
-    cd "$DETECTED_KIOSK_DIR" || {
-        echo "✗ Cannot access kiosk directory: $DETECTED_KIOSK_DIR"
-        pause
-        return 1
-    }
-
-    echo "Checking current Electron version..."
-    CURRENT_ELECTRON=$(sudo -u "$DETECTED_KIOSK_USER" npm list electron --depth=0 2>/dev/null | grep electron@ | cut -d'@' -f2 | cut -d' ' -f1)
-
-    if [ -z "$CURRENT_ELECTRON" ]; then
-        echo "✗ Could not determine current Electron version"
-        echo "Is Electron installed in $DETECTED_KIOSK_DIR?"
-        pause
-        return 1
-    fi
-
-    echo "Current Electron: v${CURRENT_ELECTRON}"
-    echo ""
-
-    read -p "Check for updates? (y/n): " CHECK_UPDATES
-
-    if [[ ! "$CHECK_UPDATES" =~ ^[Yy]$ ]]; then
-        echo "Update check skipped"
-        pause
-        return 0
-    fi
-
-    echo ""
-    echo "Checking npm registry for latest version..."
-    LATEST_ELECTRON=$(npm view electron version 2>/dev/null)
-
-    if [ -z "$LATEST_ELECTRON" ]; then
-        echo "✗ Could not fetch latest version from npm"
-        echo "Check your internet connection"
-        pause
-        return 1
-    fi
-
-    echo "Latest Electron: v${LATEST_ELECTRON}"
-    echo ""
-
+    
     # Compare versions
     if [ "$CURRENT_ELECTRON" = "$LATEST_ELECTRON" ]; then
-        echo "✓ You are already on the latest version!"
-        pause
-        return 0
-    fi
-
-    # Extract major versions for comparison
-    CURRENT_MAJOR=$(echo "$CURRENT_ELECTRON" | cut -d'.' -f1)
-    LATEST_MAJOR=$(echo "$LATEST_ELECTRON" | cut -d'.' -f1)
-
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    if [ "$LATEST_MAJOR" -gt "$CURRENT_MAJOR" ]; then
+      echo "✓ You are already on the latest version!"
+    else
+      # Extract major versions
+      CURRENT_MAJOR=$(echo "$CURRENT_ELECTRON" | cut -d'.' -f1)
+      LATEST_MAJOR=$(echo "$LATEST_ELECTRON" | cut -d'.' -f1)
+      
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      if [ "$LATEST_MAJOR" -gt "$CURRENT_MAJOR" ]; then
         echo "⚠️  MAJOR VERSION UPDATE"
         echo "This is a major version change (v$CURRENT_MAJOR → v$LATEST_MAJOR)"
         echo "May contain breaking changes!"
@@ -8462,96 +8309,48 @@ manual_electron_update() {
         echo "  • Chromium engine updates"
         echo ""
         echo "Review: https://www.electronjs.org/docs/latest/breaking-changes"
-    else
+      else
         echo "Minor/patch update (v$CURRENT_ELECTRON → v$LATEST_ELECTRON)"
         echo "Should be safe to update"
-    fi
-    echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    echo ""
-
-    read -p "Update to v${LATEST_ELECTRON}? (y/n): " DO_UPDATE
-
-    if [[ ! "$DO_UPDATE" =~ ^[Yy]$ ]]; then
-        echo "Update cancelled"
-        pause
-        return 0
-    fi
-
-    # Create backup before updating
-    echo ""
-    echo "Creating backup..."
-    BACKUP_DIR="${DETECTED_KIOSK_DIR}_backup_$(date +%Y%m%d_%H%M%S)"
-
-    if sudo cp -r "$DETECTED_KIOSK_DIR" "$BACKUP_DIR" 2>/dev/null; then
-        echo "✓ Backup created: $BACKUP_DIR"
-    else
-        echo "⚠ Could not create backup"
-        read -p "Continue anyway? (y/n): " CONTINUE
-        if [[ ! "$CONTINUE" =~ ^[Yy]$ ]]; then
-            echo "Update cancelled"
-            pause
-            return 1
-        fi
-    fi
-
-    echo ""
-    echo "Updating Electron to v${LATEST_ELECTRON}..."
-    echo "This may take 1-2 minutes..."
-    echo ""
-
-    # Perform the update
-    if sudo -u "$DETECTED_KIOSK_USER" npm install "electron@${LATEST_ELECTRON}" --save-exact 2>&1 | tee /tmp/electron-update.log; then
-        # Verify the update
-        echo ""
-        echo "Verifying installation..."
-        NEW_VERSION=$(sudo -u "$DETECTED_KIOSK_USER" npm list electron --depth=0 2>/dev/null | grep electron@ | cut -d'@' -f2 | cut -d' ' -f1)
-
-        if [ "$NEW_VERSION" = "$LATEST_ELECTRON" ]; then
-            echo ""
-            echo "✓ Update successful!"
-            echo "  Old version: v${CURRENT_ELECTRON}"
-            echo "  New version: v${NEW_VERSION}"
-            echo ""
-
-            # Offer to remove backup
-            read -p "Remove backup? (y/n): " REMOVE_BACKUP
-            if [[ "$REMOVE_BACKUP" =~ ^[Yy]$ ]]; then
-                sudo rm -rf "$BACKUP_DIR"
-                echo "✓ Backup removed"
-            else
-                echo "Backup kept at: $BACKUP_DIR"
-            fi
-
-            echo ""
-            read -p "Restart kiosk now? (y/n): " RESTART_NOW
-            if [[ "$RESTART_NOW" =~ ^[Yy]$ ]]; then
-                echo "Restarting kiosk..."
-                sudo systemctl restart lightdm
-            else
-                echo "Restart later with: sudo systemctl restart lightdm"
-            fi
+      fi
+      echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+      echo ""
+      
+      read -p "Update to v${LATEST_ELECTRON}? (y/n): " DO_UPDATE
+      
+      if [[ "$DO_UPDATE" =~ ^[Yy]$ ]]; then
+        echo "Updating to v${LATEST_ELECTRON}..."
+        echo "This takes 1-2 minutes..."
+        
+        cd "$KIOSK_DIR" || exit 1
+        sudo -u "$KIOSK_USER" npm install "electron@${LATEST_ELECTRON}" --save-exact
+        
+        if [ $? -eq 0 ]; then
+          echo "✓ Updated successfully!"
+          echo ""
+          read -p "Restart kiosk now? (y/n): " RESTART_NOW
+          if [[ "$RESTART_NOW" =~ ^[Yy]$ ]]; then
+            echo "Restarting..."
+            sudo systemctl restart lightdm
+          else
+            echo "Restart later with: sudo systemctl restart lightdm"
+          fi
         else
-            echo "⚠ Update completed but version mismatch"
-            echo "  Expected: v${LATEST_ELECTRON}"
-            echo "  Got: v${NEW_VERSION}"
-            echo ""
-            echo "Backup available at: $BACKUP_DIR"
+          echo "✗ Update failed"
         fi
-    else
-        echo ""
-        echo "✗ Update failed!"
-        echo "Check log: /tmp/electron-update.log"
-        echo ""
-        echo "Backup available at: $BACKUP_DIR"
-        echo "To restore: sudo rm -rf $DETECTED_KIOSK_DIR && sudo mv $BACKUP_DIR $DETECTED_KIOSK_DIR"
+      else
+        echo "Update cancelled"
+      fi
     fi
-
-    pause
+  fi
+else
+  echo "Update check skipped"
+fi
 }
 
 system_diagnostics() {
     clear
-    echo " --- SYSTEM DIAGNOSTICS ---"
+    echo " ═══ SYSTEM DIAGNOSTICS ═══"
     echo
     
     echo "=== Kiosk Status ==="
@@ -8572,7 +8371,7 @@ system_diagnostics() {
 
 view_logs() {
     clear
-    echo " --- VIEW LOGS ---"
+    echo " ═══ VIEW LOGS ═══"
     echo
     echo "  1. Electron log (last 50 lines)"
     echo "  2. LightDM log (last 50 lines)"
@@ -8600,7 +8399,7 @@ view_logs() {
 
 factory_reset() {
     echo
-    echo " --- FACTORY RESET ---"
+    echo " ═══ FACTORY RESET ═══"
     echo
     echo "This will reset to default config but keep the system."
     echo
@@ -8635,7 +8434,7 @@ import_config() {
 
 network_test() {
     echo
-    echo " --- NETWORK TEST ---"
+    echo " ═══ NETWORK TEST ═══"
     echo
     echo "Ping test..."
     ping -c 4 8.8.8.8
@@ -8647,7 +8446,7 @@ network_test() {
 
 audio_test() {
     echo
-    echo " --- AUDIO TEST ---"
+    echo " ═══ AUDIO TEST ═══"
     echo
     echo "Testing speaker..."
     speaker-test -t sine -f 1000 -l 1 2>/dev/null || echo "speaker-test not available"
@@ -8663,7 +8462,7 @@ audio_test() {
 
 restart_kiosk_display() {
     clear
-    echo " --- RESTART KIOSK DISPLAY ---"
+    echo " ═══ RESTART KIOSK DISPLAY ═══"
     echo
     echo "This will restart the display (LightDM)."
     echo "All services continue running."
@@ -8680,9 +8479,9 @@ restart_kiosk_display() {
 show_main_menu() {
     while true; do
         clear
-        echo "------------------------------------------------------------"
+        echo "════════════════════════════════════════════════════════════"
         echo "   Ubuntu Based Kiosk (UBK) v${SCRIPT_VERSION}                       "
-        echo "------------------------------------------------------------"
+        echo "════════════════════════════════════════════════════════════"
         echo
         
         show_system_status
@@ -8712,9 +8511,9 @@ show_main_menu() {
 core_menu() {
     while true; do
         clear
-        echo "------------------------------------------------------------"
+        echo "════════════════════════════════════════════════════════════"
         echo "   CORE SETTINGS                                             "
-        echo "------------------------------------------------------------"
+        echo "╚════════════════════════════════════════════════════════════╝"
         echo
         show_current_config
         echo
@@ -8748,9 +8547,9 @@ core_menu() {
 addons_menu() {
     while true; do
         clear
-        echo "------------------------------------------------------------"
+        echo "════════════════════════════════════════════════════════════"
         echo "   ADDONS MANAGEMENT                                             "
-        echo "------------------------------------------------------------"
+        echo "════════════════════════════════════════════════════════════"
         echo
         
         show_addon_status
@@ -8781,9 +8580,9 @@ addons_menu() {
 remote_access_menu() {
     while true; do
         clear
-        echo "------------------------------------------------------------"
+        echo "════════════════════════════════════════════════════════════"
         echo "   REMOTE ACCESS                                             "
-        echo "------------------------------------------------------------"
+        echo "════════════════════════════════════════════════════════════"
         echo
         echo "Options:"
         echo "  1. VNC Remote Desktop"
@@ -8806,7 +8605,7 @@ remote_access_menu() {
 
 audio_diagnostics() {
     clear
-    echo "--- AUDIO DIAGNOSTICS ---"
+    echo "═══ AUDIO DIAGNOSTICS ═══"
     echo
     
     local issue_found=false
@@ -8914,20 +8713,20 @@ audio_diagnostics() {
     fi
     echo
     
-    echo "------------------------------="
+    echo "═══════════════════════════════"
     if $issue_found; then
         echo "⚠️  ISSUES DETECTED - See above"
     else
         echo "✓ All checks passed"
     fi
-    echo "------------------------------="
+    echo "═══════════════════════════════"
     
     pause
 }
 
 fix_squeezelite_audio() {
     clear
-    echo "--- FIX SQUEEZELITE AUDIO ---"
+    echo "╔══ FIX SQUEEZELITE AUDIO ══╗"
     echo
     
     echo "This will attempt to fix Squeezelite audio issues by:"
@@ -8989,9 +8788,9 @@ fix_squeezelite_audio() {
 advanced_menu() {
     while true; do
         clear
-        echo "---------------------------------------------------------="
+        echo "══════════════════════════════════════════════════════════"
         echo "   ADVANCED OPTIONS                                          "
-        echo "---------------------------------------------------------="
+        echo "══════════════════════════════════════════════════════════"
         echo
         
         echo "Options:"
