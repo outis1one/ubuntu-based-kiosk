@@ -1,0 +1,156 @@
+################################################################################
+# MANUAL FIX FOR PAUSE BUTTON ISSUES
+# Use this if the automated update didn't work
+################################################################################
+
+ISSUE: Pause button not appearing on rotation sites
+
+CAUSE: The pause button code might not be properly set up
+
+SOLUTION: Manually verify/fix these sections in your kiosk files
+
+================================================================================
+FIX 1: In main.js - Find the attachView function
+================================================================================
+
+SEARCH FOR (around line 3735):
+    // Control pause button visibility based on site duration
+
+REPLACE THE NEXT 3-4 LINES WITH:
+    // Control pause button visibility based on site duration
+    // Show on rotation sites (duration > 0), hide on manual sites (duration = 0)
+    const siteDuration=parseInt(tabs[tabIdx].duration)||0;
+    const shouldShow=siteDuration>0;
+    console.log('[MAIN] Sending pause-button-visibility to tab '+tabIdx+' ('+tabs[tabIdx].url+') - duration='+siteDuration+'s, shouldShow='+shouldShow);
+    views[i].webContents.send('pause-button-visibility',shouldShow);
+
+VERIFY: shouldShow=siteDuration>0 (NOT ===0 and NOT !==0)
+
+================================================================================
+FIX 2: In preload.js - Add pause button hide timer variables
+================================================================================
+
+SEARCH FOR (around line 5151):
+  let pauseButton=null;
+  let pauseButtonShouldShow=false;
+  let pauseButtonShown=false;
+
+MAKE SURE IT INCLUDES THESE TWO LINES:
+  let pauseButtonHideTimer=null;
+  const PAUSE_BUTTON_HIDE_DELAY=5000; // Hide after 5 seconds of inactivity
+
+================================================================================
+FIX 3: In preload.js - Update showPauseButton function
+================================================================================
+
+SEARCH FOR:
+  function showPauseButton(){
+
+REPLACE ENTIRE FUNCTION WITH:
+  function showPauseButton(){
+    if(!pauseButton)createPauseButton();
+    pauseButton.style.display='flex';
+    pauseButtonShown=true;
+
+    // Clear existing hide timer
+    if(pauseButtonHideTimer){
+      clearTimeout(pauseButtonHideTimer);
+      pauseButtonHideTimer=null;
+    }
+
+    // Set new hide timer - button will auto-hide after inactivity
+    pauseButtonHideTimer=setTimeout(()=>{
+      console.log('[PAUSE-BTN] Auto-hiding after '+PAUSE_BUTTON_HIDE_DELAY+'ms inactivity');
+      hidePauseButton();
+    },PAUSE_BUTTON_HIDE_DELAY);
+  }
+
+================================================================================
+FIX 4: In preload.js - Update hidePauseButton function
+================================================================================
+
+SEARCH FOR:
+  function hidePauseButton(){
+
+REPLACE ENTIRE FUNCTION WITH:
+  function hidePauseButton(){
+    if(pauseButtonHideTimer){
+      clearTimeout(pauseButtonHideTimer);
+      pauseButtonHideTimer=null;
+    }
+    if(pauseButton){
+      pauseButton.style.display='none';
+      pauseButtonShown=false;
+    }
+  }
+
+================================================================================
+FIX 5: In preload.js - Update handleUserInteraction function
+================================================================================
+
+SEARCH FOR:
+  function handleUserInteraction
+
+REPLACE WITH THIS VERSION (note the eventType parameter):
+  function handleUserInteraction(eventType){
+    const now=Date.now();
+    if(now-lastUserInteraction<USER_INTERACTION_THROTTLE)return;
+    lastUserInteraction=now;
+
+    console.log('[PAUSE-BTN] User interaction ('+eventType+') - shouldShow='+pauseButtonShouldShow+', shown='+pauseButtonShown);
+    // Show/refresh pause button if allowed on this site
+    if(pauseButtonShouldShow){
+      if(!pauseButtonShown){
+        console.log('[PAUSE-BTN] Showing pause button now');
+      }else{
+        console.log('[PAUSE-BTN] Resetting auto-hide timer');
+      }
+      showPauseButton(); // This will reset the hide timer
+    }
+  }
+
+================================================================================
+FIX 6: In preload.js - Update event listener registration
+================================================================================
+
+SEARCH FOR:
+  const pauseButtonTriggers=['mousedown','touchstart','keydown'];
+  pauseButtonTriggers.forEach(eventType=>{
+    document.addEventListener(eventType,handleUserInteraction,{passive:true,capture:true});
+  });
+
+REPLACE WITH (note the arrow function that passes eventType):
+  const pauseButtonTriggers=['mousedown','touchstart','keydown'];
+  pauseButtonTriggers.forEach(eventType=>{
+    document.addEventListener(eventType,()=>handleUserInteraction(eventType),{passive:true,capture:true});
+  });
+
+================================================================================
+AFTER MAKING CHANGES:
+================================================================================
+
+1. Save all files
+2. Restart kiosk: sudo systemctl restart kiosk
+3. Open DevTools console (if enabled) or check logs
+4. Look for these messages:
+   - [MAIN] Sending pause-button-visibility to tab X - duration=15s, shouldShow=true
+   - [PAUSE-BTN] Visibility update: shouldShow=true
+   - [PAUSE-BTN] User interaction (mousedown) - shouldShow=true, shown=false
+   - [PAUSE-BTN] Showing pause button now
+
+5. On rotation sites (15s duration), click/touch the screen
+6. Pause button should appear and auto-hide after 5 seconds
+7. On manual sites (0 duration), pause button should NOT appear
+
+================================================================================
+SIMPLER ALTERNATIVE: Full Reinstall
+================================================================================
+
+If manual editing is too complex, run:
+
+  cd /home/user/ubk
+  bash install_kiosk_0.9.2.sh
+
+And choose "Full Reinstall" from the Core Settings menu.
+This will apply all fixes automatically.
+

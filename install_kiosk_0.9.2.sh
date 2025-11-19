@@ -3631,7 +3631,17 @@ function startMasterTimer(){
     if(homeTabIndex>=0&&!showingHidden){
       const homeViewIdx=getHomeViewIndex();
       const currentTabIdx=viewIndexToTabIndex(currentIndex);
-      
+
+      // ONLY show inactivity prompt on manual sites (duration=0)
+      // Rotation sites handle their own timing and should NOT show inactivity prompt
+      if(currentTabIdx>=0&&tabs[currentTabIdx]){
+        const currentSiteDuration=parseInt(tabs[currentTabIdx].duration)||0;
+        if(currentSiteDuration>0){
+          // Rotation site - skip return-to-home logic (uses auto-rotation instead)
+          return;
+        }
+      }
+
       if(homeViewIdx>=0&&currentIndex!==homeViewIdx){
         const idleTime=now-lastUserInteraction;
         
@@ -3736,6 +3746,7 @@ function attachView(i){
     // Show on rotation sites (duration > 0), hide on manual sites (duration = 0)
     const siteDuration=parseInt(tabs[tabIdx].duration)||0;
     const shouldShow=siteDuration>0;
+    console.log('[MAIN] Sending pause-button-visibility to tab '+tabIdx+' ('+tabs[tabIdx].url+') - duration='+siteDuration+'s, shouldShow='+shouldShow);
     views[i].webContents.send('pause-button-visibility',shouldShow);
   }
 
@@ -5040,6 +5051,82 @@ contextBridge.exposeInMainWorld('electronAPI',{
   showPauseDialog:()=>ipcRenderer.send('show-pause-dialog')
 });
 
+// Pause button state (MUST be outside DOMContentLoaded to persist across page loads)
+let pauseButton=null;
+let pauseButtonShouldShow=false;
+let pauseButtonShown=false;
+let pauseButtonHideTimer=null;
+const PAUSE_BUTTON_HIDE_DELAY=5000; // Hide after 5 seconds of inactivity
+
+// Pause button functions (must be outside DOMContentLoaded for IPC listener)
+function createPauseButton(){
+  if(pauseButton)return;
+
+  pauseButton=document.createElement('div');
+  pauseButton.id='electron-pause-button';
+  pauseButton.innerHTML='<div style="display:flex;gap:4px;"><div style="width:6px;height:24px;background:white;border-radius:2px;"></div><div style="width:6px;height:24px;background:white;border-radius:2px;"></div></div>';
+  pauseButton.title='Pause rotation';
+  pauseButton.style.cssText=`
+    position:fixed;bottom:20px;left:20px;width:60px;height:60px;
+    background:rgba(230,126,34,0.95);border:3px solid rgba(255,255,255,0.9);
+    border-radius:50%;display:none;align-items:center;justify-content:center;
+    font-size:32px;cursor:pointer;z-index:999999;
+    box-shadow:0 4px 12px rgba(0,0,0,0.4);user-select:none;
+  `;
+
+  pauseButton.addEventListener('click',(e)=>{
+    e.preventDefault();
+    e.stopPropagation();
+    ipcRenderer.send('show-pause-dialog');
+  });
+
+  document.body.appendChild(pauseButton);
+}
+
+function showPauseButton(){
+  if(!pauseButton)createPauseButton();
+  pauseButton.style.display='flex';
+  pauseButtonShown=true;
+
+  // Clear existing hide timer
+  if(pauseButtonHideTimer){
+    clearTimeout(pauseButtonHideTimer);
+    pauseButtonHideTimer=null;
+  }
+
+  // Set new hide timer - button will auto-hide after inactivity
+  pauseButtonHideTimer=setTimeout(()=>{
+    console.log('[PAUSE-BTN] Auto-hiding after '+PAUSE_BUTTON_HIDE_DELAY+'ms inactivity');
+    hidePauseButton();
+  },PAUSE_BUTTON_HIDE_DELAY);
+}
+
+function hidePauseButton(){
+  if(pauseButtonHideTimer){
+    clearTimeout(pauseButtonHideTimer);
+    pauseButtonHideTimer=null;
+  }
+  if(pauseButton){
+    pauseButton.style.display='none';
+    pauseButtonShown=false;
+  }
+}
+
+// Listen for pause button visibility control from main process
+// CRITICAL: This must be outside DOMContentLoaded so it doesn't reset on page load
+ipcRenderer.on('pause-button-visibility',(event,shouldShow)=>{
+  console.log('[PAUSE-BTN] Visibility update: shouldShow='+shouldShow);
+  pauseButtonShouldShow=shouldShow;
+  if(!shouldShow){
+    // If button should not show on this site, hide it immediately
+    console.log('[PAUSE-BTN] Hiding button (manual site)');
+    hidePauseButton();
+  }else{
+    console.log('[PAUSE-BTN] Button enabled - will show on user interaction');
+  }
+  // If shouldShow is true, button will appear on user interaction
+});
+
 window.addEventListener('DOMContentLoaded',()=>{
   document.addEventListener('contextmenu',e=>e.preventDefault());
   
@@ -5137,78 +5224,32 @@ window.addEventListener('DOMContentLoaded',()=>{
     if(keyboardIcon)keyboardIcon.style.display='none';
   }
 
-  // Pause button functionality
-  let pauseButton=null;
-  let pauseButtonShouldShow=false;
-  let pauseButtonShown=false;
-
-  function createPauseButton(){
-    if(pauseButton)return;
-
-    pauseButton=document.createElement('div');
-    pauseButton.id='electron-pause-button';
-    pauseButton.innerHTML='<div style="display:flex;gap:4px;"><div style="width:6px;height:24px;background:white;border-radius:2px;"></div><div style="width:6px;height:24px;background:white;border-radius:2px;"></div></div>';
-    pauseButton.title='Pause rotation';
-    pauseButton.style.cssText=`
-      position:fixed;bottom:20px;left:20px;width:60px;height:60px;
-      background:rgba(230,126,34,0.95);border:3px solid rgba(255,255,255,0.9);
-      border-radius:50%;display:none;align-items:center;justify-content:center;
-      font-size:32px;cursor:pointer;z-index:999999;
-      box-shadow:0 4px 12px rgba(0,0,0,0.4);user-select:none;
-    `;
-
-    pauseButton.addEventListener('click',(e)=>{
-      e.preventDefault();
-      e.stopPropagation();
-      ipcRenderer.send('show-pause-dialog');
-    });
-
-    document.body.appendChild(pauseButton);
-  }
-
-  function showPauseButton(){
-    if(!pauseButton)createPauseButton();
-    pauseButton.style.display='flex';
-    pauseButtonShown=true;
-  }
-
-  function hidePauseButton(){
-    if(pauseButton){
-      pauseButton.style.display='none';
-      pauseButtonShown=false;
-    }
-  }
-
-  // Listen for pause button visibility control from main process
-  // Main process controls whether button should be available on this site
-  ipcRenderer.on('pause-button-visibility',(event,shouldShow)=>{
-    pauseButtonShouldShow=shouldShow;
-    if(!shouldShow){
-      // If button should not show on this site, hide it immediately
-      hidePauseButton();
-    }
-    // If shouldShow is true, button will appear on user interaction
-  });
-
+  // Pause button user interaction handler
   // Show pause button on user interaction (only if allowed on this site)
   let lastUserInteraction=0;
   const USER_INTERACTION_THROTTLE=100;
 
-  function handleUserInteraction(){
+  function handleUserInteraction(eventType){
     const now=Date.now();
     if(now-lastUserInteraction<USER_INTERACTION_THROTTLE)return;
     lastUserInteraction=now;
 
-    // Only show if this site allows pause button and it's not already shown
-    if(pauseButtonShouldShow&&!pauseButtonShown){
-      showPauseButton();
+    console.log('[PAUSE-BTN] User interaction ('+eventType+') - shouldShow='+pauseButtonShouldShow+', shown='+pauseButtonShown);
+    // Show/refresh pause button if allowed on this site
+    if(pauseButtonShouldShow){
+      if(!pauseButtonShown){
+        console.log('[PAUSE-BTN] Showing pause button now');
+      }else{
+        console.log('[PAUSE-BTN] Resetting auto-hide timer');
+      }
+      showPauseButton(); // This will reset the hide timer
     }
   }
 
   // Show pause button on any user interaction
   const pauseButtonTriggers=['mousedown','touchstart','keydown'];
   pauseButtonTriggers.forEach(eventType=>{
-    document.addEventListener(eventType,handleUserInteraction,{passive:true,capture:true});
+    document.addEventListener(eventType,()=>handleUserInteraction(eventType),{passive:true,capture:true});
   });
 
   function isTextInput(el){
@@ -5397,14 +5438,16 @@ xset dpms force on
         on_mins=$(( 10#$(echo "$don" | cut -d: -f1) * 60 + 10#$(echo "$don" | cut -d: -f2) ))
 
         # Check if we're in the "display off" window
-        if [[ $off_mins -lt $on_mins ]]; then
-          # Normal case: off time is before on time (e.g., 22:00 to 06:00 next day)
-          if [[ $current_mins -ge $off_mins && $current_mins -lt $on_mins ]]; then
+        if [[ $off_mins -gt $on_mins ]]; then
+          # Overnight case: off time is after on time (e.g., turn off at 22:00, on at 06:00)
+          # Display is OFF from off_mins to midnight AND from midnight to on_mins
+          if [[ $current_mins -ge $off_mins || $current_mins -lt $on_mins ]]; then
             schedule_active=true
           fi
         else
-          # Overnight case: off time is after on time (e.g., 06:00 to 22:00)
-          if [[ $current_mins -ge $off_mins || $current_mins -lt $on_mins ]]; then
+          # Same-day case: off time is before on time (e.g., turn off at 08:00, on at 17:00)
+          # Display is OFF from off_mins to on_mins
+          if [[ $current_mins -ge $off_mins && $current_mins -lt $on_mins ]]; then
             schedule_active=true
           fi
         fi
@@ -8255,7 +8298,7 @@ manual_electron_update() {
     # Method 1: Check if default kiosk user exists and has kiosk-app
     if id "$KIOSK_USER" &>/dev/null; then
         local kiosk_home=$(eval echo ~$KIOSK_USER)
-        if [ -d "$kiosk_home/kiosk-app" ]; then
+        if [ -d "$kiosk_home/kiosk-app" ] && [ -f "$kiosk_home/kiosk-app/main.js" ]; then
             DETECTED_KIOSK_USER="$KIOSK_USER"
             DETECTED_KIOSK_DIR="$kiosk_home/kiosk-app"
         fi
@@ -8291,9 +8334,32 @@ manual_electron_update() {
 
     # Method 5: Check parent directory
     if [ -z "$DETECTED_KIOSK_DIR" ]; then
-        if [ -f "$(dirname "$PWD")/kiosk-app/main.js" ]; then
+        local parent_dir="$(dirname "$PWD")"
+        if [ -f "$parent_dir/kiosk-app/main.js" ]; then
             DETECTED_KIOSK_USER=$(whoami)
-            DETECTED_KIOSK_DIR="$(dirname "$PWD")/kiosk-app"
+            DETECTED_KIOSK_DIR="$parent_dir/kiosk-app"
+        fi
+    fi
+
+    # Method 6: Check common system locations
+    if [ -z "$DETECTED_KIOSK_DIR" ]; then
+        for sys_dir in /opt/kiosk-app /usr/local/kiosk-app; do
+            if [ -f "$sys_dir/main.js" ]; then
+                DETECTED_KIOSK_USER=$(whoami)
+                DETECTED_KIOSK_DIR="$sys_dir"
+                break
+            fi
+        done
+    fi
+
+    # Method 7: Use systemd service to find kiosk directory
+    if [ -z "$DETECTED_KIOSK_DIR" ]; then
+        if systemctl list-units --all kiosk.service | grep -q kiosk.service; then
+            local service_dir=$(systemctl show -p WorkingDirectory kiosk.service 2>/dev/null | cut -d= -f2)
+            if [ -n "$service_dir" ] && [ -f "$service_dir/main.js" ]; then
+                DETECTED_KIOSK_USER=$(systemctl show -p User kiosk.service 2>/dev/null | cut -d= -f2)
+                DETECTED_KIOSK_DIR="$service_dir"
+            fi
         fi
     fi
 
@@ -8302,18 +8368,26 @@ manual_electron_update() {
         echo "✗ Kiosk installation not found!"
         echo ""
         echo "Searched locations:"
-        echo "  - /home/$KIOSK_USER/kiosk-app"
-        echo "  - /home/*/kiosk-app"
-        echo "  - $HOME/kiosk-app"
-        echo "  - $PWD/kiosk-app"
-        echo "  - $(dirname "$PWD")/kiosk-app"
+        echo "  1. /home/$KIOSK_USER/kiosk-app"
+        echo "  2. /home/*/kiosk-app (all users)"
+        echo "  3. $HOME/kiosk-app"
+        echo "  4. $PWD/kiosk-app"
+        echo "  5. $(dirname "$PWD")/kiosk-app"
+        echo "  6. /opt/kiosk-app"
+        echo "  7. /usr/local/kiosk-app"
+        echo "  8. systemd kiosk.service location"
         echo ""
         echo "Debug info:"
         echo "  Current user: $(whoami)"
         echo "  Current directory: $PWD"
+        echo "  HOME: $HOME"
         echo "  Kiosk user exists: $(id "$KIOSK_USER" &>/dev/null && echo 'yes' || echo 'no')"
+        if id "$KIOSK_USER" &>/dev/null; then
+            echo "  Kiosk user home: $(eval echo ~$KIOSK_USER)"
+        fi
         echo ""
         echo "Please install the kiosk first (Main Menu > Install Kiosk)"
+        echo "Or run this script from the directory where kiosk-app is located"
         pause
         return 1
     fi
