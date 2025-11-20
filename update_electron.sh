@@ -55,7 +55,8 @@ find_kiosk_dir() {
     # Method 1: Check default kiosk user home
     if id "$KIOSK_USER" &>/dev/null; then
         local kiosk_home=$(eval echo ~$KIOSK_USER)
-        if [ -f "$kiosk_home/kiosk-app/main.js" ]; then
+        # Use sudo to check file since /home/kiosk may have restricted permissions
+        if sudo test -f "$kiosk_home/kiosk-app/main.js" 2>/dev/null; then
             DETECTED_DIR="$kiosk_home/kiosk-app"
         fi
     fi
@@ -63,7 +64,8 @@ find_kiosk_dir() {
     # Method 2: Search all /home directories
     if [ -z "$DETECTED_DIR" ]; then
         for user_home in /home/*; do
-            if [ -f "$user_home/kiosk-app/main.js" ]; then
+            # Use sudo to check file in case of restricted permissions
+            if sudo test -f "$user_home/kiosk-app/main.js" 2>/dev/null; then
                 DETECTED_DIR="$user_home/kiosk-app"
                 break
             fi
@@ -74,8 +76,20 @@ find_kiosk_dir() {
     if [ -z "$DETECTED_DIR" ]; then
         if systemctl list-units --all kiosk.service 2>/dev/null | grep -q kiosk.service; then
             local service_dir=$(systemctl show -p WorkingDirectory kiosk.service 2>/dev/null | cut -d= -f2)
-            if [ -n "$service_dir" ] && [ -f "$service_dir/main.js" ]; then
+            if [ -n "$service_dir" ] && sudo test -f "$service_dir/main.js" 2>/dev/null; then
                 DETECTED_DIR="$service_dir"
+            fi
+        fi
+    fi
+
+    # Method 4: Check for running electron process
+    if [ -z "$DETECTED_DIR" ]; then
+        local electron_path=$(ps aux | grep -E "electron.*main.js" | grep -v grep | head -1 | awk '{for(i=11;i<=NF;i++) if($i ~ /^\//) {print $i; exit}}')
+        if [ -n "$electron_path" ]; then
+            # Extract directory from electron path (e.g., /home/kiosk/kiosk-app/node_modules/electron/dist/electron -> /home/kiosk/kiosk-app)
+            local app_dir=$(echo "$electron_path" | sed 's|/node_modules/electron.*||')
+            if [ -n "$app_dir" ] && sudo test -f "$app_dir/main.js" 2>/dev/null; then
+                DETECTED_DIR="$app_dir"
             fi
         fi
     fi
@@ -91,19 +105,19 @@ get_current_electron_version() {
     local kiosk_dir="$1"
     local package_json="$kiosk_dir/package.json"
 
-    if [ ! -f "$package_json" ]; then
+    if ! sudo test -f "$package_json" 2>/dev/null; then
         echo "unknown"
         return 1
     fi
 
-    # Try to get version from package.json
-    local version=$(grep -oP '"electron"\s*:\s*"\^?\K[0-9.]+' "$package_json" 2>/dev/null || echo "")
+    # Try to get version from package.json (use sudo to read)
+    local version=$(sudo grep -oP '"electron"\s*:\s*"\^?\K[0-9.]+' "$package_json" 2>/dev/null || echo "")
 
     if [ -z "$version" ]; then
         # Try to get from installed node_modules
         local electron_pkg="$kiosk_dir/node_modules/electron/package.json"
-        if [ -f "$electron_pkg" ]; then
-            version=$(grep -oP '"version"\s*:\s*"\K[0-9.]+' "$electron_pkg" 2>/dev/null || echo "unknown")
+        if sudo test -f "$electron_pkg" 2>/dev/null; then
+            version=$(sudo grep -oP '"version"\s*:\s*"\K[0-9.]+' "$electron_pkg" 2>/dev/null || echo "unknown")
         else
             version="not installed"
         fi
@@ -131,7 +145,7 @@ check_electron_running() {
 ################################################################################
 
 get_latest_electron_version() {
-    log_info "Fetching latest stable Electron version from npm..."
+    log_info "Fetching latest stable Electron version from npm..." >&2
 
     # Try multiple methods to get the latest version
     local version=""
@@ -150,7 +164,7 @@ get_latest_electron_version() {
     fi
 
     if [ -z "$version" ]; then
-        log_error "Failed to fetch latest Electron version"
+        log_error "Failed to fetch latest Electron version" >&2
         echo "unknown"
         return 1
     fi
@@ -164,34 +178,35 @@ get_latest_electron_version() {
 
 create_backup() {
     local kiosk_dir="$1"
+    local kiosk_owner=$(sudo stat -c '%U' "$kiosk_dir")
     local timestamp=$(date +%Y%m%d_%H%M%S)
     BACKUP_DIR="${kiosk_dir}/backups/electron_backup_${timestamp}"
 
     log_info "Creating backup..."
 
     # Create backup directory
-    mkdir -p "$BACKUP_DIR"
+    sudo -u "$kiosk_owner" mkdir -p "$BACKUP_DIR"
 
     # Backup package.json and package-lock.json
-    if [ -f "$kiosk_dir/package.json" ]; then
-        cp "$kiosk_dir/package.json" "$BACKUP_DIR/"
+    if sudo test -f "$kiosk_dir/package.json" 2>/dev/null; then
+        sudo -u "$kiosk_owner" cp "$kiosk_dir/package.json" "$BACKUP_DIR/"
         log_success "Backed up package.json"
     fi
 
-    if [ -f "$kiosk_dir/package-lock.json" ]; then
-        cp "$kiosk_dir/package-lock.json" "$BACKUP_DIR/"
+    if sudo test -f "$kiosk_dir/package-lock.json" 2>/dev/null; then
+        sudo -u "$kiosk_owner" cp "$kiosk_dir/package-lock.json" "$BACKUP_DIR/"
         log_success "Backed up package-lock.json"
     fi
 
     # Create a list of installed packages
-    if [ -d "$kiosk_dir/node_modules" ]; then
-        ls -1 "$kiosk_dir/node_modules" > "$BACKUP_DIR/installed_packages.txt"
+    if sudo test -d "$kiosk_dir/node_modules" 2>/dev/null; then
+        sudo -u "$kiosk_owner" bash -c "ls -1 '$kiosk_dir/node_modules' > '$BACKUP_DIR/installed_packages.txt'"
         log_success "Created list of installed packages"
     fi
 
     # Save current Electron version
     local current_version=$(get_current_electron_version "$kiosk_dir")
-    echo "$current_version" > "$BACKUP_DIR/electron_version.txt"
+    echo "$current_version" | sudo -u "$kiosk_owner" tee "$BACKUP_DIR/electron_version.txt" > /dev/null
 
     log_success "Backup created at: $BACKUP_DIR"
 }
@@ -239,8 +254,8 @@ update_electron() {
     local target_version="$2"
     local kiosk_owner="$3"
 
-    log_info "Stopping kiosk service..."
-    sudo systemctl stop kiosk || true
+    log_info "Stopping kiosk display..."
+    sudo systemctl stop lightdm || true
     sleep 2
 
     log_info "Updating Electron to version $target_version..."
@@ -249,21 +264,20 @@ update_electron() {
     sudo -u "$kiosk_owner" sed -i "s/\"electron\": \".*\"/\"electron\": \"^$target_version\"/" "$kiosk_dir/package.json"
 
     # Remove old electron installation
-    if [ -d "$kiosk_dir/node_modules/electron" ]; then
+    if sudo test -d "$kiosk_dir/node_modules/electron" 2>/dev/null; then
         log_info "Removing old Electron installation..."
         sudo -u "$kiosk_owner" rm -rf "$kiosk_dir/node_modules/electron"
     fi
 
     # Install new version
     log_info "Installing Electron $target_version (this may take a few minutes)..."
-    cd "$kiosk_dir"
 
-    if sudo -u "$kiosk_owner" npm install electron@"$target_version" 2>&1 | tee /tmp/electron_install.log; then
+    if sudo -u "$kiosk_owner" bash -c "cd '$kiosk_dir' && npm install electron@'$target_version'" 2>&1 | tee /tmp/electron_install.log; then
         log_success "Electron updated successfully to version $target_version"
 
         # Fix chrome-sandbox permissions
         local sandbox="$kiosk_dir/node_modules/electron/dist/chrome-sandbox"
-        if [ -f "$sandbox" ]; then
+        if sudo test -f "$sandbox" 2>/dev/null; then
             sudo chown root:root "$sandbox"
             sudo chmod 4755 "$sandbox"
             log_success "Fixed chrome-sandbox permissions"
@@ -284,10 +298,11 @@ update_electron() {
 main() {
     print_header "Electron Update Script for UBK"
 
-    # Check if running as root or with sudo
-    if [ "$EUID" -ne 0 ]; then
-        log_error "This script must be run with sudo"
-        echo "Usage: sudo $0"
+    # Verify not running as root
+    if [ "$EUID" -eq 0 ]; then
+        log_error "Do not run this script with sudo"
+        echo "Run as regular user: ./$0"
+        echo "The script will prompt for sudo when needed for specific commands"
         exit 1
     fi
 
@@ -419,26 +434,26 @@ main() {
         log_success "Electron updated from $CURRENT_VERSION to $NEW_VERSION"
         echo ""
 
-        # Restart kiosk
-        read -p "Restart kiosk service now? (y/n): " -n 1 -r
+        # Restart kiosk display
+        read -p "Restart kiosk display now? (y/n): " -n 1 -r
         echo
         if [[ $REPLY =~ ^[Yy]$ ]]; then
-            log_info "Restarting kiosk service..."
-            sudo systemctl start kiosk
+            log_info "Restarting kiosk display..."
+            sudo systemctl start lightdm
             sleep 3
 
-            if systemctl is-active --quiet kiosk; then
-                log_success "Kiosk service started successfully"
+            if systemctl is-active --quiet lightdm; then
+                log_success "Kiosk display started successfully"
             else
-                log_error "Kiosk service failed to start"
-                log_error "Check logs with: sudo journalctl -u kiosk -n 50"
+                log_error "Kiosk display failed to start"
+                log_error "Check logs with: sudo journalctl -u lightdm -n 50"
                 echo ""
                 log_warning "You may need to restore from backup"
                 show_restore_instructions "$BACKUP_DIR"
             fi
         else
-            log_info "Kiosk service not started"
-            log_info "Start manually with: sudo systemctl start kiosk"
+            log_info "Kiosk display not started"
+            log_info "Start manually with: sudo systemctl start lightdm"
         fi
 
         echo ""
@@ -460,14 +475,13 @@ main() {
 
         # Reinstall original version
         log_info "Reinstalling original Electron version..."
-        cd "$KIOSK_DIR"
-        if sudo -u "$KIOSK_OWNER" npm install; then
+        if sudo -u "$KIOSK_OWNER" bash -c "cd '$KIOSK_DIR' && npm install"; then
             log_success "Restored original Electron installation"
 
-            # Restart kiosk
-            log_info "Restarting kiosk service..."
-            sudo systemctl start kiosk
-            log_success "Kiosk service restarted"
+            # Restart kiosk display
+            log_info "Restarting kiosk display..."
+            sudo systemctl start lightdm
+            log_success "Kiosk display restarted"
         else
             log_error "Failed to restore original installation"
             log_error "Manual intervention required"
