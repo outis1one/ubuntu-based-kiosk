@@ -8343,7 +8343,7 @@ manual_electron_update() {
 
     # Function to get latest electron version
     get_latest_electron_version_local() {
-        log_info "Fetching latest stable Electron version from npm..."
+        log_info "Fetching latest stable Electron version from npm..." >&2
 
         local version=""
 
@@ -8472,24 +8472,25 @@ manual_electron_update() {
     # Create backup
     echo ""
     log_info "Creating backup..."
+    local kiosk_owner=$(sudo stat -c '%U' "$KIOSK_DIR")
     local timestamp=$(date +%Y%m%d_%H%M%S)
     local backup_dir="${KIOSK_DIR}/backups/electron_backup_${timestamp}"
 
-    mkdir -p "$backup_dir"
+    sudo -u "$kiosk_owner" mkdir -p "$backup_dir"
 
     # Backup package.json and package-lock.json
-    if [ -f "$KIOSK_DIR/package.json" ]; then
-        cp "$KIOSK_DIR/package.json" "$backup_dir/"
+    if sudo test -f "$KIOSK_DIR/package.json" 2>/dev/null; then
+        sudo -u "$kiosk_owner" cp "$KIOSK_DIR/package.json" "$backup_dir/"
         log_success "Backed up package.json"
     fi
 
-    if [ -f "$KIOSK_DIR/package-lock.json" ]; then
-        cp "$KIOSK_DIR/package-lock.json" "$backup_dir/"
+    if sudo test -f "$KIOSK_DIR/package-lock.json" 2>/dev/null; then
+        sudo -u "$kiosk_owner" cp "$KIOSK_DIR/package-lock.json" "$backup_dir/"
         log_success "Backed up package-lock.json"
     fi
 
     # Save current Electron version
-    echo "$CURRENT_VERSION" > "$backup_dir/electron_version.txt"
+    echo "$CURRENT_VERSION" | sudo -u "$kiosk_owner" tee "$backup_dir/electron_version.txt" > /dev/null
     log_success "Backup created at: $backup_dir"
     echo ""
 

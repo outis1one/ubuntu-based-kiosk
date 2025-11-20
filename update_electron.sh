@@ -145,7 +145,7 @@ check_electron_running() {
 ################################################################################
 
 get_latest_electron_version() {
-    log_info "Fetching latest stable Electron version from npm..."
+    log_info "Fetching latest stable Electron version from npm..." >&2
 
     # Try multiple methods to get the latest version
     local version=""
@@ -164,7 +164,7 @@ get_latest_electron_version() {
     fi
 
     if [ -z "$version" ]; then
-        log_error "Failed to fetch latest Electron version"
+        log_error "Failed to fetch latest Electron version" >&2
         echo "unknown"
         return 1
     fi
@@ -178,7 +178,7 @@ get_latest_electron_version() {
 
 create_backup() {
     local kiosk_dir="$1"
-    local kiosk_owner=$(stat -c '%U' "$kiosk_dir")
+    local kiosk_owner=$(sudo stat -c '%U' "$kiosk_dir")
     local timestamp=$(date +%Y%m%d_%H%M%S)
     BACKUP_DIR="${kiosk_dir}/backups/electron_backup_${timestamp}"
 
@@ -188,18 +188,18 @@ create_backup() {
     sudo -u "$kiosk_owner" mkdir -p "$BACKUP_DIR"
 
     # Backup package.json and package-lock.json
-    if [ -f "$kiosk_dir/package.json" ]; then
+    if sudo test -f "$kiosk_dir/package.json" 2>/dev/null; then
         sudo -u "$kiosk_owner" cp "$kiosk_dir/package.json" "$BACKUP_DIR/"
         log_success "Backed up package.json"
     fi
 
-    if [ -f "$kiosk_dir/package-lock.json" ]; then
+    if sudo test -f "$kiosk_dir/package-lock.json" 2>/dev/null; then
         sudo -u "$kiosk_owner" cp "$kiosk_dir/package-lock.json" "$BACKUP_DIR/"
         log_success "Backed up package-lock.json"
     fi
 
     # Create a list of installed packages
-    if [ -d "$kiosk_dir/node_modules" ]; then
+    if sudo test -d "$kiosk_dir/node_modules" 2>/dev/null; then
         sudo -u "$kiosk_owner" bash -c "ls -1 '$kiosk_dir/node_modules' > '$BACKUP_DIR/installed_packages.txt'"
         log_success "Created list of installed packages"
     fi
