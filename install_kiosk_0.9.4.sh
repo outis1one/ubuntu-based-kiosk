@@ -3893,6 +3893,7 @@ function startMasterTimer(){
       if(idleTime>KEYBOARD_AUTO_CLOSE){
         keyboardClosePending=true;
         closeHTMLKeyboard();
+      }
     }
 
     // 1.5. LOCKOUT TIMER CHECK
@@ -3907,9 +3908,7 @@ function startMasterTimer(){
         showLockoutScreen();
       }
     }
-      }
-    }
-    
+
     // 2. MEDIA CHECK
     if(now-lastMediaCheck>MEDIA_CHECK_INTERVAL){
       checkMediaPlayback();
@@ -5599,7 +5598,6 @@ window.addEventListener('DOMContentLoaded',()=>{
     if(!keyboardButtonEnabled)return;
     if(!keyboardIcon)createKeyboardIcon();
     if(keyboardIcon)keyboardIcon.style.display='flex';
-    keyboardIcon.style.display='flex';
   }
   
   function hideKeyboardIcon(){
