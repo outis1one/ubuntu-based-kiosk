@@ -8313,38 +8313,75 @@ manual_electron_update() {
     echo "═══ MANUAL ELECTRON UPDATE ═══"
     echo ""
 
-    # Verify kiosk directory exists
-    if [[ ! -d "$KIOSK_DIR" ]]; then
-        log_error "Kiosk directory not found: $KIOSK_DIR"
+    # Find the actual kiosk installation (search multiple locations)
+    echo "Searching for kiosk installation..."
+    ACTUAL_KIOSK_DIR=""
+
+    # Try multiple possible locations
+    for dir in "$KIOSK_DIR" "/home/*/kiosk-app" "/home/kiosk/kiosk-app" "/opt/kiosk-app" "$HOME/kiosk-app"; do
+        # Expand wildcards
+        for expanded_dir in $dir; do
+            if [[ -d "$expanded_dir" ]] && [[ -f "$expanded_dir/package.json" ]]; then
+                # Verify it's actually our kiosk by checking for electron dependency
+                if grep -q "electron" "$expanded_dir/package.json" 2>/dev/null; then
+                    ACTUAL_KIOSK_DIR="$expanded_dir"
+                    break 2
+                fi
+            fi
+        done
+    done
+
+    if [[ -z "$ACTUAL_KIOSK_DIR" ]]; then
+        log_error "Could not find kiosk installation"
+        echo ""
+        echo "Searched locations:"
+        echo "  • $KIOSK_DIR"
+        echo "  • /home/*/kiosk-app"
+        echo "  • /opt/kiosk-app"
+        echo ""
+        echo "The kiosk must have:"
+        echo "  • package.json with electron dependency"
+        echo "  • node_modules directory"
+        echo ""
         pause
         return 1
     fi
+
+    echo "Found kiosk at: $ACTUAL_KIOSK_DIR"
+    echo ""
 
     # Detect current Electron version (multiple methods for reliability)
     echo "Detecting current Electron version..."
     CURRENT_ELECTRON=""
 
     # Method 1: Check package.json in kiosk directory
-    if [[ -f "$KIOSK_DIR/package.json" ]]; then
-        CURRENT_ELECTRON=$(sudo -u "$KIOSK_USER" jq -r '.dependencies.electron // empty' "$KIOSK_DIR/package.json" 2>/dev/null | sed 's/[\^~]//g')
+    if [[ -f "$ACTUAL_KIOSK_DIR/package.json" ]]; then
+        CURRENT_ELECTRON=$(jq -r '.dependencies.electron // empty' "$ACTUAL_KIOSK_DIR/package.json" 2>/dev/null | sed 's/[\^~]//g')
     fi
 
     # Method 2: If package.json didn't work, check node_modules
-    if [[ -z "$CURRENT_ELECTRON" ]] && [[ -f "$KIOSK_DIR/node_modules/electron/package.json" ]]; then
-        CURRENT_ELECTRON=$(jq -r '.version // empty' "$KIOSK_DIR/node_modules/electron/package.json" 2>/dev/null)
+    if [[ -z "$CURRENT_ELECTRON" ]] && [[ -f "$ACTUAL_KIOSK_DIR/node_modules/electron/package.json" ]]; then
+        CURRENT_ELECTRON=$(jq -r '.version // empty' "$ACTUAL_KIOSK_DIR/node_modules/electron/package.json" 2>/dev/null)
     fi
 
-    # Method 3: Try npm list from kiosk directory
+    # Method 3: Check package-lock.json
+    if [[ -z "$CURRENT_ELECTRON" ]] && [[ -f "$ACTUAL_KIOSK_DIR/package-lock.json" ]]; then
+        CURRENT_ELECTRON=$(jq -r '.packages."node_modules/electron".version // .dependencies.electron.version // empty' "$ACTUAL_KIOSK_DIR/package-lock.json" 2>/dev/null)
+    fi
+
+    # Method 4: Try npm list from kiosk directory
     if [[ -z "$CURRENT_ELECTRON" ]]; then
-        CURRENT_ELECTRON=$(cd "$KIOSK_DIR" 2>/dev/null && sudo -u "$KIOSK_USER" npm list electron --depth=0 2>/dev/null | grep electron@ | cut -d'@' -f2 | cut -d' ' -f1)
+        CURRENT_ELECTRON=$(cd "$ACTUAL_KIOSK_DIR" 2>/dev/null && npm list electron --depth=0 2>/dev/null | grep electron@ | cut -d'@' -f2 | cut -d' ' -f1)
     fi
 
     if [[ -z "$CURRENT_ELECTRON" ]]; then
         log_error "Could not detect current Electron version"
         echo ""
-        echo "Possible causes:"
-        echo "  • Electron not installed in $KIOSK_DIR"
-        echo "  • Corrupted node_modules directory"
+        echo "Checked:"
+        echo "  • $ACTUAL_KIOSK_DIR/package.json"
+        echo "  • $ACTUAL_KIOSK_DIR/node_modules/electron/package.json"
+        echo "  • $ACTUAL_KIOSK_DIR/package-lock.json"
+        echo "  • npm list command"
         echo ""
         read -r -p "Try to continue anyway? (y/n): " CONTINUE_ANYWAY
         if [[ ! "$CONTINUE_ANYWAY" =~ ^[Yy]$ ]]; then
@@ -8411,30 +8448,28 @@ manual_electron_update() {
         return 0
     fi
 
+    # Get the kiosk user (owner of the directory)
+    KIOSK_OWNER=$(stat -c '%U' "$ACTUAL_KIOSK_DIR" 2>/dev/null || echo "kiosk")
+
     # Create backup before update
     echo ""
     echo "Creating backup before update..."
-    BACKUP_DIR="$KIOSK_DIR/electron-backup-$(date +%Y%m%d-%H%M%S)"
+    BACKUP_DIR="$ACTUAL_KIOSK_DIR/electron-backup-$(date +%Y%m%d-%H%M%S)"
 
-    if sudo -u "$KIOSK_USER" mkdir -p "$BACKUP_DIR"; then
+    if sudo -u "$KIOSK_OWNER" mkdir -p "$BACKUP_DIR" 2>/dev/null || mkdir -p "$BACKUP_DIR"; then
         # Backup package.json and package-lock.json
-        [[ -f "$KIOSK_DIR/package.json" ]] && sudo -u "$KIOSK_USER" cp "$KIOSK_DIR/package.json" "$BACKUP_DIR/"
-        [[ -f "$KIOSK_DIR/package-lock.json" ]] && sudo -u "$KIOSK_USER" cp "$KIOSK_DIR/package-lock.json" "$BACKUP_DIR/"
-
-        # Backup electron module if it exists
-        if [[ -d "$KIOSK_DIR/node_modules/electron" ]]; then
-            sudo -u "$KIOSK_USER" cp -r "$KIOSK_DIR/node_modules/electron" "$BACKUP_DIR/" 2>/dev/null || echo "Note: Could not backup electron module (too large, skipping)"
-        fi
+        [[ -f "$ACTUAL_KIOSK_DIR/package.json" ]] && cp "$ACTUAL_KIOSK_DIR/package.json" "$BACKUP_DIR/"
+        [[ -f "$ACTUAL_KIOSK_DIR/package-lock.json" ]] && cp "$ACTUAL_KIOSK_DIR/package-lock.json" "$BACKUP_DIR/"
 
         log_success "Backup created: $BACKUP_DIR"
         echo ""
         echo "═══════════════════════════════════════════════════"
         echo "ROLLBACK INSTRUCTIONS (if update fails):"
         echo "═══════════════════════════════════════════════════"
-        echo "1. cd $KIOSK_DIR"
-        echo "2. sudo -u kiosk cp $BACKUP_DIR/package.json ."
-        echo "3. sudo -u kiosk cp $BACKUP_DIR/package-lock.json ."
-        echo "4. sudo -u kiosk npm install"
+        echo "1. cd $ACTUAL_KIOSK_DIR"
+        echo "2. cp $BACKUP_DIR/package.json ."
+        echo "3. cp $BACKUP_DIR/package-lock.json ."
+        echo "4. sudo -u $KIOSK_OWNER npm install"
         echo "5. sudo systemctl restart lightdm"
         echo "═══════════════════════════════════════════════════"
         echo ""
@@ -8453,9 +8488,14 @@ manual_electron_update() {
     echo "This may take 1-2 minutes..."
     echo ""
 
-    if cd "$KIOSK_DIR"; then
-        sudo -u "$KIOSK_USER" npm install "electron@${LATEST_ELECTRON}" --save-exact
-        UPDATE_STATUS=$?
+    if cd "$ACTUAL_KIOSK_DIR"; then
+        # Try with kiosk user first, fallback to root
+        if sudo -u "$KIOSK_OWNER" npm install "electron@${LATEST_ELECTRON}" --save-exact 2>/dev/null; then
+            UPDATE_STATUS=0
+        else
+            npm install "electron@${LATEST_ELECTRON}" --save-exact
+            UPDATE_STATUS=$?
+        fi
 
         if [[ $UPDATE_STATUS -eq 0 ]]; then
             echo ""
@@ -8463,7 +8503,7 @@ manual_electron_update() {
             echo ""
 
             # Verify the update
-            NEW_VERSION=$(jq -r '.version // empty' "$KIOSK_DIR/node_modules/electron/package.json" 2>/dev/null)
+            NEW_VERSION=$(jq -r '.version // empty' "$ACTUAL_KIOSK_DIR/node_modules/electron/package.json" 2>/dev/null)
             if [[ "$NEW_VERSION" == "$LATEST_ELECTRON" ]]; then
                 echo "✓ Verified: Electron v${NEW_VERSION} is now installed"
             else
@@ -8490,7 +8530,7 @@ manual_electron_update() {
             echo ""
         fi
     else
-        log_error "Could not change to kiosk directory: $KIOSK_DIR"
+        log_error "Could not change to kiosk directory: $ACTUAL_KIOSK_DIR"
     fi
 
     pause
