@@ -164,34 +164,35 @@ get_latest_electron_version() {
 
 create_backup() {
     local kiosk_dir="$1"
+    local kiosk_owner=$(stat -c '%U' "$kiosk_dir")
     local timestamp=$(date +%Y%m%d_%H%M%S)
     BACKUP_DIR="${kiosk_dir}/backups/electron_backup_${timestamp}"
 
     log_info "Creating backup..."
 
     # Create backup directory
-    mkdir -p "$BACKUP_DIR"
+    sudo -u "$kiosk_owner" mkdir -p "$BACKUP_DIR"
 
     # Backup package.json and package-lock.json
     if [ -f "$kiosk_dir/package.json" ]; then
-        cp "$kiosk_dir/package.json" "$BACKUP_DIR/"
+        sudo -u "$kiosk_owner" cp "$kiosk_dir/package.json" "$BACKUP_DIR/"
         log_success "Backed up package.json"
     fi
 
     if [ -f "$kiosk_dir/package-lock.json" ]; then
-        cp "$kiosk_dir/package-lock.json" "$BACKUP_DIR/"
+        sudo -u "$kiosk_owner" cp "$kiosk_dir/package-lock.json" "$BACKUP_DIR/"
         log_success "Backed up package-lock.json"
     fi
 
     # Create a list of installed packages
     if [ -d "$kiosk_dir/node_modules" ]; then
-        ls -1 "$kiosk_dir/node_modules" > "$BACKUP_DIR/installed_packages.txt"
+        sudo -u "$kiosk_owner" bash -c "ls -1 '$kiosk_dir/node_modules' > '$BACKUP_DIR/installed_packages.txt'"
         log_success "Created list of installed packages"
     fi
 
     # Save current Electron version
     local current_version=$(get_current_electron_version "$kiosk_dir")
-    echo "$current_version" > "$BACKUP_DIR/electron_version.txt"
+    echo "$current_version" | sudo -u "$kiosk_owner" tee "$BACKUP_DIR/electron_version.txt" > /dev/null
 
     log_success "Backup created at: $BACKUP_DIR"
 }
@@ -284,10 +285,11 @@ update_electron() {
 main() {
     print_header "Electron Update Script for UBK"
 
-    # Check if running as root or with sudo
-    if [ "$EUID" -ne 0 ]; then
-        log_error "This script must be run with sudo"
-        echo "Usage: sudo $0"
+    # Verify not running as root
+    if [ "$EUID" -eq 0 ]; then
+        log_error "Do not run this script with sudo"
+        echo "Run as regular user: ./$0"
+        echo "The script will prompt for sudo when needed for specific commands"
         exit 1
     fi
 
