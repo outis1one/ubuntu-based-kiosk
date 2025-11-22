@@ -3699,7 +3699,7 @@ first_time_install() {
     echo "  • Onboard touchscreen keyboard"
     echo
     read -r -p "Proceed with installation? (y/n): " proceed
-    [[ "$proceed" != "y" ]] && exit 0
+    [[ ! "$proceed" =~ ^[Yy]$ ]] && exit 0
     
     echo
     echo "[1/27] Installing packages..."
@@ -4040,12 +4040,26 @@ function unlockScreen(){
   }
 
   // Restore current view using proper method
+  // For boot unlock, always use attachView for regular views (safe path)
   if(showingHidden&&hiddenViews[currentHiddenIndex]){
-    const[w,h]=mainWindow.getContentSize();
-    mainWindow.setTopBrowserView(hiddenViews[currentHiddenIndex]);
-    hiddenViews[currentHiddenIndex].setBounds({x:0,y:0,width:w,height:h});
-  }else if(views[currentIndex]){
-    attachView(currentIndex);
+    try{
+      const[w,h]=mainWindow.getContentSize();
+      // Ensure view is added to window before setting as top
+      mainWindow.addBrowserView(hiddenViews[currentHiddenIndex]);
+      mainWindow.setTopBrowserView(hiddenViews[currentHiddenIndex]);
+      hiddenViews[currentHiddenIndex].setBounds({x:0,y:0,width:w,height:h});
+    }catch(e){
+      console.error('[LOCKOUT] Error restoring hidden view:',e);
+      // Fallback to regular views
+      if(views.length>0){
+        showingHidden=false;
+        attachView(0);
+      }
+    }
+  }else if(views.length>0){
+    // Use valid index or default to 0
+    const idx=(currentIndex>=0&&currentIndex<views.length)?currentIndex:0;
+    attachView(idx);
   }
 
   // Start master timer if not already running (handles boot password case)
