@@ -3699,7 +3699,7 @@ first_time_install() {
     echo "  • Onboard touchscreen keyboard"
     echo
     read -r -p "Proceed with installation? (y/n): " proceed
-    [[ "$proceed" != "y" ]] && exit 0
+    [[ ! "$proceed" =~ ^[Yy]$ ]] && exit 0
     
     echo
     echo "[1/27] Installing packages..."
