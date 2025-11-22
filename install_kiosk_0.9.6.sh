@@ -838,7 +838,33 @@ show_addon_status() {
     [[ -x /usr/bin/wg ]] && { any_addon=true; echo "WireGuard: ✓ Installed"; }
     [[ -x /usr/bin/tailscale ]] && { any_addon=true; echo "Tailscale: ✓ Installed"; }
     [[ -x /usr/bin/netbird ]] && { any_addon=true; echo "Netbird: ✓ Installed"; }
-    
+
+    # Bluetooth - FAST CHECK
+    if command -v bluetoothctl &>/dev/null && systemctl is-active --quiet bluetooth 2>/dev/null; then
+        any_addon=true
+        local bt_status="Bluetooth: ✓ Active"
+
+        # Count paired devices
+        if [[ -f "$BT_CONFIG" ]] && [[ -s "$BT_CONFIG" ]]; then
+            local device_count=$(wc -l < "$BT_CONFIG")
+            local connected_count=0
+
+            while IFS='|' read -r mac name; do
+                if bluetoothctl info "$mac" 2>/dev/null | grep -q "Connected: yes"; then
+                    ((connected_count++))
+                fi
+            done < "$BT_CONFIG"
+
+            if [[ $connected_count -gt 0 ]]; then
+                bt_status="${bt_status} ($connected_count/$device_count devices connected)"
+            else
+                bt_status="${bt_status} ($device_count devices paired)"
+            fi
+        fi
+
+        echo "$bt_status"
+    fi
+
     if ! $any_addon; then
         echo "No addons installed"
     fi
@@ -9281,6 +9307,553 @@ uninstall_html_keyboard() {
     log_success "HTML Keyboard removed"
     pause
 }
+
+################################################################################
+### SECTION 14.5: ADDON - BLUETOOTH AUDIO
+################################################################################
+
+BT_CONFIG="/home/kiosk/.bt-devices"
+BT_SERVICE="/etc/systemd/system/kiosk-bluetooth.service"
+
+addon_bluetooth() {
+    while true; do
+        clear
+        echo "╔══════════════════════════════════════════════════════════╗"
+        echo "   BLUETOOTH AUDIO                                          "
+        echo "╚══════════════════════════════════════════════════════════╝"
+        echo
+
+        local bt_installed=false
+        local bt_enabled=false
+
+        if command -v bluetoothctl &>/dev/null; then
+            bt_installed=true
+            if systemctl is-active --quiet bluetooth; then
+                bt_enabled=true
+            fi
+        fi
+
+        if $bt_installed && $bt_enabled; then
+            echo "Status: ✓ Bluetooth enabled"
+            echo
+
+            # Show paired devices
+            if [[ -f "$BT_CONFIG" ]]; then
+                echo "Paired Devices:"
+                while IFS='|' read -r mac name; do
+                    local status="disconnected"
+                    if bluetoothctl info "$mac" 2>/dev/null | grep -q "Connected: yes"; then
+                        status="✓ connected"
+                    fi
+                    echo "  • $name ($status)"
+                done < "$BT_CONFIG"
+            else
+                echo "No devices paired yet"
+            fi
+            echo
+
+            echo "Options:"
+            echo "  1. Add Bluetooth Device"
+            echo "  2. Remove Device"
+            echo "  3. Disconnect Device"
+            echo "  4. Reconnect All"
+            echo "  5. Set Default Output"
+            echo "  6. Bluetooth Diagnostics"
+            echo "  7. Uninstall"
+            echo "  0. Return"
+        else
+            echo "Status: Not installed"
+            echo
+            echo "Bluetooth audio allows:"
+            echo "  • Wireless speakers/headphones"
+            echo "  • Auto-reconnect on boot"
+            echo "  • Works with Squeezelite/Jitsi"
+            echo
+            echo "Options:"
+            echo "  1. Install Bluetooth Support"
+            echo "  0. Return"
+        fi
+
+        echo
+        read -r -p "Choose: " choice
+
+        if ! $bt_installed; then
+            case "$choice" in
+                1) install_bluetooth ;;
+                0) return ;;
+            esac
+        else
+            case "$choice" in
+                1) pair_bluetooth_device ;;
+                2) remove_bluetooth_device ;;
+                3) disconnect_bluetooth_device ;;
+                4) reconnect_all_bluetooth ;;
+                5) set_default_bluetooth ;;
+                6) bluetooth_diagnostics ;;
+                7) uninstall_bluetooth ;;
+                0) return ;;
+            esac
+        fi
+    done
+}
+
+install_bluetooth() {
+    echo
+    echo "Installing Bluetooth support..."
+
+    # Install packages
+    sudo apt update
+    sudo apt install -y bluez bluez-tools libspa-0.2-bluetooth
+
+    # Enable Bluetooth service
+    sudo systemctl enable bluetooth
+    sudo systemctl start bluetooth
+
+    # Wait for Bluetooth to be ready
+    sleep 3
+
+    # Unblock Bluetooth (if blocked)
+    sudo rfkill unblock bluetooth 2>/dev/null || true
+
+    # Add kiosk user to bluetooth group
+    sudo usermod -aG bluetooth kiosk
+
+    # Create config file
+    sudo touch "$BT_CONFIG"
+    sudo chown kiosk:kiosk "$BT_CONFIG"
+
+    # Create auto-reconnect service
+    create_bluetooth_reconnect_service
+
+    log_success "Bluetooth installed"
+    echo
+    echo "Ready to pair devices!"
+    pause
+}
+
+pair_bluetooth_device() {
+    echo
+    echo "═══════════════════════════════════════════════════════════"
+    echo "  BLUETOOTH PAIRING WIZARD"
+    echo "═══════════════════════════════════════════════════════════"
+    echo
+    echo "Instructions:"
+    echo "  1. Put your device in pairing mode"
+    echo "  2. Wait for it to appear in the scan"
+    echo "  3. Note the MAC address (XX:XX:XX:XX:XX:XX)"
+    echo "  4. Type 'pair <MAC>' to pair"
+    echo "  5. Type 'quit' when done"
+    echo
+    echo "Starting Bluetooth scan..."
+    echo
+
+    # Create temp script for interactive pairing
+    local pair_script="/tmp/bt-pair-$$.exp"
+    cat > "$pair_script" <<'BTPAIR'
+#!/usr/bin/expect -f
+set timeout 120
+
+spawn bluetoothctl
+expect "Agent registered"
+
+send "power on\r"
+expect "Changing power on succeeded"
+
+send "agent on\r"
+expect "Agent is already registered"
+
+send "default-agent\r"
+expect "Default agent request successful"
+
+send "scan on\r"
+expect "Discovery started"
+
+puts "\n\n═══════════════════════════════════════════════════════════"
+puts "  DEVICES FOUND (waiting 15 seconds...)"
+puts "═══════════════════════════════════════════════════════════\n"
+
+sleep 15
+
+send "scan off\r"
+expect "Discovery stopped"
+
+puts "\n\n═══════════════════════════════════════════════════════════"
+puts "  PAIRING INSTRUCTIONS"
+puts "═══════════════════════════════════════════════════════════"
+puts "  At the [bluetooth]# prompt:"
+puts "    pair XX:XX:XX:XX:XX:XX"
+puts "    trust XX:XX:XX:XX:XX:XX"
+puts "    connect XX:XX:XX:XX:XX:XX"
+puts "    quit"
+puts "═══════════════════════════════════════════════════════════\n"
+
+interact
+BTPAIR
+
+    chmod +x "$pair_script"
+
+    # Check if expect is installed
+    if ! command -v expect &>/dev/null; then
+        echo "Installing expect for interactive pairing..."
+        sudo apt install -y expect
+    fi
+
+    # Run interactive pairing
+    "$pair_script"
+    rm -f "$pair_script"
+
+    echo
+    echo "═══════════════════════════════════════════════════════════"
+    read -r -p "Did pairing succeed? (y/n): " success
+
+    if [[ "$success" =~ ^[Yy]$ ]]; then
+        echo
+        read -r -p "Enter device MAC address: " mac
+        read -r -p "Enter device name: " name
+
+        # Save device info
+        echo "$mac|$name" >> "$BT_CONFIG"
+
+        # Set A2DP profile for audio
+        bluetoothctl << EOF
+select $mac
+info $mac
+EOF
+
+        log_success "Device saved: $name"
+        echo
+        echo "Testing audio connection..."
+        sleep 2
+
+        # Check if connected
+        if bluetoothctl info "$mac" 2>/dev/null | grep -q "Connected: yes"; then
+            log_success "Device connected successfully!"
+
+            # Test audio
+            echo
+            read -r -p "Play test sound? (y/n): " test_audio
+            if [[ "$test_audio" =~ ^[Yy]$ ]]; then
+                paplay /usr/share/sounds/alsa/Front_Center.wav 2>/dev/null || \
+                speaker-test -t sine -f 1000 -l 1 2>/dev/null || \
+                echo "No test sound available"
+            fi
+        else
+            log_warning "Device paired but not connected"
+            echo "Try: Reconnect All from menu"
+        fi
+    fi
+
+    pause
+}
+
+remove_bluetooth_device() {
+    echo
+
+    if [[ ! -f "$BT_CONFIG" ]] || [[ ! -s "$BT_CONFIG" ]]; then
+        echo "No devices to remove"
+        pause
+        return
+    fi
+
+    echo "Paired devices:"
+    local i=1
+    while IFS='|' read -r mac name; do
+        echo "  $i. $name ($mac)"
+        ((i++))
+    done < "$BT_CONFIG"
+
+    echo
+    read -r -p "Remove which device number (0=cancel): " num
+
+    if [[ "$num" == "0" ]] || [[ "$num" -lt 1 ]] || [[ "$num" -ge "$i" ]]; then
+        echo "Cancelled"
+        pause
+        return
+    fi
+
+    # Get device info
+    local mac=$(sed -n "${num}p" "$BT_CONFIG" | cut -d'|' -f1)
+    local name=$(sed -n "${num}p" "$BT_CONFIG" | cut -d'|' -f2)
+
+    echo
+    echo "Removing: $name"
+
+    # Remove from BlueZ
+    bluetoothctl remove "$mac" 2>/dev/null || true
+
+    # Remove from config
+    sed -i "${num}d" "$BT_CONFIG"
+
+    log_success "Device removed"
+    pause
+}
+
+disconnect_bluetooth_device() {
+    echo
+    echo "Connected Bluetooth devices:"
+
+    # Get list of connected devices
+    local connected_devices=$(bluetoothctl devices Connected 2>/dev/null)
+
+    if [[ -z "$connected_devices" ]]; then
+        echo "No devices currently connected"
+        pause
+        return
+    fi
+
+    # Parse and display connected devices
+    local i=1
+    declare -A device_map
+
+    while read -r line; do
+        local mac=$(echo "$line" | awk '{print $2}')
+        local name=$(echo "$line" | cut -d' ' -f3-)
+        echo "  $i. $name ($mac)"
+        device_map[$i]="$mac|$name"
+        ((i++))
+    done <<< "$connected_devices"
+
+    echo
+    read -r -p "Disconnect which device (0=cancel): " num
+
+    if [[ "$num" == "0" ]] || [[ "$num" -lt 1 ]] || [[ "$num" -ge "$i" ]]; then
+        echo "Cancelled"
+        pause
+        return
+    fi
+
+    # Get device info
+    local device_info="${device_map[$num]}"
+    local mac=$(echo "$device_info" | cut -d'|' -f1)
+    local name=$(echo "$device_info" | cut -d'|' -f2)
+
+    echo
+    echo "Disconnecting: $name..."
+
+    # Disconnect device (keeps it paired/trusted)
+    if bluetoothctl disconnect "$mac" 2>/dev/null; then
+        sleep 1
+
+        # Verify disconnection
+        if bluetoothctl info "$mac" 2>/dev/null | grep -q "Connected: no"; then
+            log_success "$name disconnected"
+            echo
+            echo "Device remains paired and trusted."
+            echo "Use 'Reconnect All' to reconnect."
+        else
+            log_warning "Disconnect command sent but status unclear"
+        fi
+    else
+        log_error "Failed to disconnect $name"
+    fi
+
+    pause
+}
+
+reconnect_all_bluetooth() {
+    echo
+    echo "Reconnecting all paired devices..."
+
+    if [[ ! -f "$BT_CONFIG" ]]; then
+        echo "No devices configured"
+        pause
+        return
+    fi
+
+    while IFS='|' read -r mac name; do
+        echo "Connecting: $name..."
+
+        bluetoothctl << EOF
+power on
+connect $mac
+EOF
+
+        sleep 2
+
+        if bluetoothctl info "$mac" 2>/dev/null | grep -q "Connected: yes"; then
+            log_success "$name connected"
+        else
+            log_warning "$name failed to connect"
+        fi
+    done < "$BT_CONFIG"
+
+    pause
+}
+
+set_default_bluetooth() {
+    echo
+    echo "Available Bluetooth devices:"
+
+    local devices=$(pactl list sinks short | grep bluez)
+
+    if [[ -z "$devices" ]]; then
+        echo "No Bluetooth audio devices found"
+        echo "Make sure device is connected first"
+        pause
+        return
+    fi
+
+    echo "$devices"
+    echo
+    read -r -p "Enter sink name: " sink_name
+
+    if [[ -n "$sink_name" ]]; then
+        pactl set-default-sink "$sink_name"
+        log_success "Default audio set to: $sink_name"
+    fi
+
+    pause
+}
+
+bluetooth_diagnostics() {
+    echo
+    echo "═══════════════════════════════════════════════════════════"
+    echo "  BLUETOOTH DIAGNOSTICS"
+    echo "═══════════════════════════════════════════════════════════"
+    echo
+
+    echo "[1/6] Bluetooth service status:"
+    if systemctl is-active --quiet bluetooth; then
+        log_success "Bluetooth service running"
+    else
+        log_error "Bluetooth service not running"
+        echo "  Fix: sudo systemctl start bluetooth"
+    fi
+    echo
+
+    echo "[2/6] Bluetooth hardware:"
+    if hciconfig 2>/dev/null | grep -q "UP RUNNING"; then
+        log_success "Bluetooth hardware active"
+        hciconfig 2>/dev/null | head -3
+    else
+        log_warning "Bluetooth hardware may be off"
+        echo "  Try: sudo rfkill unblock bluetooth"
+    fi
+    echo
+
+    echo "[3/6] Paired devices:"
+    bluetoothctl devices 2>/dev/null | sed 's/^/  /' || echo "  None"
+    echo
+
+    echo "[4/6] Connected devices:"
+    bluetoothctl devices Connected 2>/dev/null | sed 's/^/  /' || echo "  None"
+    echo
+
+    echo "[5/6] PipeWire Bluetooth sinks:"
+    pactl list sinks short | grep bluez | sed 's/^/  /' || echo "  None"
+    echo
+
+    echo "[6/6] Audio routing:"
+    local default_sink=$(pactl get-default-sink 2>/dev/null)
+    echo "  Default: $default_sink"
+
+    if [[ "$default_sink" == *"bluez"* ]]; then
+        log_success "Routing to Bluetooth"
+    else
+        log_warning "Not routing to Bluetooth"
+    fi
+
+    pause
+}
+
+create_bluetooth_reconnect_service() {
+    # Create reconnection script
+    sudo tee /usr/local/bin/kiosk-bluetooth-reconnect > /dev/null <<'BTRECONNECT'
+#!/bin/bash
+# Auto-reconnect trusted Bluetooth devices
+
+BT_CONFIG="/home/kiosk/.bt-devices"
+LOG_TAG="KIOSK-BT"
+
+logger -t "$LOG_TAG" "Starting Bluetooth reconnection"
+
+# Wait for Bluetooth to be ready
+sleep 10
+
+# Power on Bluetooth
+bluetoothctl power on
+
+# Try to connect each saved device
+if [[ -f "$BT_CONFIG" ]]; then
+    while IFS='|' read -r mac name; do
+        logger -t "$LOG_TAG" "Attempting to connect: $name ($mac)"
+
+        # Try to connect
+        bluetoothctl connect "$mac" 2>&1 | logger -t "$LOG_TAG"
+
+        sleep 3
+
+        # Check if connected
+        if bluetoothctl info "$mac" 2>/dev/null | grep -q "Connected: yes"; then
+            logger -t "$LOG_TAG" "SUCCESS: $name connected"
+        else
+            logger -t "$LOG_TAG" "FAILED: $name did not connect"
+        fi
+    done < "$BT_CONFIG"
+else
+    logger -t "$LOG_TAG" "No devices configured in $BT_CONFIG"
+fi
+
+logger -t "$LOG_TAG" "Bluetooth reconnection complete"
+BTRECONNECT
+
+    sudo chmod +x /usr/local/bin/kiosk-bluetooth-reconnect
+
+    # Create systemd service
+    sudo tee "$BT_SERVICE" > /dev/null <<'BTSVC'
+[Unit]
+Description=Kiosk Bluetooth Auto-Reconnect
+After=bluetooth.service
+Wants=bluetooth.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/kiosk-bluetooth-reconnect
+RemainAfterExit=yes
+
+[Install]
+WantedBy=multi-user.target
+BTSVC
+
+    sudo systemctl daemon-reload
+    sudo systemctl enable kiosk-bluetooth.service
+
+    log_success "Auto-reconnect service created"
+}
+
+uninstall_bluetooth() {
+    echo
+    read -r -p "Remove Bluetooth support? (yes/no): " confirm
+    [[ "$confirm" != "yes" ]] && return
+
+    echo "Uninstalling..."
+
+    # Stop and disable service
+    sudo systemctl stop kiosk-bluetooth.service 2>/dev/null || true
+    sudo systemctl disable kiosk-bluetooth.service 2>/dev/null || true
+    sudo rm -f "$BT_SERVICE"
+    sudo rm -f /usr/local/bin/kiosk-bluetooth-reconnect
+
+    # Disconnect all devices
+    if [[ -f "$BT_CONFIG" ]]; then
+        while IFS='|' read -r mac name; do
+            bluetoothctl remove "$mac" 2>/dev/null || true
+        done < "$BT_CONFIG"
+        rm -f "$BT_CONFIG"
+    fi
+
+    # Optionally remove packages
+    read -r -p "Remove Bluetooth packages? (y/n): " remove_packages
+    if [[ "$remove_packages" =~ ^[Yy]$ ]]; then
+        sudo apt remove -y bluez bluez-tools
+    fi
+
+    sudo systemctl daemon-reload
+
+    log_success "Bluetooth support removed"
+    pause
+}
+
 ################################################################################
 ### SECTION 15: ADVANCED MENU FUNCTIONS
 ################################################################################
@@ -9827,10 +10400,11 @@ addons_menu() {
         echo "  4. talkkonnect/Murmur Intercom (native audio)"
         echo "  5. On-Screen Keyboard"
         echo "  6. Remote Access (VNC/VPN)"
+        echo "  7. Bluetooth Audio"
         echo "  0. Return"
         echo
-        read -r -p "Choose [0-6]: " choice
-        
+        read -r -p "Choose [0-7]: " choice
+
         case "$choice" in
             1) addon_lms_squeezelite ;;
             2) addon_cups ;;
@@ -9838,6 +10412,7 @@ addons_menu() {
             4) addon_talkkonnect_intercom ;;
             5) addon_onscreen_keyboard ;;
             6) remote_access_menu ;;
+            7) addon_bluetooth ;;
             0) return ;;
         esac
     done
