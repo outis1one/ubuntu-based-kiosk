@@ -237,7 +237,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="0.9.5-3"
+SCRIPT_VERSION="0.9.5-9"
 KIOSK_USER="kiosk"
 BUILD_USER="${SUDO_USER:-$(whoami)}"
 KIOSK_HOME="/home/${KIOSK_USER}"
