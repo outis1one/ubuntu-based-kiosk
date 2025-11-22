@@ -224,6 +224,9 @@ install_talkkonnect_with_config() {
     rm -rf "$tk_src"
     git clone https://github.com/talkkonnect/talkkonnect.git "$tk_src"
 
+    # Change ownership so kiosk user can write to vendor directory
+    sudo chown -R "$KIOSK_USER:$KIOSK_USER" "$tk_src"
+
     echo "Building (this takes 5-10 minutes)..."
 
     # Build as kiosk user with proper environment
