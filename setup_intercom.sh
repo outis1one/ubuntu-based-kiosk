@@ -220,16 +220,10 @@ install_talkkonnect_with_config() {
     sudo apt install -y libopenal-dev libopus-dev libopus0 libopusfile-dev alsa-utils portaudio19-dev git build-essential pkg-config
 
     echo "[3/4] Cloning and building talkkonnect..."
-    local tk_src="/tmp/talkkonnect-src"
-    rm -rf "$tk_src"
-    git clone https://github.com/talkkonnect/talkkonnect.git "$tk_src"
-
-    # Change ownership so kiosk user can write to vendor directory
-    sudo chown -R "$KIOSK_USER:$KIOSK_USER" "$tk_src"
 
     echo "Building (this takes 5-10 minutes)..."
 
-    # Build as kiosk user with proper environment
+    # Build as kiosk user with proper environment (using their home directory to avoid permission issues)
     sudo -u "$KIOSK_USER" bash -c "
         export PATH=/usr/local/go/bin:\$PATH
         export HOME=/home/$KIOSK_USER
@@ -238,7 +232,16 @@ install_talkkonnect_with_config() {
 
         mkdir -p /home/$KIOSK_USER/go/bin
 
-        cd '$tk_src' || exit 1
+        # Clone to kiosk user's home directory (avoids /tmp permission issues)
+        cd /home/$KIOSK_USER || exit 1
+
+        if [[ -d talkkonnect ]]; then
+            echo 'Removing existing talkkonnect directory...'
+            rm -rf talkkonnect
+        fi
+
+        git clone https://github.com/talkkonnect/talkkonnect.git
+        cd talkkonnect || exit 1
 
         echo 'Creating vendored dependencies...'
         go mod vendor
@@ -506,10 +509,10 @@ EOFOPUS
         cd cmd/talkkonnect || exit 1
 
         echo 'Compiling with vendored dependencies...'
-        go build -mod=vendor -v -o /home/$KIOSK_USER/go/bin/talkkonnect . 2>&1 | tail -20
+        go build -mod=vendor -v -o /home/$KIOSK_USER/talkkonnect-binary . 2>&1 | tail -20
 
-        if [[ -f /home/$KIOSK_USER/go/bin/talkkonnect ]]; then
-            chmod +x /home/$KIOSK_USER/go/bin/talkkonnect
+        if [[ -f /home/$KIOSK_USER/talkkonnect-binary ]]; then
+            chmod +x /home/$KIOSK_USER/talkkonnect-binary
             echo 'Build successful'
             exit 0
         else
@@ -519,7 +522,6 @@ EOFOPUS
     "
 
     local build_result=$?
-    rm -rf "$tk_src"
 
     if [[ $build_result -ne 0 ]]; then
         log_error "Build failed"
@@ -532,12 +534,18 @@ EOFOPUS
         return 1
     fi
 
-    # Verify binary
-    if [[ ! -x "/home/$KIOSK_USER/go/bin/talkkonnect" ]]; then
+    # Verify and install binary
+    if [[ ! -x "/home/$KIOSK_USER/talkkonnect-binary" ]]; then
         log_error "Binary not executable after build"
         pause
         return 1
     fi
+
+    echo "Installing binary..."
+    sudo cp /home/$KIOSK_USER/talkkonnect-binary /home/$KIOSK_USER/go/bin/talkkonnect
+    sudo chmod +x /home/$KIOSK_USER/go/bin/talkkonnect
+    sudo chown "$KIOSK_USER:$KIOSK_USER" /home/$KIOSK_USER/go/bin/talkkonnect
+    rm -f /home/$KIOSK_USER/talkkonnect-binary
 
     log_success "talkkonnect built successfully"
 
