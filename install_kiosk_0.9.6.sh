@@ -1,44 +1,27 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk (UBK) v0.9.6            ###
+###   Ubuntu Based Kiosk (UBK) v0.9.6-1          ###
 ################################################################################
 #
-# RELEASE v0.9.6 - WebRTC Intercom System
+# RELEASE v0.9.6-1 - Mumble/Talkkonnect Intercom System
 #
-# What's NEW in v0.9.6:
-# - NEW: Built-in WebRTC intercom system with push-to-talk
-#   * Auto-discovery: Kiosks automatically find each other via mDNS (no configuration!)
-#   * Browser-based phones: No app installation - just open URL in Chrome/Safari
-#   * Smart conversations: Responses auto-route back to caller (60s timeout)
-#   * Selective communication: Choose which kiosk/phone to talk to
-#   * Media key PTT: Uses Mute or PlayPause key (doesn't trigger page navigation)
-#   * Lock screen aware: Configurable intercom behavior when kiosk is locked
-#   * Zero external dependencies: WebSocket signaling + WebRTC audio embedded in Electron
-#   * Dynamic expansion: Add new kiosks anytime - they auto-discover existing ones
-# - NEW: Progressive Web App (PWA) client for phones/tablets
-#   * Single-file HTML served from kiosk
-#   * Works on Android and iOS (Chrome, Safari)
-#   * Push-to-talk button with visual feedback
-#   * Shows available kiosks in real-time
-#   * Can be added to home screen
-# - NEW: Kiosk-to-kiosk intercom
-#   * Full mesh network for 1-5 kiosks
-#   * Auto-elected hub for 6+ kiosks
-#   * Topology adapts automatically
-# - NEW: Target selection overlay
-#   * Keyboard navigation (arrow keys) or touch
-#   * Hold PTT >1 second to change target mid-conversation
-#   * Shows online/offline status for each endpoint
-# - CONFIGURATION: Simple 4-question setup during install
-#   * Friendly name (e.g., "Kitchen", "Office")
-#   * PTT key choice (Mute or PlayPause)
-#   * Lock screen behavior (Allow/Disable/Receive-only)
-#   * Response mode (Caller-only or Broadcast)
-# - TECHNICAL: Phone-initiated calls work everywhere
-#   * Kiosk-initiated calls work when phone PWA is open
-#   * PWA limitation: phones can't receive calls when app is closed (browser restriction)
-#   * Future: Can add wake locks or push notifications if needed
-# - All fixes from v0.9.5-12 included
+# What's NEW in v0.9.6-1:
+# - NEW: Mumble/Talkkonnect intercom system with push-to-talk
+#   * Murmur Server: Self-hosted Mumble server (one kiosk can host for all others)
+#   * talkkonnect Client: Headless Mumble client for kiosk-to-kiosk communication
+#   * Voice activation or push-to-talk via keyboard/USB button
+#   * Auto-connect to specific channel on server startup
+#   * Low-latency audio codec (Opus) for clear communication
+#   * Secure: Password-protected server with SSL support
+#   * Flexible: Client-only, server-only, or all-in-one installation
+# - NEW: x86_64 compatibility fixes for talkkonnect
+#   * Patched gopus library to use system libopus
+#   * Resolved build failures on x86_64 architecture
+#   * Vendored dependencies for reliable compilation
+#   * Proper CGO flags for Opus codec
+# - REMOVED: WebRTC intercom (replaced with Mumble/talkkonnect)
+# - REMOVED: Jitsi support (replaced with Mumble/talkkonnect)
+# - All fixes from v0.9.6 included (bluetooth, etc.)
 #
 # RELEASE v0.9.5-12 - Site-Specific Extension Fix
 #
@@ -1621,66 +1604,6 @@ reorder_sites() {
     log_success "Sites reordered"
 }
 
-configure_intercom() {
-    echo
-    echo " ═══ INTERCOM CONFIGURATION ═══"
-    echo
-    echo "The intercom feature allows:"
-    echo "  • Kiosks to talk to each other (auto-discovery via mDNS)"
-    echo "  • Phones/tablets to connect via browser (no app needed)"
-    echo "  • Push-to-talk communication with smart conversation routing"
-    echo "  • Works on local network, no internet required"
-    echo
-
-    read -r -p "Enable intercom feature? (y/n): " enable_intercom
-
-    if [[ ! "$enable_intercom" =~ ^[Yy]$ ]]; then
-        ENABLE_INTERCOM="false"
-        log_info "Intercom disabled"
-        return 0
-    fi
-
-    ENABLE_INTERCOM="true"
-
-    # Question 1: Friendly name
-    echo
-    read -r -p "Friendly name for this kiosk (e.g., Kitchen, Office, Lobby): " kiosk_name
-    INTERCOM_NAME="${kiosk_name:-Kiosk}"
-
-    # Question 2: PTT Key
-    echo
-    echo "Choose push-to-talk media key:"
-    echo "  1. Mute/Unmute (recommended - F20 on most keyboards)"
-    echo "  2. Media Play/Pause"
-    read -r -p "Choice (1-2) [1]: " ptt_choice
-    INTERCOM_PTT_KEY="${ptt_choice:-1}"
-
-    # Question 3: Lock screen behavior
-    echo
-    echo "Intercom behavior when kiosk is locked:"
-    echo "  1. Allow (can receive and respond - like a doorbell)"
-    echo "  2. Disable (secure mode - no intercom when locked)"
-    echo "  3. Receive only (can hear, can't respond until unlocked)"
-    read -r -p "Choice (1-3) [1]: " lock_mode
-    INTERCOM_LOCK_MODE="${lock_mode:-1}"
-
-    # Question 4: Default response mode
-    echo
-    echo "When someone calls you, your response goes to:"
-    echo "  1. Caller only (private conversation - recommended)"
-    echo "  2. All devices (broadcast mode)"
-    read -r -p "Choice (1-2) [1]: " response_mode
-    INTERCOM_RESPONSE_MODE="${response_mode:-1}"
-
-    echo
-    log_success "Intercom enabled as '$INTERCOM_NAME'"
-    echo "  • Auto-discovery: Kiosks will find each other automatically"
-    echo "  • Phone access: http://$(hostname -I | awk '{print $1}'):8765"
-    echo "  • PTT key: $([ "$INTERCOM_PTT_KEY" = "1" ] && echo "Mute" || echo "Play/Pause")"
-    echo "  • Lock mode: $(case $INTERCOM_LOCK_MODE in 1) echo "Allow";; 2) echo "Disable";; 3) echo "Receive only";; esac)"
-    echo "  • Response: $([ "$INTERCOM_RESPONSE_MODE" = "1" ] && echo "Caller only" || echo "Broadcast")"
-    echo
-}
 
 configure_home_url() {
     echo
@@ -3922,7 +3845,6 @@ first_time_install() {
     configure_optional_features
     configure_password_protection
     configure_sites
-    configure_intercom
 
     echo "[12/27] Initial scheduling (optional)..."
     echo
@@ -7500,164 +7422,6 @@ EOF
     pause
 }
 
-################################################################################
-### SECTION 11: ADDON - JITSI (with keep-alive)
-################################################################################
-
-addon_jitsi_intercom() {
-    clear
-    echo "════════════════════════════════════════════════════════════"
-    echo "   JITSI INTERCOM (TWO-WAY AUDIO)                            "
-    echo "════════════════════════════════════════════════════════════"
-    echo
-    
-    local jitsi_configured=false
-    if sudo -u "$KIOSK_USER" test -f "$CONFIG_PATH" 2>/dev/null; then
-        if sudo -u "$KIOSK_USER" jq -e '.tabs[] | select(.url | contains("jit"))' "$CONFIG_PATH" >/dev/null 2>&1; then
-            jitsi_configured=true
-            local room_url=$(sudo -u "$KIOSK_USER" jq -r '.tabs[] | select(.url | contains("jit")) | .url' "$CONFIG_PATH")
-            echo "Status: ✓ Configured"
-            echo "  Room: $room_url"
-            echo
-        fi
-    fi
-    
-    if systemctl is-active --quiet jitsi-ptt 2>/dev/null; then
-        echo "PTT Service: ✓ Running"
-        echo "  PTT Key: Spacebar (hold to talk)"
-        echo
-    fi
-    
-    if $jitsi_configured; then
-        echo "Options:"
-        echo "  1. Keep as-is"
-        echo "  2. Change room/server"
-        echo "  3. Change PIN"
-        echo "  4. Remove Jitsi"
-        echo "  0. Return"
-        echo
-        read -r -p "Choose [0-5]: " action
-        
-        case "$action" in
-            2)
-                if sudo -u "$KIOSK_USER" test -f "$CONFIG_PATH" 2>/dev/null; then
-                    sudo -u "$KIOSK_USER" jq 'del(.tabs[] | select(.url | contains("jit")))' "$CONFIG_PATH" > /tmp/config.tmp
-                    sudo -u "$KIOSK_USER" cp /tmp/config.tmp "$CONFIG_PATH"
-                fi
-                install_jitsi_intercom
-                ;;
-            3)
-                echo
-                echo "PIN Configuration:"
-                read -r -s -p "New PIN (blank=no PIN): " new_pin
-                echo
-                if [[ -z "$new_pin" ]]; then
-                    echo "NOPIN" | sudo -u kiosk tee /home/kiosk/kiosk-app/.jitsi-pin >/dev/null
-                    log_success "PIN disabled"
-                elif [[ "$new_pin" =~ ^[0-9]{4,8}$ ]]; then
-                    echo "$new_pin" | sudo -u kiosk tee /home/kiosk/kiosk-app/.jitsi-pin >/dev/null
-                    sudo chmod 600 /home/kiosk/kiosk-app/.jitsi-pin
-                    log_success "PIN updated"
-                else
-                    log_error "PIN must be 4-8 digits"
-                fi
-                pause
-                ;;
-            4) remove_jitsi_intercom ;;
-            0) return ;;
-            *) log_success "Keeping Jitsi"; pause ;;
-        esac
-    else
-        echo "Status: Not configured"
-        echo
-        echo "Jitsi provides:"
-        echo "  • Two-way audio (Kiosk ↔ Phone)"
-        echo "  • Hidden tab (F10 or 3-finger swipe)"
-        echo "  • Audio-only mode (Spacebar PTT)"
-        echo "  • Works with mobile Jitsi app"
-        echo
-        read -r -p "Configure Jitsi intercom? (y/n): " install
-        
-        if [[ "$install" =~ ^[Yy]$ ]]; then
-            install_jitsi_intercom
-        fi
-    fi
-}
-
-install_jitsi_intercom() {
-    echo
-    echo " ══ JITSI SETUP ══"
-    echo
-    echo "Choose Jitsi server type:"
-    echo "  1. Public Jitsi (meet.jit.si) - Free, no setup"
-    echo "  2. Self-hosted Jitsi - Your own server"
-    echo
-    read -r -p "Choose [1-3]: " server_choice
-    
-    local url=""
-    local room="kiosk-$(openssl rand -hex 12)"
-    
-    case "$server_choice" in
-        1)
-            url="https://meet.jit.si/${room}#config.startWithAudioMuted=true&config.startWithVideoMuted=true&config.prejoinPageEnabled=false&config.disableThirdPartyRequests=true"
-            log_success "Using public Jitsi server"
-            ;;
-        2)
-            read -r -p "Enter your Jitsi server URL (e.g., jitsi.example.com): " jitsi_server
-            if [[ -z "$jitsi_server" ]]; then
-                log_error "No server provided"
-                pause
-                return
-            fi
-            url="https://${jitsi_server}/${room}#config.startWithAudioMuted=true&config.startWithVideoMuted=true&config.prejoinPageEnabled=false"
-            log_success "Using self-hosted: $jitsi_server"
-            ;;
-         *)
-            log_error "Invalid choice"
-            pause
-            return
-            ;;
-    esac
-
-    
-    read -r -p "PIN (4-8 digits) [1234]: " pin
-    pin="${pin:-1234}"
-    [[ ! "$pin" =~ ^[0-9]{4,8}$ ]] && pin="1234"
-    
-    echo "$pin" | sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/.jitsi-pin" >/dev/null
-    sudo -u "$KIOSK_USER" chmod 600 "$KIOSK_DIR/.jitsi-pin"
-    
-    load_config || true
-    URLS+=("$url")
-    DURS+=(-1)
-    USERS+=("")
-    PASSES+=("")
-    save_config
-    
-    log_success "Jitsi configured: $room (PIN: $pin)"
-    echo "Room URL: $url"
-    
-    if ! systemctl is-active --quiet jitsi-ptt; then
-        sudo systemctl start jitsi-ptt
-    fi
-    
-    pause
-}
-remove_jitsi_intercom() {
-    echo
-    read -r -p "Remove Jitsi intercom? (y/n): " confirm
-    [[ ! "$confirm" =~ ^[Yy]$ ]] && return
-    
-    if sudo -u "$KIOSK_USER" test -f "$CONFIG_PATH" 2>/dev/null; then
-        sudo -u "$KIOSK_USER" jq 'del(.tabs[] | select(.url | contains("jit")))' "$CONFIG_PATH" > /tmp/config.tmp
-        sudo -u "$KIOSK_USER" cp /tmp/config.tmp "$CONFIG_PATH"
-    fi
-    
-    sudo systemctl stop jitsi-ptt 2>/dev/null || true
-    
-    log_success "Jitsi intercom removed"
-    pause
-}
 
 
 ################################################################################
