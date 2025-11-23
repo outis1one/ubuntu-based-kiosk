@@ -194,9 +194,6 @@ MURMURCONF
 ### TALKKONNECT CLIENT INSTALLATION
 ################################################################################
 
-# This is the replacement install_talkkonnect_with_config() function
-# Copy this into setup_intercom.sh starting at line 197
-
 install_talkkonnect_with_config() {
     local server_addr="$1"
     local server_port="$2"
@@ -209,58 +206,83 @@ install_talkkonnect_with_config() {
     echo "   INSTALLING TALKKONNECT CLIENT"
     echo "═══════════════════════════════════════════════════════════════"
     echo
-    echo "Using proven installation method (same as talkkonnect_complete_install.sh)..."
+    echo "Using proven talkkonnect installation method..."
     echo
 
     # Get target user info
     local TARGET_USER="$KIOSK_USER"
     local TARGET_UID=$(id -u "$TARGET_USER")
     local TARGET_HOME="/home/$TARGET_USER"
-    local CONFIG_DIR="$TARGET_HOME/.config/talkkonnect"
 
     # Verify home directory exists
     if [ ! -d "$TARGET_HOME" ]; then
         log_error "Home directory does not exist: $TARGET_HOME"
+        echo "Please ensure the user account is properly set up"
         pause
         return 1
     fi
 
     # --- System Prep ------------------------------------------------------
-    echo "[1/7] Installing system dependencies..."
+    echo "[1/6] Updating system packages..."
     sudo apt update
+    sudo apt upgrade -y
+
+    echo "[1/6] Installing dependencies..."
     sudo apt install -y wget git build-essential pkg-config \
         libasound2-dev libopus-dev libopus0 libopusfile-dev \
         libpipewire-0.3-dev libevdev-dev libopenal-dev alsa-utils
 
     # --- Go Installation --------------------------------------------------
-    echo "[2/7] Installing Go 1.24.1..."
+    echo "[2/6] Installing Go 1.24.1..."
     if ! command -v go &>/dev/null || ! go version | grep -q "go1.24"; then
-        sudo rm -rf /usr/local/go
-        wget -q https://go.dev/dl/go1.24.1.linux-amd64.tar.gz
-        sudo tar -C /usr/local -xzf go1.24.1.linux-amd64.tar.gz
-        rm -f go1.24.1.linux-amd64.tar.gz
-        sudo ln -sf /usr/local/go/bin/go /usr/bin/go
-        export PATH="/usr/local/go/bin:$PATH"
-        log_success "Go 1.24.1 installed"
+        sudo rm -rf /usr/local/go /usr/lib/go* /usr/bin/go
+        wget https://go.dev/dl/go1.24.1.linux-amd64.tar.gz
+        sudo tar -C /usr/local -xzf go1.23.4.linux-amd64.tar.gz
+        rm go1.23.4.linux-amd64.tar.gz
+        export PATH=$PATH:/usr/local/go/bin
+        echo 'export PATH=$PATH:/usr/local/go/bin' | sudo tee /etc/profile.d/go.sh
+        log_success "Go installed"
     else
         log_success "Go already installed"
     fi
 
-    # --- Clone TalkKonnect ------------------------------------------------
-    echo "[3/7] Cloning talkkonnect repository..."
-    cd ~
-    if [ -d "talkkonnect" ]; then
-        rm -rf talkkonnect
-    fi
-    git clone https://github.com/talkkonnect/talkkonnect.git
-    cd talkkonnect
+    echo "[2/4] Installing audio dependencies..."
+    sudo apt install -y libopenal-dev libopus-dev libopus0 libopusfile-dev alsa-utils portaudio19-dev git build-essential pkg-config
 
-    # --- Patch gopus for x86_64 -------------------------------------------
-    echo "[4/7] Applying x86_64 Opus patch..."
-    go mod vendor
+    echo "[3/4] Cloning and building talkkonnect..."
 
-    if [ -d "vendor/github.com/talkkonnect/gopus" ]; then
-        cat > vendor/github.com/talkkonnect/gopus/opus_nonshared.go << 'EOFOPUS'
+    echo "Building (this takes 5-10 minutes)..."
+
+    # Build as kiosk user with proper environment (using their home directory to avoid permission issues)
+    sudo -u "$KIOSK_USER" bash -c "
+        export PATH=/usr/local/go/bin:\$PATH
+        export HOME=/home/$KIOSK_USER
+        export GOPATH=/home/$KIOSK_USER/go
+        export CGO_ENABLED=1
+
+        mkdir -p /home/$KIOSK_USER/go/bin
+
+        # Clone to kiosk user's home directory (avoids /tmp permission issues)
+        cd /home/$KIOSK_USER || exit 1
+
+        if [[ -d talkkonnect ]]; then
+            echo 'Removing existing talkkonnect directory...'
+            rm -rf talkkonnect
+        fi
+
+        git clone https://github.com/talkkonnect/talkkonnect.git
+        cd talkkonnect || exit 1
+
+        echo 'Creating vendored dependencies...'
+        go mod vendor
+
+        # Apply critical x86_64 Opus patch
+        echo 'Applying x86_64 Opus compatibility patch...'
+        if [[ -f vendor/github.com/talkkonnect/gopus/opus_nonshared.go ]]; then
+            cp vendor/github.com/talkkonnect/gopus/opus_nonshared.go \
+               vendor/github.com/talkkonnect/gopus/opus_nonshared.go.backup
+
+            cat > vendor/github.com/talkkonnect/gopus/opus_nonshared.go << 'EOFOPUS'
 // +build amd64,cgo 386,cgo
 
 package gopus
@@ -321,11 +343,11 @@ package gopus
 // void gopus_decoder_resetstate(OpusDecoder *decoder) {
 //   opus_decoder_ctl(decoder, OPUS_RESET_STATE);
 // }
-import "C"
+import \"C\"
 
 import (
-	"errors"
-	"unsafe"
+	\"errors\"
+	\"unsafe\"
 )
 
 type Application int
@@ -471,14 +493,14 @@ func CountFrames(data []byte) (int, error) {
 }
 
 var (
-	ErrBadArgument   = errors.New("bad argument")
-	ErrSmallBuffer   = errors.New("buffer is too small")
-	ErrInternal      = errors.New("internal error")
-	ErrInvalidPacket = errors.New("invalid packet")
-	ErrUnimplemented = errors.New("unimplemented")
-	ErrInvalidState  = errors.New("invalid state")
-	ErrAllocFail     = errors.New("allocation failed")
-	ErrUnknown       = errors.New("unknown error")
+	ErrBadArgument   = errors.New(\"bad argument\")
+	ErrSmallBuffer   = errors.New(\"buffer is too small\")
+	ErrInternal      = errors.New(\"internal error\")
+	ErrInvalidPacket = errors.New(\"invalid packet\")
+	ErrUnimplemented = errors.New(\"unimplemented\")
+	ErrInvalidState  = errors.New(\"invalid state\")
+	ErrAllocFail     = errors.New(\"allocation failed\")
+	ErrUnknown       = errors.New(\"unknown error\")
 )
 
 func getErr(code C.int) error {
@@ -504,69 +526,83 @@ func getErr(code C.int) error {
 	}
 }
 EOFOPUS
-        log_success "Opus patch applied"
-    fi
+            echo 'Opus patch applied'
+        else
+            echo 'Warning: gopus not found in vendor directory'
+        fi
 
-    # --- Build TalkKonnect ------------------------------------------------
-    echo "[5/7] Building talkkonnect (this may take a few minutes)..."
-    cd ~/talkkonnect/cmd/talkkonnect
+        # Set CGO flags for Opus
+        export CGO_CFLAGS=\"\$(pkg-config --cflags opus)\"
+        export CGO_LDFLAGS=\"\$(pkg-config --libs opus) -lm\"
 
-    export CGO_ENABLED=1
-    export CGO_CFLAGS="$(pkg-config --cflags opus)"
-    export CGO_LDFLAGS="$(pkg-config --libs opus) -lm"
+        # Build in the cmd/talkkonnect directory with vendored dependencies
+        cd cmd/talkkonnect || exit 1
 
-    go build -mod=vendor -v -o ~/talkkonnect-binary . 2>&1 | tail -20
+        echo 'Compiling with vendored dependencies...'
+        go build -mod=vendor -v -o ~/talkkonnect-binary . 2>&1 | tail -20
 
-    if [ ! -f ~/talkkonnect-binary ]; then
-        log_error "Build failed!"
+        if [[ ! -f ~/talkkonnect-binary ]]; then
+            echo 'Build failed - binary not created'
+            exit 1
+        fi
+
+        echo 'Build successful'
+    "
+
+    local build_result=$?
+
+    if [[ $build_result -ne 0 ]]; then
+        log_error "Build failed"
+        echo
+        echo "Troubleshooting:"
+        echo "  1. Check Go version: go version"
+        echo "  2. Ensure build tools: sudo apt install build-essential"
+        echo "  3. Check logs above for specific errors"
         pause
         return 1
     fi
 
-    # Stop any running instances
+    # Stop any running talkkonnect before installing
+    echo "Installing binary..."
     if systemctl is-active --quiet talkkonnect 2>/dev/null; then
+        echo "Stopping existing talkkonnect service..."
         sudo systemctl stop talkkonnect
     fi
-    if pgrep -x talkkonnect > /dev/null; then
+
+    # Kill any stray processes
+    if pgrep -x talkkonnect > /dev/null 2>&1; then
+        echo "Killing running talkkonnect processes..."
         sudo pkill -9 talkkonnect
         sleep 1
     fi
 
-    # Install binary
-    sudo cp ~/talkkonnect-binary /usr/local/bin/talkkonnect
-    sudo chmod +x /usr/local/bin/talkkonnect
-    rm ~/talkkonnect-binary
-    log_success "Binary installed to /usr/local/bin/talkkonnect"
+    # Now install as kiosk user
+    sudo -u "$KIOSK_USER" bash -c "
+        cp ~/talkkonnect-binary ~/go/bin/talkkonnect
+        chmod +x ~/go/bin/talkkonnect
+        rm ~/talkkonnect-binary
+    "
 
-    # --- User Permissions -------------------------------------------------
-    echo "[6/7] Setting up permissions..."
-    if ! groups "$TARGET_USER" | grep -q input; then
-        sudo usermod -a -G input "$TARGET_USER"
-        log_success "Added $TARGET_USER to 'input' group"
-    fi
-    if ! groups "$TARGET_USER" | grep -q audio; then
-        sudo usermod -a -G audio "$TARGET_USER"
-        log_success "Added $TARGET_USER to 'audio' group"
+    if [[ $? -ne 0 ]]; then
+        log_error "Failed to install binary"
+        pause
+        return 1
     fi
 
-    # --- Configuration ----------------------------------------------------
-    echo "[7/7] Creating configuration..."
+    log_success "talkkonnect built successfully"
 
-    # Create config directory as target user
-    if [ "$TARGET_USER" != "$USER" ]; then
-        sudo -u "$TARGET_USER" mkdir -p "$CONFIG_DIR"
-    else
-        mkdir -p "$CONFIG_DIR"
-    fi
+    echo "[4/4] Creating configuration..."
 
-    # Create config file with provided settings
-    sudo tee "$CONFIG_DIR/talkkonnect.xml" > /dev/null <<EOFXML
+    # Create config directory for logs
+    sudo -u "$KIOSK_USER" mkdir -p /home/$KIOSK_USER/.config/talkkonnect
+
+    sudo -u "$KIOSK_USER" tee /home/$KIOSK_USER/talkkonnect.xml > /dev/null <<TKXML
 <?xml version="1.0" encoding="UTF-8"?>
 <document type="talkkonnect/xml">
   <global>
     <software>
       <settings outputdevice="default"
-                logfilenameandpath="$CONFIG_DIR/talkkonnect.log"
+                logfilenameandpath="/home/$KIOSK_USER/.config/talkkonnect/talkkonnect.log"
                 logging="both"
                 daemonize="false"
                 cancelconnect="false"
@@ -575,7 +611,8 @@ EOFOPUS
       <autoprovisioning enabled="false"/>
     </software>
     <hardware>
-      <settings targetboard="pc" voiceactivitytimersecs="200"/>
+      <settings targetboard="pc"
+                voiceactivitytimersecs="200"/>
       <io>
         <pins enabled="false"/>
       </io>
@@ -606,11 +643,18 @@ EOFOPUS
 
   <audio>
     <input>
-      <settings enabled="true" device="default" samplerate="48000"
-                channels="1" codec="opus" framespersecond="50"/>
+      <settings enabled="true"
+                device="default"
+                samplerate="48000"
+                channels="1"
+                codec="opus"
+                framespersecond="50"/>
     </input>
     <output>
-      <settings enabled="true" device="default" samplerate="48000" channels="1"/>
+      <settings enabled="true"
+                device="default"
+                samplerate="48000"
+                channels="1"/>
     </output>
   </audio>
 
@@ -619,45 +663,48 @@ EOFOPUS
   </ptt>
 
   <voiceactivity enabled="true">
-    <settings threshold="0.3" holdtimems="1000" holdtimeoutms="2000"/>
+    <settings threshold="0.3"
+              holdtimems="1000"
+              holdtimeoutms="2000"/>
   </voiceactivity>
 
   <sounds enabled="false"/>
+
   <txtts enabled="false"/>
+
   <smtp enabled="false"/>
+
   <api enabled="false"/>
+
   <printxml enabled="false"/>
 
 </document>
-EOFXML
-
-    # Set ownership
-    sudo chown -R "$TARGET_USER:$TARGET_USER" "$CONFIG_DIR"
-    sudo chmod 755 "$CONFIG_DIR"
-    sudo chmod 644 "$CONFIG_DIR/talkkonnect.xml"
+TKXML
 
     # Create systemd service
-    sudo tee /etc/systemd/system/talkkonnect.service > /dev/null <<EOFSVC
+    sudo tee /etc/systemd/system/talkkonnect.service > /dev/null <<EOF
 [Unit]
-Description=TalkKonnect Headless Mumble Transceiver
-After=network-online.target sound.target
-Wants=network-online.target
+Description=talkkonnect Mumble Client
+After=network.target sound.target pipewire.service
+Wants=pipewire.service
 
 [Service]
 Type=simple
-User=$TARGET_USER
-Group=$TARGET_USER
-WorkingDirectory=$TARGET_HOME
-ExecStart=/usr/local/bin/talkkonnect -config $CONFIG_DIR/talkkonnect.xml
+User=$KIOSK_USER
+Environment="PATH=/usr/local/go/bin:/usr/bin:/bin"
+Environment="HOME=/home/$KIOSK_USER"
+Environment="GOPATH=/home/$KIOSK_USER/go"
+WorkingDirectory=/home/$KIOSK_USER
+ExecStartPre=/bin/sleep 10
+ExecStart=/home/$KIOSK_USER/go/bin/talkkonnect -config /home/$KIOSK_USER/talkkonnect.xml
 Restart=always
-RestartSec=5
+RestartSec=10
 StandardOutput=journal
 StandardError=journal
-Environment="XDG_RUNTIME_DIR=/run/user/$TARGET_UID"
 
 [Install]
 WantedBy=multi-user.target
-EOFSVC
+EOF
 
     sudo systemctl daemon-reload
     sudo systemctl enable talkkonnect
@@ -665,27 +712,24 @@ EOFSVC
 
     sleep 3
 
-    log_success "talkkonnect installed successfully!"
+    log_success "talkkonnect installed"
     echo "═══════════════════════════════════════════════════════════════"
     echo "  Server: $server_addr:$server_port"
-    echo "  Username: $tk_user"
-    echo "  Channel: $tk_channel"
-    echo "  Config: $CONFIG_DIR/talkkonnect.xml"
-    echo "  Binary: /usr/local/bin/talkkonnect"
+    echo "  PTT Key: Spacebar"
     echo "═══════════════════════════════════════════════════════════════"
-    echo
 
     # Show status
+    echo
     if systemctl is-active --quiet talkkonnect; then
-        log_success "Service is running"
-        echo "View logs: sudo journalctl -u talkkonnect -f"
+        log_success "Service started successfully"
     else
-        log_warning "Service may have issues"
-        echo "Check logs: sudo journalctl -u talkkonnect -n 50"
+        log_warning "Service may have issues - check logs:"
+        echo "  sudo journalctl -u talkkonnect -n 50"
     fi
 
     pause
 }
+
 install_talkkonnect_only() {
     echo
     echo "═══════════════════════════════════════════════════════════════"
