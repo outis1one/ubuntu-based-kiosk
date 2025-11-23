@@ -226,6 +226,46 @@ curl http://localhost:8011/api/channel?channel=General/Support
 
 ## Troubleshooting
 
+### Common Warnings (Usually Non-Fatal)
+
+These warnings often appear but don't prevent talkkonnect from working:
+
+**`Unable to Unmute failed to execute "pactl set-sink-mute 0 0"`**
+- TalkKonnect is trying to unmute your audio output
+- This usually fails because the sink index is wrong or pactl isn't accessible
+- **Audio typically works anyway** - this is just a cosmetic error
+- To fix: Run `./fix_talkkonnect_audio.sh` to check your audio configuration
+
+**`Unable to Find Channel Name: Root`**
+- Just a warning - connection usually succeeds anyway
+- The channel exists but talkkonnect didn't detect it during initial scan
+- You'll see a follow-up message showing successful connection
+
+**`Failed to connect PipeWire event context (errno: 112)`**
+- TalkKonnect is trying to use PipeWire but can't access the session
+- Usually happens when running as a service without proper environment
+- **If you see `Speaking ->` messages, audio is working!**
+- To fix: Ensure XDG_RUNTIME_DIR is set correctly in systemd service
+
+### Audio Troubleshooting
+
+Run the audio diagnostic script:
+```bash
+./fix_talkkonnect_audio.sh
+```
+
+This will:
+- Check PipeWire/PulseAudio session status
+- List available audio devices
+- Show current talkkonnect configuration
+- Provide specific recommendations
+
+**Quick audio test:**
+```bash
+# Test as the kiosk user (replace with your user)
+sudo -u kiosk XDG_RUNTIME_DIR=/run/user/$(id -u kiosk) speaker-test -t wav -c 2 -l 1
+```
+
 ### View Logs
 
 ```bash
