@@ -509,16 +509,22 @@ EOFOPUS
         cd cmd/talkkonnect || exit 1
 
         echo 'Compiling with vendored dependencies...'
-        go build -mod=vendor -v -o /home/$KIOSK_USER/talkkonnect-binary . 2>&1 | tail -20
+        go build -mod=vendor -v -o ~/talkkonnect-binary . 2>&1 | tail -20
 
-        if [[ -f /home/$KIOSK_USER/talkkonnect-binary ]]; then
-            chmod +x /home/$KIOSK_USER/talkkonnect-binary
-            echo 'Build successful'
-            exit 0
-        else
+        if [[ ! -f ~/talkkonnect-binary ]]; then
             echo 'Build failed - binary not created'
             exit 1
         fi
+
+        echo 'Build successful'
+        echo 'Installing binary...'
+
+        # Install to go/bin
+        cp ~/talkkonnect-binary ~/go/bin/talkkonnect
+        chmod +x ~/go/bin/talkkonnect
+        rm ~/talkkonnect-binary
+
+        echo 'Installation complete'
     "
 
     local build_result=$?
@@ -533,19 +539,6 @@ EOFOPUS
         pause
         return 1
     fi
-
-    # Verify and install binary
-    if [[ ! -x "/home/$KIOSK_USER/talkkonnect-binary" ]]; then
-        log_error "Binary not executable after build"
-        pause
-        return 1
-    fi
-
-    echo "Installing binary..."
-    sudo cp /home/$KIOSK_USER/talkkonnect-binary /home/$KIOSK_USER/go/bin/talkkonnect
-    sudo chmod +x /home/$KIOSK_USER/go/bin/talkkonnect
-    sudo chown "$KIOSK_USER:$KIOSK_USER" /home/$KIOSK_USER/go/bin/talkkonnect
-    rm -f /home/$KIOSK_USER/talkkonnect-binary
 
     log_success "talkkonnect built successfully"
 
