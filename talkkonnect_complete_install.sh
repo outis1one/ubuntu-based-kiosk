@@ -434,7 +434,7 @@ echo "======================================================================="
 echo "[+] CREATING CONFIGURATION"
 echo "======================================================================="
 
-CONFIG_DIR="$HOME/.config/talkkonnect"
+CONFIG_DIR="$TARGET_HOME/.config/talkkonnect"
 mkdir -p "$CONFIG_DIR"
 
 cat > "$CONFIG_DIR/talkkonnect.xml" << 'EOFXML'
@@ -523,7 +523,13 @@ cat > "$CONFIG_DIR/talkkonnect.xml" << 'EOFXML'
 EOFXML
 
 # Update the log path to use actual username
-sed -i "s|/home/user/|$HOME/|g" "$CONFIG_DIR/talkkonnect.xml"
+sed -i "s|/home/user/|$TARGET_HOME/|g" "$CONFIG_DIR/talkkonnect.xml"
+
+# Set proper ownership if running as a different user
+if [ "$TARGET_USER" != "$USER" ]; then
+    sudo chown -R "$TARGET_USER:$TARGET_USER" "$CONFIG_DIR"
+    echo "[+] Set ownership of config directory to $TARGET_USER"
+fi
 
 echo "[+] Created configuration file: $CONFIG_DIR/talkkonnect.xml"
 
