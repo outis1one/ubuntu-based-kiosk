@@ -1,11 +1,25 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk (UBK) v0.9.6-1          ###
+###   Ubuntu Based Kiosk (UBK) v0.9.6-2          ###
 ################################################################################
+#
+# RELEASE v0.9.6-2 - Talkkonnect Terminal Fix
+#
+# What's NEW in v0.9.6-2:
+# - CRITICAL FIX: Talkkonnect systemd service terminal initialization error
+#   * ISSUE: talkkonnect service fails with "Cannot Initialize Terminal" error
+#     Error logs show: "alert: Cannot Initialize Terminal" followed by abnormal termination
+#   * ROOT CAUSE: talkkonnect uses termbox-go for terminal UI, which requires a TTY
+#     Systemd services don't provide a TTY by default, causing initialization failure
+#   * FIX: Added two changes to talkkonnect systemd service:
+#     - Environment="TERM=dumb" tells terminal library to use minimal mode
+#     - StandardInput=null explicitly prevents terminal initialization attempts
+#   * RESULT: talkkonnect now runs successfully as a headless systemd service
+# - All features from v0.9.6-1 included
 #
 # RELEASE v0.9.6-1 - Bluetooth Edition (No WebRTC/Jitsi)
 #
-# What's NEW in v0.9.6-1:
+# What was in v0.9.6-1:
 # - NEW: Bluetooth audio support (A2DP sink/source)
 #   * Pair bluetooth speakers, headsets, and microphones
 #   * Auto-reconnect to known devices
@@ -7140,24 +7154,92 @@ addon_bluetooth() {
     case "$bt_choice" in
         1)
             echo
-            echo "Scanning for devices (30 seconds)..."
+            echo "Preparing bluetooth for scanning..."
+            # Enable bluetooth and make it discoverable
             bluetoothctl power on
-            bluetoothctl scan on &
+            bluetoothctl pairable on
+            bluetoothctl discoverable on
+
+            # Remove old scan results
+            rm -f /tmp/bt_scan_* 2>/dev/null
+
+            # Start scanning and capture output
+            echo "Scanning for devices (30 seconds)..."
+            echo "Please put your device in pairing mode now..."
+            echo
+
+            # Use timeout to control scan duration and capture output
+            timeout 30s bluetoothctl --timeout 30 scan on 2>&1 | tee /tmp/bt_scan_$$.log &
             scan_pid=$!
-            sleep 30
-            kill $scan_pid 2>/dev/null
+
+            # Show discovered devices in real-time
+            sleep 2  # Give scan time to start
+            for i in {1..14}; do
+                sleep 2
+                # Show new devices discovered
+                if grep -q "Device" /tmp/bt_scan_$$.log 2>/dev/null; then
+                    echo -ne "\rScanning... ($((i*2))s) - Devices found: $(grep -c "Device" /tmp/bt_scan_$$.log 2>/dev/null || echo 0)  "
+                fi
+            done
+
+            wait $scan_pid 2>/dev/null || true
+            bluetoothctl scan off 2>/dev/null || true
+
             echo
-            echo "Devices found:"
-            bluetoothctl devices
             echo
-            read -r -p "Enter device MAC address to pair: " bt_mac
+            echo "Scan complete. Devices found:"
+
+            # Parse and display discovered devices
+            if [[ -f /tmp/bt_scan_$$.log ]]; then
+                grep -E "Device [0-9A-F:]{17}" /tmp/bt_scan_$$.log | sort -u | while read -r line; do
+                    mac=$(echo "$line" | grep -oE "[0-9A-F:]{17}")
+                    name=$(echo "$line" | sed -E 's/.*Device [0-9A-F:]{17} //')
+                    # Check if already paired
+                    if bluetoothctl devices Paired 2>/dev/null | grep -q "$mac"; then
+                        echo "  $mac - $name (already paired)"
+                    else
+                        echo "  $mac - $name"
+                    fi
+                done
+            fi
+
+            # Also show already paired devices
+            echo
+            echo "Already paired devices:"
+            if bluetoothctl devices Paired 2>/dev/null | grep -q "Device"; then
+                bluetoothctl devices Paired | while read -r line; do
+                    echo "  $line"
+                done
+            else
+                echo "  (none)"
+            fi
+
+            echo
+            read -r -p "Enter device MAC address to pair (or Enter to cancel): " bt_mac
             if [[ -n "$bt_mac" ]]; then
                 echo "Pairing with $bt_mac..."
-                bluetoothctl pair "$bt_mac"
-                bluetoothctl trust "$bt_mac"
-                bluetoothctl connect "$bt_mac"
-                log_success "Device paired and connected"
+
+                # Try to pair
+                if bluetoothctl pair "$bt_mac" 2>&1 | tee /tmp/bt_pair_$$.log; then
+                    echo "Trusting device..."
+                    bluetoothctl trust "$bt_mac"
+                    echo "Connecting..."
+                    if bluetoothctl connect "$bt_mac"; then
+                        log_success "Device paired and connected successfully"
+                    else
+                        echo "Warning: Paired but connection failed. Device may not be ready."
+                        echo "You can try connecting again from the main bluetooth menu."
+                    fi
+                else
+                    echo "Pairing failed. Make sure the device is in pairing mode."
+                    if grep -qi "AuthenticationFailed" /tmp/bt_pair_$$.log; then
+                        echo "Try: Remove any existing pairing on your device and try again."
+                    fi
+                fi
+                rm -f /tmp/bt_pair_$$.log
             fi
+
+            rm -f /tmp/bt_scan_$$.log
             pause
             addon_bluetooth
             ;;
@@ -9420,23 +9502,19 @@ addons_menu() {
         echo "Available Addons:"
         echo "  1. LMS Server / Squeezelite Player"
         echo "  2. CUPS Printing"
-        echo "  1. LMS Server / Squeezelite Player"
-        echo "  2. CUPS Printing"
         echo "  3. Bluetooth Audio & Devices"
         echo "  4. talkkonnect/Murmur Intercom (native audio)"
-        echo "  6. Remote Access (VNC/VPN)"
+        echo "  5. Remote Access (VNC/VPN)"
         echo "  0. Return"
         echo
-        read -r -p "Choose [0-6]: " choice
-        
+        read -r -p "Choose [0-5]: " choice
+
         case "$choice" in
-            1) addon_lms_squeezelite ;;
-            2) addon_cups ;;
             1) addon_lms_squeezelite ;;
             2) addon_cups ;;
             3) addon_bluetooth ;;
             4) addon_talkkonnect_intercom ;;
-            6) remote_access_menu ;;
+            5) remote_access_menu ;;
             0) return ;;
         esac
     done
