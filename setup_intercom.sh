@@ -69,7 +69,10 @@ check_talkkonnect_status() {
     local installed=false
     local running=false
 
-    if command -v talkkonnect &>/dev/null || [[ -f "/home/$KIOSK_USER/go/bin/talkkonnect" ]]; then
+    # Check if systemd service exists (most reliable indicator)
+    if [[ -f /etc/systemd/system/talkkonnect.service ]] || \
+       command -v talkkonnect &>/dev/null || \
+       [[ -f "/home/$KIOSK_USER/go/bin/talkkonnect" ]]; then
         installed=true
         if systemctl is-active --quiet talkkonnect; then
             running=true
