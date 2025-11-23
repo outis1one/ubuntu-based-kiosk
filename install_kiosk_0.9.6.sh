@@ -3,41 +3,8 @@
 ###   Ubuntu Based Kiosk (UBK) v0.9.6            ###
 ################################################################################
 #
-# RELEASE v0.9.6 - WebRTC Intercom System
-#
-# What's NEW in v0.9.6:
-# - NEW: Built-in WebRTC intercom system with push-to-talk
-#   * Auto-discovery: Kiosks automatically find each other via mDNS (no configuration!)
-#   * Browser-based phones: No app installation - just open URL in Chrome/Safari
-#   * Smart conversations: Responses auto-route back to caller (60s timeout)
-#   * Selective communication: Choose which kiosk/phone to talk to
-#   * Media key PTT: Uses Mute or PlayPause key (doesn't trigger page navigation)
-#   * Lock screen aware: Configurable intercom behavior when kiosk is locked
-#   * Zero external dependencies: WebSocket signaling + WebRTC audio embedded in Electron
-#   * Dynamic expansion: Add new kiosks anytime - they auto-discover existing ones
-# - NEW: Progressive Web App (PWA) client for phones/tablets
-#   * Single-file HTML served from kiosk
-#   * Works on Android and iOS (Chrome, Safari)
-#   * Push-to-talk button with visual feedback
-#   * Shows available kiosks in real-time
-#   * Can be added to home screen
-# - NEW: Kiosk-to-kiosk intercom
-#   * Full mesh network for 1-5 kiosks
-#   * Auto-elected hub for 6+ kiosks
-#   * Topology adapts automatically
-# - NEW: Target selection overlay
-#   * Keyboard navigation (arrow keys) or touch
-#   * Hold PTT >1 second to change target mid-conversation
-#   * Shows online/offline status for each endpoint
-# - CONFIGURATION: Simple 4-question setup during install
-#   * Friendly name (e.g., "Kitchen", "Office")
-#   * PTT key choice (Mute or PlayPause)
-#   * Lock screen behavior (Allow/Disable/Receive-only)
-#   * Response mode (Caller-only or Broadcast)
-# - TECHNICAL: Phone-initiated calls work everywhere
-#   * Kiosk-initiated calls work when phone PWA is open
-#   * PWA limitation: phones can't receive calls when app is closed (browser restriction)
-#   * Future: Can add wake locks or push notifications if needed
+# RELEASE v0.9.6 - Bluetooth and mumble
+
 # - All fixes from v0.9.5-12 included
 #
 # RELEASE v0.9.5-12 - Site-Specific Extension Fix
