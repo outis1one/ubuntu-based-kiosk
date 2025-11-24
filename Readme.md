@@ -86,7 +86,6 @@ The installer will guide you through configuration during setup.
 - **Scheduled lockout** at specific time daily
 - **Display wake lockout** - Require password after display schedule
 - **Boot password** option - Require password on system startup
-- **SHA-256 hashed passwords**
 - **Full screen blocking** during lockout (no content visible)
 
 ### Navigation Security
