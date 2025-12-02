@@ -1,12 +1,16 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk (UBK) v0.9.7         ###
+###   Ubuntu Based Kiosk (UBK) v0.9.7-3       ###
 ################################################################################
 #
-# RELEASE v0.9.7 - phase one complete
+# RELEASE v0.9.7-3 - Install improvements & management features
+# - Fixed missing complete_uninstall function
+# - Added virtual console configuration (Ctrl+Alt+F1-F8)
+# - Added emergency hotspot to initial installation
+# - Enhanced security options and documentation
 #
 # Built with Claude Sonnet 4/.5 AI assistance
-# License: GPL v3 - Keep derivatives open sour
+# License: GPL v3 - Keep derivatives open source
 # Repository: https://github.com/outis1one/ubk/
 #
 # TARGET SYSTEMS:
@@ -35,7 +39,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="0.9.7"
+SCRIPT_VERSION="0.9.7-3"
 KIOSK_USER="kiosk"
 BUILD_USER="${SUDO_USER:-$(whoami)}"
 KIOSK_HOME="/home/${KIOSK_USER}"

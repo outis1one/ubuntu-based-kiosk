@@ -47,9 +47,9 @@ Home/office kiosk for reusing old hardware, displaying:
 # Enable SSH during installation
 
 # Download and run installer
-wget https://github.com/outis1one/ubk/raw/main/install_kiosk_0.9.7.sh
-chmod +x install_kiosk_0.9.7.sh
-./install_kiosk_0.9.7.sh
+wget https://github.com/outis1one/ubk/raw/main/install_kiosk_0.9.7-3.sh
+chmod +x install_kiosk_0.9.7-3.sh
+./install_kiosk_0.9.7-3.sh
 ```
 
 The installer will guide you through configuration during setup.
@@ -128,7 +128,9 @@ The installer will guide you through configuration during setup.
 - **Netbird VPN** - Setup key support
 
 ### Advanced
-- **Emergency WiFi Hotspot** - Auto-starts if no internet after boot
+- **Emergency WiFi Hotspot** - Auto-starts if no internet after boot (configurable during install)
+- **Virtual Console Access** - Ctrl+Alt+F1-F8 terminal login (configurable during install)
+- **Complete Uninstall** - Full system cleanup and kiosk removal
 - **SSH remote access** - For configuration and troubleshooting
 
 ---
@@ -167,7 +169,7 @@ The installer will guide you through configuration during setup.
 
 ### Security & Lockdown
 - **Autologin** as kiosk user
-- **VT switching disabled** (Ctrl+Alt+F1-F12 blocked)
+- **Virtual consoles** (Ctrl+Alt+F1-F8) - Optional, configurable during install
 - **X server key combinations disabled** (Ctrl+Alt+Backspace)
 - **Right-click disabled** in kiosk app
 - **Screen blanking disabled** with schedule awareness
@@ -381,12 +383,12 @@ smb://WORKGROUP/COMPUTER/PrinterName
 
 ```bash
 # Run installer script again to access menu
-./install_kiosk_0.9.7.sh
+./install_kiosk_0.9.7-3.sh
 
 # Menu structure:
-# 1. Core Settings - Sites, WiFi, schedules, passwords
+# 1. Core Settings - Sites, WiFi, schedules, passwords, full reinstall, complete uninstall
 # 2. Addons - LMS, CUPS, VNC, VPNs
-# 3. Advanced - Diagnostics, logs, Electron updates
+# 3. Advanced - Diagnostics, logs, Electron updates, virtual consoles, emergency hotspot
 # 4. Restart Kiosk Display
 ```
 
@@ -484,6 +486,52 @@ echo "NOPIN" | sudo -u kiosk tee /home/kiosk/kiosk-app/.jitsi-pin
 - Hidden from normal rotation
 - **Triggers inactivity timeout** (returns to home after idle time, just like manual sites)
 
+#### Why Use Hidden Tabs?
+
+Hidden tabs are perfect for scenarios where you need access to sensitive or private content on a shared/public kiosk:
+
+**Private Communication:**
+- Video conferencing (Jitsi Meet, Zoom, Google Meet)
+- Private messaging or chat applications
+- Internal communication tools for staff only
+- Conference room scheduling interfaces
+
+**Administrative Access:**
+- Server administration panels (Proxmox, TrueNAS, router interfaces)
+- Security camera feeds
+- Home automation controls (Home Assistant, OpenHAB)
+- Network monitoring dashboards
+
+**Content Management:**
+- Digital signage content editors
+- Photo album management (Immich, PhotoPrism)
+- Media server administration (Plex, Jellyfin)
+- Calendar and scheduling updates
+
+**Secure Entertainment:**
+- Personal streaming accounts (prevent others from accessing your watch history)
+- Gaming platforms or cloud gaming services
+- Adult content controls (parental access only)
+- Personal social media (Facebook, Instagram, etc.)
+
+**Business Use Cases:**
+- Employee time tracking systems
+- Inventory management interfaces
+- Point-of-sale backend access
+- Staff scheduling and shift management
+
+**Example Scenarios:**
+
+1. **Reception Kiosk:** Public-facing sites rotate (directory, weather, news), but staff can swipe up with PIN to access appointment scheduling, visitor management, or internal messaging.
+
+2. **Family Room Display:** Displays photo slideshows, calendar, and weather, but parents can PIN-access streaming services, smart home controls, or security cameras.
+
+3. **Digital Signage:** Publicly shows announcements and menus, but managers can PIN-access the content management system to make updates.
+
+4. **Conference Room Display:** Shows meeting schedules and company news, but attendees can PIN-access video conferencing or presentation tools.
+
+The hidden tab system provides a balance between public accessibility and private functionality without needing to physically access a terminal or reconfigure the system.
+
 ### Inactivity Extensions
 
 When "Are you still here?" prompt appears (on manual or hidden sites):
@@ -544,6 +592,135 @@ Example: Display off 22:00-06:00, optional password on wake
 #   - main.js detects flag and shows lockout screen
 # - Otherwise, display just turns on normally
 ```
+
+---
+
+## Installation & Management Features
+
+### Virtual Console Configuration
+
+Virtual consoles provide terminal access via Ctrl+Alt+F1 through F8 keyboard combinations.
+
+**During Installation:**
+- Prompted at the end of initial setup
+- Default: ENABLED (Ubuntu standard behavior)
+- Option to disable for enhanced security
+
+**Security Considerations:**
+
+*Enabled (Default):*
+- Allows manual terminal login for troubleshooting
+- Useful for SSH failures or network issues
+- Standard Ubuntu/Linux behavior
+- Can login with kiosk user credentials or main user account
+
+*Disabled (More Secure):*
+- Blocks direct terminal access
+- Forces all access through SSH or menu system
+- Better for public kiosks or untrusted environments
+- Can still be re-enabled via Advanced menu (requires existing SSH access)
+
+**Post-Install Management:**
+```bash
+# Access via menu: Advanced → Virtual Consoles (option 7)
+
+# Manual enable
+for i in {1..8}; do sudo systemctl unmask getty@tty$i.service; done
+sudo systemctl daemon-reload
+
+# Manual disable
+for i in {1..8}; do sudo systemctl mask getty@tty$i.service; done
+sudo systemctl daemon-reload
+```
+
+**Typical TTY Layout:**
+- TTY1-6: Login consoles (if enabled)
+- TTY7: Graphical kiosk display (X11/LightDM)
+- TTY8: Available for additional services
+
+### Emergency WiFi Hotspot
+
+Automatically creates a WiFi access point when internet connectivity is lost.
+
+**During Installation:**
+- Prompted at the end of initial setup
+- Optional configuration with custom SSID and password
+- Can be deferred and configured later
+
+**How It Works:**
+1. Service monitors internet connectivity every 30 seconds
+2. When internet is lost, automatically:
+   - Creates WiFi hotspot with configured credentials
+   - Assigns IP address (default: 10.42.0.1)
+   - Displays on-screen notification with connection details
+   - Serves simple web page at http://10.42.0.1
+3. When internet returns, hotspot automatically shuts down
+
+**Use Cases:**
+- Initial WiFi configuration without keyboard
+- Network troubleshooting when SSH is unavailable
+- Remote location setup without IT staff present
+- Automatic failover for temporary connectivity issues
+
+**Configuration:**
+```bash
+# Access via menu: Advanced → Emergency Hotspot (option 9)
+
+# Default credentials:
+SSID: Kiosk-Emergency
+Password: kioskhotspot123
+
+# Once connected to hotspot:
+# - SSH: ssh user@10.42.0.1
+# - Web: http://10.42.0.1 (shows connection info)
+# - Run installer script to reconfigure WiFi
+```
+
+**Files Created:**
+- `/usr/local/bin/kiosk-emergency-hotspot` - Main service script
+- `/etc/systemd/system/kiosk-emergency-hotspot.service` - Systemd service
+
+### Complete Uninstall
+
+Full system cleanup that removes all kiosk components and restores the system to pre-installation state.
+
+**Access:**
+```bash
+# Core Settings menu → option 11
+./install_kiosk_0.9.7-3.sh
+# Choose: Core Settings → Complete Uninstall
+```
+
+**What Gets Removed:**
+- Kiosk user and all user data
+- All Electron and Node.js installations
+- LightDM and Openbox window manager
+- All systemd services and timers
+- All kiosk scripts and configurations
+- CUPS printing system
+- VNC server
+- Emergency hotspot configuration
+- All scheduled tasks (power, display, quiet hours)
+
+**What Gets Preserved:**
+- VPN configurations (if not manually removed)
+- System packages (Ubuntu base system)
+- Network configuration (WiFi, ethernet)
+- SSH server and settings
+- User accounts (except kiosk user)
+
+**Safety Features:**
+- Requires typing "UNINSTALL" to confirm
+- Re-enables virtual consoles automatically
+- Stops all services before removal
+- Offers optional reboot after completion
+- No way to undo - creates clean slate
+
+**Use When:**
+- Repurposing hardware for different use
+- Testing/development cleanup
+- Complete fresh start needed
+- Removing kiosk from production system
 
 ---
 
@@ -672,7 +849,7 @@ See the LICENSE file in the repository for full terms.
 
 ## Project Status & Future Plans
 
-**Current Version:** 0.9.7 - Site-Specific Extension Fix
+**Current Version:** 0.9.7-3 - Install Improvements & Management Features
 
 **Planned Features:**
 - Web-based GUI configuration interface
@@ -714,5 +891,5 @@ Special thanks to the maintainers of all upstream projects that make UBK possibl
 
 ---
 
-*Last Updated: November 23 2025*  
-*Version: Check script header for current version*
+*Last Updated: December 2, 2024*
+*Version: 0.9.7-3*
