@@ -8990,9 +8990,9 @@ core_menu() {
             6) configure_power_display_quiet ;;
             7) load_existing_config; if configure_optional_features; then save_config; fi ;;
             8) load_existing_config; if configure_password_protection; then save_config; fi ;;
-            9) configure_hidden_site_pin ;;           # <- ADD THIS
-            10) full_reinstall; return ;;             # <- UPDATE THESE
-            11) complete_uninstall; return ;;         # <- UPDATE THESE
+            9) configure_hidden_site_pin ;;
+            10) full_reinstall ;;
+            11) complete_uninstall; return ;;
             0) return ;;
         esac
     done
