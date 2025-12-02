@@ -68,8 +68,7 @@ The installer will guide you through configuration during setup.
 
 ### Touch Controls
 - **2-finger horizontal swipe** - Switch between sites
-- **3-finger up swipe** - Access hidden tabs (PIN required)
-- **3-finger down swipe** - Return to normal tabs (from hidden tabs)
+- **3-finger down/up swipe** - Access/return hidden tabs (PIN required optional )
 - **1-finger swipe** (dual mode) - Navigate within page (arrow keys)
 - **On-screen keyboard** - Auto-shows on text fields or click keyboard icon
 
