@@ -5283,7 +5283,20 @@ function createWindow(){
   });
 
   ipcMain.on('get-config',(event)=>{
-    event.sender.send('config-data',config);
+    try{
+      if(fs.existsSync(CONFIG_FILE)){
+        const data=fs.readFileSync(CONFIG_FILE,'utf8');
+        const config=JSON.parse(data);
+        event.sender.send('config-data',config);
+        console.log('[NAV] Sent config data to renderer');
+      }else{
+        console.error('[NAV] Config file not found');
+        event.sender.send('config-data',{tabs:[]});
+      }
+    }catch(err){
+      console.error('[NAV] Error reading config:',err);
+      event.sender.send('config-data',{tabs:[]});
+    }
   });
 
   ipcMain.on('navigate-to-tab',(event,tabIndex)=>{
@@ -6181,6 +6194,8 @@ let navButtonEnabled=true;
 let navButton=null;
 let navMenu=null;
 let navMenuVisible=false;
+let navMenuTimer=null;
+const NAV_MENU_TIMEOUT=30000; // 30 seconds
 
 // Listen for pause button visibility control from main process
 // CRITICAL: This must be outside DOMContentLoaded so it doesn't reset on page load
@@ -6319,20 +6334,26 @@ window.addEventListener('DOMContentLoaded',()=>{
 
     navButton=document.createElement('div');
     navButton.id='electron-nav-button';
-    navButton.innerHTML='🔑';
+    // Use SVG key icon instead of emoji for better compatibility
+    navButton.innerHTML='<svg width="32" height="32" viewBox="0 0 24 24" fill="white"><path d="M12.65 10C11.7 7.31 8.9 5.5 5.77 6.12c-2.29.46-4.15 2.29-4.63 4.58C.32 14.57 3.26 18 7 18c2.61 0 4.83-1.67 5.65-4H17v2c0 1.1.9 2 2 2s2-.9 2-2v-2c1.1 0 2-.9 2-2s-.9-2-2-2h-8.35zM7 14c-1.1 0-2-.9-2-2s.9-2 2-2 2 .9 2 2-.9 2-2 2z"/></svg>';
     navButton.title='Navigation Menu';
     navButton.style.cssText=`
       position:fixed;top:20px;left:20px;width:60px;height:60px;
       background:rgba(155,89,182,0.95);border:3px solid rgba(255,255,255,0.9);
       border-radius:50%;display:none;align-items:center;justify-content:center;
-      font-size:32px;cursor:pointer;z-index:999999;
+      cursor:pointer;z-index:999999;
       box-shadow:0 4px 12px rgba(0,0,0,0.4);user-select:none;
     `;
 
     navButton.addEventListener('click',(e)=>{
       e.preventDefault();
       e.stopPropagation();
-      toggleNavMenu();
+      console.log('[NAV] Button clicked');
+      try{
+        toggleNavMenu();
+      }catch(err){
+        console.error('[NAV] Error toggling menu:',err);
+      }
     });
 
     document.body.appendChild(navButton);
@@ -6350,18 +6371,19 @@ window.addEventListener('DOMContentLoaded',()=>{
 
   function createNavMenu(){
     if(navMenu)return;
+    console.log('[NAV] Creating navigation menu');
 
     navMenu=document.createElement('div');
     navMenu.id='electron-nav-menu';
     navMenu.style.cssText=`
       position:fixed;top:0;left:0;width:100%;height:100%;
       background:rgba(0,0,0,0.9);display:none;align-items:center;justify-content:center;
-      z-index:999998;
+      z-index:999998;pointer-events:auto;
     `;
 
     const content=document.createElement('div');
     content.style.cssText=`
-      background:rgba(44,62,80,0.98);border-radius:20px;padding:40px;
+      position:relative;background:rgba(44,62,80,0.98);border-radius:20px;padding:40px;
       max-width:90%;max-height:90%;overflow-y:auto;
       box-shadow:0 10px 40px rgba(0,0,0,0.5);
     `;
@@ -6369,11 +6391,17 @@ window.addEventListener('DOMContentLoaded',()=>{
     const closeBtn=document.createElement('div');
     closeBtn.innerHTML='✕';
     closeBtn.style.cssText=`
-      position:absolute;top:20px;right:20px;font-size:32px;color:white;
+      position:absolute;top:10px;right:10px;font-size:32px;color:white;
       cursor:pointer;width:40px;height:40px;display:flex;align-items:center;
       justify-content:center;border-radius:50%;background:rgba(231,76,60,0.8);
+      user-select:none;
     `;
-    closeBtn.addEventListener('click',hideNavMenu);
+    closeBtn.addEventListener('click',(e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      console.log('[NAV] Close button clicked');
+      hideNavMenu();
+    });
     content.appendChild(closeBtn);
 
     const columns=document.createElement('div');
@@ -6437,14 +6465,22 @@ window.addEventListener('DOMContentLoaded',()=>{
 
     navMenu.addEventListener('click',(e)=>{
       if(e.target===navMenu){
+        console.log('[NAV] Background clicked, closing menu');
         hideNavMenu();
       }
     });
 
+    // Prevent clicks inside content from closing menu
+    content.addEventListener('click',(e)=>{
+      e.stopPropagation();
+    });
+
     document.body.appendChild(navMenu);
+    console.log('[NAV] Navigation menu created and appended to body');
   }
 
   function toggleNavMenu(){
+    console.log('[NAV] Toggle menu, current state:',navMenuVisible);
     if(navMenuVisible){
       hideNavMenu();
     }else{
@@ -6453,58 +6489,121 @@ window.addEventListener('DOMContentLoaded',()=>{
   }
 
   function showNavMenu(){
-    if(!navMenu)createNavMenu();
-    loadSitesIntoNav();
-    navMenu.style.display='flex';
-    navMenuVisible=true;
+    console.log('[NAV] Showing navigation menu');
+    try{
+      if(!navMenu){
+        createNavMenu();
+      }
+
+      // Request sites data
+      loadSitesIntoNav();
+
+      navMenu.style.display='flex';
+      navMenuVisible=true;
+
+      // Set 30-second auto-dismiss timer
+      if(navMenuTimer){
+        clearTimeout(navMenuTimer);
+      }
+      navMenuTimer=setTimeout(()=>{
+        console.log('[NAV] Auto-dismissing menu after 30 seconds');
+        hideNavMenu();
+      },NAV_MENU_TIMEOUT);
+
+      console.log('[NAV] Menu displayed, 30-second timer started');
+    }catch(err){
+      console.error('[NAV] Error showing menu:',err);
+    }
   }
 
   function hideNavMenu(){
-    if(navMenu)navMenu.style.display='none';
-    navMenuVisible=false;
+    console.log('[NAV] Hiding navigation menu');
+    try{
+      if(navMenuTimer){
+        clearTimeout(navMenuTimer);
+        navMenuTimer=null;
+      }
+      if(navMenu){
+        navMenu.style.display='none';
+      }
+      navMenuVisible=false;
+      console.log('[NAV] Menu hidden');
+    }catch(err){
+      console.error('[NAV] Error hiding menu:',err);
+    }
   }
 
   function loadSitesIntoNav(){
-    const sitesList=document.getElementById('nav-sites-list');
-    if(!sitesList)return;
-
-    // Request config from main process
-    ipcRenderer.send('get-config');
+    console.log('[NAV] Requesting config from main process');
+    try{
+      ipcRenderer.send('get-config');
+    }catch(err){
+      console.error('[NAV] Error requesting config:',err);
+    }
   }
 
   ipcRenderer.on('config-data',(event,config)=>{
-    const sitesList=document.getElementById('nav-sites-list');
-    if(!sitesList||!config||!config.tabs)return;
+    console.log('[NAV] Received config data:',config);
+    try{
+      const sitesList=document.getElementById('nav-sites-list');
+      if(!sitesList){
+        console.error('[NAV] Sites list element not found');
+        return;
+      }
 
-    sitesList.innerHTML='';
+      if(!config||!config.tabs){
+        console.error('[NAV] Invalid config data');
+        sitesList.innerHTML='<div style="color:white;padding:10px;">No sites configured</div>';
+        return;
+      }
 
-    config.tabs.forEach((tab,index)=>{
-      // Skip hidden tabs (duration === -1)
-      if(tab.duration===-1)return;
+      sitesList.innerHTML='';
+      let siteCount=0;
 
-      const siteBtn=document.createElement('div');
-      const displayName=tab.name||tab.url;
-      siteBtn.innerHTML=displayName;
-      siteBtn.style.cssText=`
-        padding:15px 20px;background:rgba(52,152,219,0.8);color:white;
-        border-radius:10px;cursor:pointer;font-size:18px;
-        transition:all 0.2s;border:2px solid transparent;
-      `;
-      siteBtn.addEventListener('mouseenter',()=>{
-        siteBtn.style.background='rgba(52,152,219,1)';
-        siteBtn.style.borderColor='rgba(255,255,255,0.5)';
+      config.tabs.forEach((tab,index)=>{
+        // Skip hidden tabs (duration === -1)
+        if(tab.duration===-1){
+          console.log('[NAV] Skipping hidden tab at index',index);
+          return;
+        }
+
+        const siteBtn=document.createElement('div');
+        const displayName=tab.name||tab.url;
+        siteBtn.textContent=displayName;
+        siteBtn.style.cssText=`
+          padding:15px 20px;background:rgba(52,152,219,0.8);color:white;
+          border-radius:10px;cursor:pointer;font-size:18px;
+          transition:all 0.2s;border:2px solid transparent;
+          user-select:none;
+        `;
+        siteBtn.addEventListener('mouseenter',()=>{
+          siteBtn.style.background='rgba(52,152,219,1)';
+          siteBtn.style.borderColor='rgba(255,255,255,0.5)';
+        });
+        siteBtn.addEventListener('mouseleave',()=>{
+          siteBtn.style.background='rgba(52,152,219,0.8)';
+          siteBtn.style.borderColor='transparent';
+        });
+        siteBtn.addEventListener('click',(e)=>{
+          e.preventDefault();
+          e.stopPropagation();
+          console.log('[NAV] Navigating to tab',index);
+          try{
+            ipcRenderer.send('navigate-to-tab',index);
+            hideNavMenu();
+          }catch(err){
+            console.error('[NAV] Error navigating:',err);
+          }
+        });
+
+        sitesList.appendChild(siteBtn);
+        siteCount++;
       });
-      siteBtn.addEventListener('mouseleave',()=>{
-        siteBtn.style.background='rgba(52,152,219,0.8)';
-        siteBtn.style.borderColor='transparent';
-      });
-      siteBtn.addEventListener('click',()=>{
-        ipcRenderer.send('navigate-to-tab',index);
-        hideNavMenu();
-      });
 
-      sitesList.appendChild(siteBtn);
-    });
+      console.log('[NAV] Loaded',siteCount,'sites into menu');
+    }catch(err){
+      console.error('[NAV] Error processing config data:',err);
+    }
   });
 
   function isTextInput(el){
