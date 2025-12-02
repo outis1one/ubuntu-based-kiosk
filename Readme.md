@@ -1,6 +1,6 @@
 # Ubuntu Based Kiosk (UBK)
 
-**Current Version:** 0.9.7-4 (check script header for latest version)
+**Current Version:** 0.9.7-5 (check script header for latest version)
 **Built with Claude Sonnet 4/.5 AI assistance**
 **License:** GPL v3 - Keep derivatives open source
 **Repository:** https://github.com/outis1one/ubk/
@@ -47,9 +47,9 @@ Home/office kiosk for reusing old hardware, displaying:
 # Enable SSH during installation
 
 # Download and run installer
-wget https://github.com/outis1one/ubk/raw/main/install_kiosk_0.9.7-4.sh
-chmod +x install_kiosk_0.9.7-4.sh
-./install_kiosk_0.9.7-4.sh
+wget https://github.com/outis1one/ubk/raw/main/install_kiosk_0.9.7-5.sh
+chmod +x install_kiosk_0.9.7-5.sh
+./install_kiosk_0.9.7-5.sh
 ```
 
 The installer will guide you through configuration during setup.
@@ -138,7 +138,7 @@ The installer will guide you through configuration during setup.
 ## What This Script Installs
 
 ### Core Components
-- **Electron** v33.4.11 (Chromium-based app framework)
+- **Electron** v39.2.4 (Chromium-based app framework)
 - **Node.js** v20.x with npm
 - **Openbox** - Lightweight window manager
 - **LightDM** - Display manager with autologin
@@ -310,7 +310,7 @@ From Windows, find the printer's URI:
 - Windows shows: `http://192.168.1.100/ipp/print` or similar
 - CUPS URI: `ipp://192.168.1.100/ipp/print`
 - Alternative: `http://192.168.1.100:631/ipp/print`
-gumble
+
 **Generic Network Printers (Socket/JetDirect):**
 - Windows shows: `Standard TCP/IP Port` on `192.168.1.100`
 - CUPS URI: `socket://192.168.1.100:9100`
@@ -382,7 +382,7 @@ smb://WORKGROUP/COMPUTER/PrinterName
 
 ```bash
 # Run installer script again to access menu
-./install_kiosk_0.9.7-4.sh
+./install_kiosk_0.9.7-5.sh
 
 # Menu structure:
 # 1. Core Settings - Sites, WiFi, schedules, passwords, full reinstall, complete uninstall
@@ -394,11 +394,44 @@ smb://WORKGROUP/COMPUTER/PrinterName
 ### Updating Electron
 
 ```bash
-# Via menu: Advanced → Manual Electron Update
+# Via menu: Advanced → Manual Electron Update (RECOMMENDED)
+# The menu option automatically:
+# - Creates backup before updating
+# - Shows rollback instructions
+# - Handles permissions correctly
+
 # Or manually:
 cd /home/kiosk/kiosk-app
 sudo -u kiosk npm install electron@latest
 sudo systemctl restart lightdm
+```
+
+**Rollback if update fails:**
+
+The menu update creates automatic backups in `/home/kiosk/electron-backup-<timestamp>/`
+
+```bash
+# 1. Stop display
+sudo systemctl stop lightdm
+
+# 2. Find your backup (most recent)
+ls -lt /home/kiosk/electron-backup-* | head -1
+
+# 3. Restore backup files (replace timestamp with your backup)
+BACKUP=/home/kiosk/electron-backup-<timestamp>
+sudo cp $BACKUP/package.json /home/kiosk/kiosk-app/
+sudo cp $BACKUP/package-lock.json /home/kiosk/kiosk-app/ 2>/dev/null || true
+
+# 4. Remove failed install and reinstall previous version
+sudo rm -rf /home/kiosk/kiosk-app/node_modules/electron
+cd /home/kiosk/kiosk-app && sudo -u kiosk npm install --unsafe-perm
+
+# 5. Fix permissions
+sudo chown root:root /home/kiosk/kiosk-app/node_modules/electron/dist/chrome-sandbox
+sudo chmod 4755 /home/kiosk/kiosk-app/node_modules/electron/dist/chrome-sandbox
+
+# 6. Restart display
+sudo systemctl start lightdm
 ```
 
 ---
@@ -694,7 +727,7 @@ Full system cleanup that removes all kiosk components and restores the system to
 **Access:**
 ```bash
 # Core Settings menu → option 11
-./install_kiosk_0.9.7-4.sh
+./install_kiosk_0.9.7-5.sh
 # Choose: Core Settings → Complete Uninstall
 ```
 
@@ -856,7 +889,7 @@ See the LICENSE file in the repository for full terms.
 
 ## Project Status & Future Plans
 
-**Current Version:** 0.9.7-4 - Gesture & Console Improvements
+**Current Version:** 0.9.7-5 - Maintenance & Polish Update
 
 **Planned Features:**
 - Web-based GUI configuration interface
@@ -898,5 +931,5 @@ Special thanks to the maintainers of all upstream projects that make UBK possibl
 
 ---
 
-*Last Updated: December 2, 2024*
-*Version: 0.9.7-4*
+*Last Updated: December 2, 2025*
+*Version: 0.9.7-5*
