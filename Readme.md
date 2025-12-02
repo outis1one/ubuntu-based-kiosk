@@ -891,18 +891,6 @@ This project bundles or installs several open-source components under their resp
 - **Repository:** https://github.com/netbirdio/netbird
 - **Full License:** https://github.com/netbirdio/netbird/blob/main/LICENSE
 
-### Murmur Server (Mumble Server)
-- **License:** BSD-3-Clause
-- **Source:** https://www.mumble.info
-- **Repository:** https://github.com/mumble-voip/mumble
-- **Full License:** https://github.com/mumble-voip/mumble/blob/master/LICENSE
-- **Note:** Used in separate voice communication components
-
-### Gumble (Mumble Cli Client) (Mumble Client Library for Go)
-- * **License:** Mozilla Public License 2.0 (MPL-2.0)
-- * **Source:** https://github.com/layeh/gumble
-- * **Full License:** https://github.com/layeh/gumble/blob/master/LICENSE
-- * **Note:** Used as the core client library for Mumble protocol integration
 
 
 ---
@@ -934,7 +922,7 @@ See the LICENSE file in the repository for full terms.
 **Planned Features:**
 - Web-based GUI configuration interface
 - All-in-one ISO installer
-- Voice communication integration (Mumble/TalkKonnect)
+- Voice communication integration (Asterisk/Baresip)
 - Enhanced Raspberry Pi support and testing
 
 **Known Limitations:**
