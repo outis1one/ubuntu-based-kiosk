@@ -891,5 +891,5 @@ Special thanks to the maintainers of all upstream projects that make UBK possibl
 
 ---
 
-*Last Updated: December 2, 2024*
+*Last Updated: December 1, 2025*
 *Version: 0.9.7-3*
