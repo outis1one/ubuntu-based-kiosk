@@ -998,9 +998,9 @@ configure_hidden_site_pin() {
     echo " ═══ HIDDEN SITE PIN ═══"
     echo
     echo "The PIN protects access to hidden sites (duration: -1)"
-    echo "Hidden sites can be accessed via:"
+    echo "Hidden sites can be toggled via:"
     echo "  • F10 key"
-    echo "  • 3-finger DOWN swipe"
+    echo "  • 3-finger DOWN swipe (shows/hides)"
     echo
     
     local pin_file="$KIOSK_DIR/.jitsi-pin"
@@ -5928,8 +5928,7 @@ const {contextBridge,ipcRenderer}=require('electron');
 
 console.log('═════════════════════════════════════════════════════════════');
 console.log('  Gestures:');
-console.log('    3-finger DOWN: Show hidden tabs (PIN required)');
-console.log('    3-finger UP: Return to normal tabs');
+console.log('    3-finger DOWN: Toggle hidden tabs (PIN required)');
 console.log('    2-finger HORIZONTAL: Switch between sites');
 console.log('  Keyboard: Auto-shows on text fields or click icon');
 console.log('╚═══════════════════════════════════════════════════════════╝');
@@ -6192,15 +6191,10 @@ window.addEventListener('DOMContentLoaded',()=>{
       const absX=Math.abs(deltaX);
       const absY=Math.abs(deltaY);
 
-      // 3-finger DOWN = show hidden tabs (easier than up)
+      // 3-finger DOWN = toggle hidden tabs (show/hide)
       if(fingerCount===3&&absY>SWIPE_THRESHOLD&&absX<SWIPE_TOLERANCE&&deltaY>0){
-        console.log('[TOUCH] 3-finger DOWN - show hidden tab');
+        console.log('[TOUCH] 3-finger DOWN - toggle hidden tabs');
         ipcRenderer.send('toggle-hidden');
-      }
-      // 3-finger UP = return to normal tabs (close hidden)
-      else if(fingerCount===3&&absY>SWIPE_THRESHOLD&&absX<SWIPE_TOLERANCE&&deltaY<0){
-        console.log('[TOUCH] 3-finger UP - return to normal tabs');
-        ipcRenderer.send('return-to-tabs');
       }
       // 2-finger HORIZONTAL = change tabs
       else if(fingerCount===2&&absX>SWIPE_THRESHOLD&&absY<SWIPE_TOLERANCE){
@@ -8321,17 +8315,10 @@ window.addEventListener('DOMContentLoaded',()=>{
       const absX=Math.abs(deltaX);
       const absY=Math.abs(deltaY);
 
-      // 3-finger gestures for hidden tabs
-      if(fingerCount===3 && absY>SWIPE_THRESHOLD && absX<SWIPE_TOLERANCE){
-        if(deltaY>0){
-          // 3-finger DOWN = show hidden tabs (easier than up)
-          console.log('[TOUCH] 3-finger DOWN - show hidden tab');
-          ipcRenderer.send('toggle-hidden');
-        } else if(deltaY<0){
-          // 3-finger UP = return to normal tabs
-          console.log('[TOUCH] 3-finger UP - return to normal tabs');
-          ipcRenderer.send('return-to-tabs');
-        }
+      // 3-finger DOWN = toggle hidden tabs (show/hide)
+      if(fingerCount===3 && absY>SWIPE_THRESHOLD && absX<SWIPE_TOLERANCE && deltaY>0){
+        console.log('[TOUCH] 3-finger DOWN - toggle hidden tabs');
+        ipcRenderer.send('toggle-hidden');
       }
       // 2-finger vertical DOWN = keyboard (ALWAYS works, no throttling)
       else if(fingerCount===2 && absY>SWIPE_THRESHOLD && absX<SWIPE_TOLERANCE && deltaY>0){

@@ -1,6 +1,6 @@
 # Ubuntu Based Kiosk (UBK)
 
-**Current Version:** 0.9.7-3 (check script header for latest version)
+**Current Version:** 0.9.7-4 (check script header for latest version)
 **Built with Claude Sonnet 4/.5 AI assistance**
 **License:** GPL v3 - Keep derivatives open source
 **Repository:** https://github.com/outis1one/ubk/
@@ -47,9 +47,9 @@ Home/office kiosk for reusing old hardware, displaying:
 # Enable SSH during installation
 
 # Download and run installer
-wget https://github.com/outis1one/ubk/raw/main/install_kiosk_0.9.7-3.sh
-chmod +x install_kiosk_0.9.7-3.sh
-./install_kiosk_0.9.7-3.sh
+wget https://github.com/outis1one/ubk/raw/main/install_kiosk_0.9.7-4.sh
+chmod +x install_kiosk_0.9.7-4.sh
+./install_kiosk_0.9.7-4.sh
 ```
 
 The installer will guide you through configuration during setup.
@@ -365,8 +365,7 @@ smb://WORKGROUP/COMPUTER/PrinterName
 |---------|---------|-----------|--------|
 | Swipe | 2 | Left/Right | Switch between sites |
 | Swipe | 1 | Left/Right | Navigate within page (arrow keys) |
-| Swipe | 3 | Up | Show hidden tabs (PIN required) |
-| Swipe | 3 | Down | Return to normal tabs |
+| Swipe | 3 | Down | Toggle hidden tabs (PIN required) |
 
 **Keyboard Shortcuts:**
 - `Ctrl+Tab` or `Ctrl+]` - Next tab
@@ -383,7 +382,7 @@ smb://WORKGROUP/COMPUTER/PrinterName
 
 ```bash
 # Run installer script again to access menu
-./install_kiosk_0.9.7-3.sh
+./install_kiosk_0.9.7-4.sh
 
 # Menu structure:
 # 1. Core Settings - Sites, WiFi, schedules, passwords, full reinstall, complete uninstall
@@ -478,8 +477,8 @@ echo "NOPIN" | sudo -u kiosk tee /home/kiosk/kiosk-app/.jitsi-pin
 - Triggers inactivity timeout (returns to home after idle time)
 
 **Hidden (duration = -1):**
-- Accessible via 3-finger up swipe + PIN
-- Return to normal tabs via 3-finger down swipe or Escape key
+- Toggle visibility via 3-finger down swipe + PIN, or F10 key
+- Also use Escape key to return to normal tabs
 - PIN stored in `/home/kiosk/kiosk-app/.jitsi-pin`
 - Default PIN: 1234 (configurable via Sites menu)
 - PIN can be 4-8 digits or disabled completely
@@ -623,15 +622,23 @@ Virtual consoles provide terminal access via Ctrl+Alt+F1 through F8 keyboard com
 **Post-Install Management:**
 ```bash
 # Access via menu: Advanced → Virtual Consoles (option 7)
+# Note: Changes require restarting the display manager to take effect
 
 # Manual enable
 for i in {1..8}; do sudo systemctl unmask getty@tty$i.service; done
 sudo systemctl daemon-reload
+sudo systemctl restart lightdm
 
 # Manual disable
 for i in {1..8}; do sudo systemctl mask getty@tty$i.service; done
 sudo systemctl daemon-reload
+sudo systemctl restart lightdm
 ```
+
+**Important Notes:**
+- **Version 0.9.7-4** fixed Ctrl+Alt+F1-F8 key combinations (now properly enables/disables X11 VT switching)
+- If you enabled virtual consoles in an earlier version, you must re-enable them from the menu for keys to work
+- Changes require restarting lightdm: `sudo systemctl restart lightdm`
 
 **Typical TTY Layout:**
 - TTY1-6: Login consoles (if enabled)
@@ -687,7 +694,7 @@ Full system cleanup that removes all kiosk components and restores the system to
 **Access:**
 ```bash
 # Core Settings menu → option 11
-./install_kiosk_0.9.7-3.sh
+./install_kiosk_0.9.7-4.sh
 # Choose: Core Settings → Complete Uninstall
 ```
 
@@ -849,7 +856,7 @@ See the LICENSE file in the repository for full terms.
 
 ## Project Status & Future Plans
 
-**Current Version:** 0.9.7-3 - Install Improvements & Management Features
+**Current Version:** 0.9.7-4 - Gesture & Console Improvements
 
 **Planned Features:**
 - Web-based GUI configuration interface
@@ -892,4 +899,4 @@ Special thanks to the maintainers of all upstream projects that make UBK possibl
 ---
 
 *Last Updated: December 2, 2024*
-*Version: 0.9.7-3*
+*Version: 0.9.7-4*
