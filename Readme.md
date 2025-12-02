@@ -1,8 +1,8 @@
 # Ubuntu Based Kiosk (UBK)
 
-**Current Version:** 0.9.7-3 (check script header for latest version)
-**Built with Claude Sonnet 4/.5 AI assistance**
-**License:** GPL v3 - Keep derivatives open source
+**Current Version:** 0.9.7-3 (check script header for latest version)  
+**Built with Claude Sonnet 4/.5 AI assistance**  
+**License:** GPL v3 - Keep derivatives open source  
 **Repository:** https://github.com/outis1one/ubk/
 
 ---
