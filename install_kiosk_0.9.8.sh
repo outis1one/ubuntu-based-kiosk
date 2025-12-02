@@ -3979,6 +3979,7 @@ let inactivityTimeout=120000;
 let allowNavigation='same-origin';
 let enablePauseButton=true;
 let enableKeyboardButton=true;
+let enableNavButton=true;
 let enablePasswordProtection=false;
 let lockoutPassword="";
 let lockoutTimeout=0;
@@ -4010,6 +4011,7 @@ function loadConfig(){
     allowNavigation=config.allowNavigation||'same-origin';
     enablePauseButton=(config.enablePauseButton!==false);
     enableKeyboardButton=(config.enableKeyboardButton!==false);
+    enableNavButton=(config.enableNavButton!==false);
     enablePasswordProtection=(config.enablePasswordProtection===true);
     lockoutPassword=config.lockoutPassword||"";
     lockoutTimeout=(config.lockoutTimeout||0)*60000; // Convert minutes to ms
@@ -5225,6 +5227,10 @@ function createWindow(){
 
       view.webContents.send('keyboard-button-enabled',enableKeyboardButton);
       console.log('[MAIN] Page loaded - sending keyboard-button-enabled: '+enableKeyboardButton);
+
+      view.webContents.send('nav-button-enabled',enableNavButton);
+      console.log('[MAIN] Page loaded - sending nav-button-enabled: '+enableNavButton);
+
       console.log('[MAIN] Page loaded - resending pause-button-visibility: '+shouldShow+' for '+t.url);
     });
     
@@ -5273,6 +5279,22 @@ function createWindow(){
       if(lockoutWindow&&!lockoutWindow.isDestroyed()){
         lockoutWindow.webContents.send('password-incorrect');
       }
+    }
+  });
+
+  ipcMain.on('get-config',(event)=>{
+    event.sender.send('config-data',config);
+  });
+
+  ipcMain.on('navigate-to-tab',(event,tabIndex)=>{
+    console.log('[NAV] Navigate to tab '+tabIndex);
+    if(showingHidden){
+      forceReturnToTabs();
+    }
+    const viewIndex=tabIndexToViewIndex[tabIndex];
+    if(viewIndex!==undefined&&viewIndex>=0&&viewIndex<views.length){
+      currentIndex=viewIndex;
+      showView(currentIndex);
     }
   });
   
@@ -6074,12 +6096,13 @@ INACTHTML
 sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/preload.js" > /dev/null <<'PRELOAD'
 const {contextBridge,ipcRenderer}=require('electron');
 
-console.log('═════════════════════════════════════════════════════════════');
+console.log('════════════════════════════════════════════════════════════');
 console.log('  Gestures:');
 console.log('    3-finger DOWN: Toggle hidden tabs (PIN required)');
 console.log('    2-finger HORIZONTAL: Switch between sites');
-console.log('  Keyboard: Auto-shows on text fields or click icon');
-console.log('╚═══════════════════════════════════════════════════════════╝');
+console.log('    1-finger HORIZONTAL: Navigate within page');
+console.log('  Navigation: Top-left key icon for site menu');
+console.log('════════════════════════════════════════════════════════════');
 
 contextBridge.exposeInMainWorld('electronAPI', {
   notifyActivity: () => ipcRenderer.send('user-activity'),
@@ -6154,6 +6177,10 @@ function hidePauseButton(){
 let keyboardButtonEnabled=true;
 let keyboardVisible=false;
 let keyboardIcon=null;
+let navButtonEnabled=true;
+let navButton=null;
+let navMenu=null;
+let navMenuVisible=false;
 
 // Listen for pause button visibility control from main process
 // CRITICAL: This must be outside DOMContentLoaded so it doesn't reset on page load
@@ -6176,6 +6203,17 @@ ipcRenderer.on('keyboard-button-enabled',(event,enabled)=>{
   // Note: keyboardIcon may not exist yet if page hasn't loaded
   if(keyboardIcon&&!enabled){
     keyboardIcon.style.display='none';
+  }
+});
+
+ipcRenderer.on('nav-button-enabled',(event,enabled)=>{
+  navButtonEnabled=enabled;
+  console.log('[NAV-BTN] Navigation button enabled: '+enabled);
+  if(navButton&&!enabled){
+    navButton.style.display='none';
+  }
+  if(navMenu&&!enabled){
+    navMenu.style.display='none';
   }
 });
 
@@ -6275,7 +6313,200 @@ window.addEventListener('DOMContentLoaded',()=>{
   function hideKeyboardIcon(){
     if(keyboardIcon)keyboardIcon.style.display='none';
   }
-  
+
+  function createNavButton(){
+    if(navButton||!navButtonEnabled)return;
+
+    navButton=document.createElement('div');
+    navButton.id='electron-nav-button';
+    navButton.innerHTML='🔑';
+    navButton.title='Navigation Menu';
+    navButton.style.cssText=`
+      position:fixed;top:20px;left:20px;width:60px;height:60px;
+      background:rgba(155,89,182,0.95);border:3px solid rgba(255,255,255,0.9);
+      border-radius:50%;display:none;align-items:center;justify-content:center;
+      font-size:32px;cursor:pointer;z-index:999999;
+      box-shadow:0 4px 12px rgba(0,0,0,0.4);user-select:none;
+    `;
+
+    navButton.addEventListener('click',(e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      toggleNavMenu();
+    });
+
+    document.body.appendChild(navButton);
+  }
+
+  function showNavButton(){
+    if(!navButtonEnabled)return;
+    if(!navButton)createNavButton();
+    if(navButton)navButton.style.display='flex';
+  }
+
+  function hideNavButton(){
+    if(navButton)navButton.style.display='none';
+  }
+
+  function createNavMenu(){
+    if(navMenu)return;
+
+    navMenu=document.createElement('div');
+    navMenu.id='electron-nav-menu';
+    navMenu.style.cssText=`
+      position:fixed;top:0;left:0;width:100%;height:100%;
+      background:rgba(0,0,0,0.9);display:none;align-items:center;justify-content:center;
+      z-index:999998;
+    `;
+
+    const content=document.createElement('div');
+    content.style.cssText=`
+      background:rgba(44,62,80,0.98);border-radius:20px;padding:40px;
+      max-width:90%;max-height:90%;overflow-y:auto;
+      box-shadow:0 10px 40px rgba(0,0,0,0.5);
+    `;
+
+    const closeBtn=document.createElement('div');
+    closeBtn.innerHTML='✕';
+    closeBtn.style.cssText=`
+      position:absolute;top:20px;right:20px;font-size:32px;color:white;
+      cursor:pointer;width:40px;height:40px;display:flex;align-items:center;
+      justify-content:center;border-radius:50%;background:rgba(231,76,60,0.8);
+    `;
+    closeBtn.addEventListener('click',hideNavMenu);
+    content.appendChild(closeBtn);
+
+    const columns=document.createElement('div');
+    columns.style.cssText='display:flex;gap:40px;margin-top:20px;';
+
+    // Column 1: Sites
+    const sitesCol=document.createElement('div');
+    sitesCol.style.cssText='flex:1;min-width:300px;';
+    sitesCol.innerHTML='<h2 style="color:white;margin-bottom:20px;">Sites</h2>';
+    const sitesList=document.createElement('div');
+    sitesList.id='nav-sites-list';
+    sitesList.style.cssText='display:flex;flex-direction:column;gap:10px;';
+    sitesCol.appendChild(sitesList);
+
+    // Column 2: Gesture Cheat Sheet
+    const cheatCol=document.createElement('div');
+    cheatCol.style.cssText='flex:1;min-width:300px;';
+    cheatCol.innerHTML=`
+      <h2 style="color:white;margin-bottom:20px;">Touch Gestures</h2>
+      <div style="color:#ecf0f1;line-height:1.8;font-size:16px;">
+        <div style="margin-bottom:15px;">
+          <div style="font-weight:bold;color:#3498db;">2-Finger Horizontal Swipe</div>
+          <div style="padding-left:15px;">Switch between sites</div>
+        </div>
+        <div style="margin-bottom:15px;">
+          <div style="font-weight:bold;color:#3498db;">1-Finger Horizontal Swipe</div>
+          <div style="padding-left:15px;">Navigate within page (arrow keys)</div>
+        </div>
+        <div style="margin-bottom:15px;">
+          <div style="font-weight:bold;color:#9b59b6;">3-Finger Down Swipe</div>
+          <div style="padding-left:15px;">Toggle hidden tabs (PIN required)</div>
+        </div>
+        <div style="margin-bottom:25px;padding-top:15px;border-top:1px solid rgba(255,255,255,0.2);">
+          <div style="font-weight:bold;color:#e74c3c;">Keyboard Shortcuts</div>
+        </div>
+        <div style="margin-bottom:10px;">
+          <div style="padding-left:15px;"><kbd style="background:rgba(255,255,255,0.2);padding:2px 8px;border-radius:3px;">Ctrl+Tab</kbd> or <kbd style="background:rgba(255,255,255,0.2);padding:2px 8px;border-radius:3px;">Ctrl+]</kbd> Next tab</div>
+        </div>
+        <div style="margin-bottom:10px;">
+          <div style="padding-left:15px;"><kbd style="background:rgba(255,255,255,0.2);padding:2px 8px;border-radius:3px;">Ctrl+Shift+Tab</kbd> or <kbd style="background:rgba(255,255,255,0.2);padding:2px 8px;border-radius:3px;">Ctrl+[</kbd> Previous tab</div>
+        </div>
+        <div style="margin-bottom:10px;">
+          <div style="padding-left:15px;"><kbd style="background:rgba(255,255,255,0.2);padding:2px 8px;border-radius:3px;">F10</kbd> or <kbd style="background:rgba(255,255,255,0.2);padding:2px 8px;border-radius:3px;">Ctrl+H</kbd> Toggle hidden tabs</div>
+        </div>
+        <div style="margin-bottom:10px;">
+          <div style="padding-left:15px;"><kbd style="background:rgba(255,255,255,0.2);padding:2px 8px;border-radius:3px;">Escape</kbd> Return to normal tabs</div>
+        </div>
+        <div style="margin-bottom:10px;">
+          <div style="padding-left:15px;"><kbd style="background:rgba(255,255,255,0.2);padding:2px 8px;border-radius:3px;">Ctrl+Alt+Delete</kbd> or <kbd style="background:rgba(255,255,255,0.2);padding:2px 8px;border-radius:3px;">Ctrl+Alt+P</kbd> Power menu</div>
+        </div>
+        <div style="margin-bottom:10px;">
+          <div style="padding-left:15px;"><kbd style="background:rgba(255,255,255,0.2);padding:2px 8px;border-radius:3px;">Ctrl+K</kbd> Toggle keyboard</div>
+        </div>
+      </div>
+    `;
+
+    columns.appendChild(sitesCol);
+    columns.appendChild(cheatCol);
+    content.appendChild(columns);
+    navMenu.appendChild(content);
+
+    navMenu.addEventListener('click',(e)=>{
+      if(e.target===navMenu){
+        hideNavMenu();
+      }
+    });
+
+    document.body.appendChild(navMenu);
+  }
+
+  function toggleNavMenu(){
+    if(navMenuVisible){
+      hideNavMenu();
+    }else{
+      showNavMenu();
+    }
+  }
+
+  function showNavMenu(){
+    if(!navMenu)createNavMenu();
+    loadSitesIntoNav();
+    navMenu.style.display='flex';
+    navMenuVisible=true;
+  }
+
+  function hideNavMenu(){
+    if(navMenu)navMenu.style.display='none';
+    navMenuVisible=false;
+  }
+
+  function loadSitesIntoNav(){
+    const sitesList=document.getElementById('nav-sites-list');
+    if(!sitesList)return;
+
+    // Request config from main process
+    ipcRenderer.send('get-config');
+  }
+
+  ipcRenderer.on('config-data',(event,config)=>{
+    const sitesList=document.getElementById('nav-sites-list');
+    if(!sitesList||!config||!config.tabs)return;
+
+    sitesList.innerHTML='';
+
+    config.tabs.forEach((tab,index)=>{
+      // Skip hidden tabs (duration === -1)
+      if(tab.duration===-1)return;
+
+      const siteBtn=document.createElement('div');
+      const displayName=tab.name||tab.url;
+      siteBtn.innerHTML=displayName;
+      siteBtn.style.cssText=`
+        padding:15px 20px;background:rgba(52,152,219,0.8);color:white;
+        border-radius:10px;cursor:pointer;font-size:18px;
+        transition:all 0.2s;border:2px solid transparent;
+      `;
+      siteBtn.addEventListener('mouseenter',()=>{
+        siteBtn.style.background='rgba(52,152,219,1)';
+        siteBtn.style.borderColor='rgba(255,255,255,0.5)';
+      });
+      siteBtn.addEventListener('mouseleave',()=>{
+        siteBtn.style.background='rgba(52,152,219,0.8)';
+        siteBtn.style.borderColor='transparent';
+      });
+      siteBtn.addEventListener('click',()=>{
+        ipcRenderer.send('navigate-to-tab',index);
+        hideNavMenu();
+      });
+
+      sitesList.appendChild(siteBtn);
+    });
+  });
+
   function isTextInput(el){
     if(!el)return false;
     const tag=(el.tagName||'').toLowerCase();
@@ -6379,6 +6610,11 @@ window.addEventListener('DOMContentLoaded',()=>{
         console.log('[PAUSE-BTN] Resetting auto-hide timer');
       }
       showPauseButton(); // This will reset the hide timer
+    }
+
+    // Always show navigation button on user interaction (if enabled)
+    if(navButtonEnabled){
+      showNavButton();
     }
   }
 
@@ -8314,8 +8550,11 @@ disable_keyboard_autoshow() {
 const {contextBridge,ipcRenderer}=require('electron');
 
 console.log('════════════════════════════════════════════════════════════');
-console.log('  Hidden Tab: 3-finger DOWN swipe (PIN protected)');
-console.log('  Keyboard: 2-finger DOWN swipe (always available)');
+console.log('  Gestures:');
+console.log('    3-finger DOWN: Toggle hidden tabs (PIN required)');
+console.log('    2-finger HORIZONTAL: Switch between sites');
+console.log('    1-finger HORIZONTAL: Navigate within page');
+console.log('  Navigation: Top-left key icon for site menu');
 console.log('════════════════════════════════════════════════════════════');
 
 contextBridge.exposeInMainWorld('electronAPI', {

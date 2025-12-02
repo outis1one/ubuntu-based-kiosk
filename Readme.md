@@ -1,6 +1,6 @@
 # Ubuntu Based Kiosk (UBK)
 
-**Current Version:** 0.9.7-5 (check script header for latest version)
+**Current Version:** 0.9.8 (check script header for latest version)
 **Built with Claude Sonnet 4/.5 AI assistance**
 **License:** GPL v3 - Keep derivatives open source
 **Repository:** https://github.com/outis1one/ubk/
@@ -47,9 +47,9 @@ Home/office kiosk for reusing old hardware, displaying:
 # Enable SSH during installation
 
 # Download and run installer
-wget https://github.com/outis1one/ubk/raw/main/install_kiosk_0.9.7-5.sh
-chmod +x install_kiosk_0.9.7-5.sh
-./install_kiosk_0.9.7-5.sh
+wget https://github.com/outis1one/ubk/raw/main/install_kiosk_0.9.8.sh
+chmod +x install_kiosk_0.9.8.sh
+./install_kiosk_0.9.8.sh
 ```
 
 The installer will guide you through configuration during setup.
@@ -60,18 +60,20 @@ The installer will guide you through configuration during setup.
 
 ### Multi-Site Management
 - **Single or multiple sites** with independent configurations
+- **Named sites** - Optional friendly names for easy identification in navigation menu
 - **Auto-rotation** - Sites rotate automatically based on duration
 - **Manual sites** - Duration = 0, accessible via swipe only, trigger inactivity timeout
 - **Hidden sites** - Duration = -1, PIN-protected access, trigger inactivity timeout
 - **Home URL** - Auto-return after inactivity on manual or hidden sites
 - **Pause functionality** - Temporarily pause rotation (configurable per-site)
+- **Navigation menu** - Quick access to all sites via key icon (top-left hot corner)
 
 ### Touch Controls
 - **2-finger horizontal swipe** - Switch between sites
-- **3-finger up swipe** - Access hidden tabs (PIN required)
-- **3-finger down swipe** - Return to normal tabs (from hidden tabs)
+- **3-finger down swipe** - Toggle hidden tabs (PIN required to show, swipe again to hide)
 - **1-finger swipe** (dual mode) - Navigate within page (arrow keys)
 - **On-screen keyboard** - Auto-shows on text fields or click keyboard icon
+- **Navigation menu** - Click key icon (top-left) to access site list and gesture cheat sheet
 
 ### On-Screen Keyboard
 - **HTML-based keyboard** with full QWERTY layout
@@ -382,7 +384,7 @@ smb://WORKGROUP/COMPUTER/PrinterName
 
 ```bash
 # Run installer script again to access menu
-./install_kiosk_0.9.7-5.sh
+./install_kiosk_0.9.8.sh
 
 # Menu structure:
 # 1. Core Settings - Sites, WiFi, schedules, passwords, full reinstall, complete uninstall
@@ -564,6 +566,44 @@ Hidden tabs are perfect for scenarios where you need access to sensitive or priv
 
 The hidden tab system provides a balance between public accessibility and private functionality without needing to physically access a terminal or reconfigure the system.
 
+#### Why Use Named Sites?
+
+Named sites provide user-friendly labels that make navigation and management easier, especially when dealing with multiple similar URLs or complex web addresses.
+
+**Benefits:**
+
+- **Easier Navigation:** Click "Photo Gallery" instead of remembering "https://immich.mydomain.com:2283"
+- **Better Organization:** Quickly identify sites in the navigation menu without parsing URLs
+- **User-Friendly:** Non-technical users can find sites by name instead of domain
+- **Cleaner Display:** "Home Assistant" is more readable than "http://192.168.1.50:8123"
+- **Professional Appearance:** Business kiosks benefit from descriptive names over technical URLs
+
+**Use Cases:**
+
+**Home/Family Kiosks:**
+- "Photo Albums" instead of "https://photoprism.local:2342"
+- "Weather" instead of "https://weather.com"
+- "Security Cameras" instead of "http://192.168.1.100:8000"
+- "Smart Home" instead of "http://homeassistant.local:8123"
+
+**Business Kiosks:**
+- "Employee Portal" instead of "https://portal.company.com/employees"
+- "Time Clock" instead of "https://timekeeping.company.com/punch"
+- "Inventory System" instead of "http://10.0.0.50:8080/inventory"
+- "Customer Service" instead of "https://crm.company.com/support"
+
+**Digital Signage:**
+- "Dashboard 1" through "Dashboard 5" for rotating content
+- "Announcements" instead of "https://cms.local/public/announcements"
+- "Menu Board" instead of "http://192.168.1.75/menus/today"
+
+**Multi-Location Setups:**
+- "Building A Reception" and "Building B Reception" for identical URL structures
+- "Floor 1 Display" through "Floor 10 Display" for elevator kiosks
+- "East Wing" and "West Wing" for hospital navigation
+
+Names are completely optional - if left blank, the URL will be displayed as usual. Configure names during initial setup or update them later via: Core Settings → Sites → Update site names.
+
 ### Inactivity Extensions
 
 When "Are you still here?" prompt appears (on manual or hidden sites):
@@ -727,7 +767,7 @@ Full system cleanup that removes all kiosk components and restores the system to
 **Access:**
 ```bash
 # Core Settings menu → option 11
-./install_kiosk_0.9.7-5.sh
+./install_kiosk_0.9.8.sh
 # Choose: Core Settings → Complete Uninstall
 ```
 
@@ -889,7 +929,7 @@ See the LICENSE file in the repository for full terms.
 
 ## Project Status & Future Plans
 
-**Current Version:** 0.9.7-5 - Maintenance & Polish Update
+**Current Version:** 0.9.8 - Named Sites & Navigation Menu
 
 **Planned Features:**
 - Web-based GUI configuration interface
@@ -932,4 +972,4 @@ Special thanks to the maintainers of all upstream projects that make UBK possibl
 ---
 
 *Last Updated: December 2, 2025*
-*Version: 0.9.7-5*
+*Version: 0.9.8*
