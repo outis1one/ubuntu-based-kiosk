@@ -48,9 +48,9 @@ Home/office kiosk for reusing old hardware, displaying:
 # Enable SSH during installation
 
 # Download and run installer
-wget https://github.com/outis1one/ubk/raw/main/install_kiosk_v0.9.9.sh
-chmod +x install_kiosk_v0.9.9.sh
-./install_kiosk_v0.9.9.sh
+wget https://github.com/outis1one/ubk/raw/main/install_kiosk_v0.9.8.sh
+chmod +x install_kiosk_v0.9.8.sh
+./install_kiosk_v0.9.8.sh
 ```
 
 The installer will guide you through configuration during setup.
@@ -393,7 +393,7 @@ smb://WORKGROUP/COMPUTER/PrinterName
 
 ```bash
 # Run installer script again to access menu
-./install_kiosk_0.9.9.sh
+./install_kiosk_v0.9.8.sh
 
 # Menu structure:
 # 1. Core Settings - Sites, WiFi, schedules, passwords, full reinstall, complete uninstall
@@ -408,9 +408,9 @@ The Easy Asterisk Intercom addon provides voice communication capabilities to yo
 
 **Access the addon menu:**
 ```bash
-./install_kiosk_v0.9.9.sh
-# Select: 2) Manage Addons
-# Then: 1) Install/Update Intercom (Easy Asterisk)
+./install_kiosk_v0.9.8.sh
+# Select: 2) Addons
+# Then: 4) Easy Asterisk Intercom
 ```
 
 **Features:**
@@ -437,9 +437,9 @@ asterisk -rvvv
 # Restart Asterisk
 systemctl restart asterisk
 
-# Configure intercom
-./install_kiosk_v0.9.9.sh
-# Select: 2) Manage Addons → 4) Configure Intercom
+# Configure intercom (rerun installation to update)
+./install_kiosk_v0.9.8.sh
+# Select: 2) Addons → 4) Easy Asterisk Intercom
 ```
 
 **Installation location:**
@@ -972,12 +972,13 @@ See the LICENSE file in the repository for full terms.
 
 ## Project Status & Future Plans
 
-**Current Version:** 0.9.9 - Easy Asterisk Intercom Integration
+**Current Version:** 0.9.8 - Named Sites & Easy Asterisk Intercom
 
-**Recent Updates (v0.9.9):**
+**Recent Updates (v0.9.8):**
 - Easy Asterisk Intercom addon with automatic updates
 - Smart version detection and configuration preservation
-- Enhanced addon management system
+- Named websites feature for user-friendly site identification
+- Navigation menu with key icon
 
 **Planned Features:**
 - Web-based GUI configuration interface
@@ -1019,4 +1020,4 @@ Special thanks to the maintainers of all upstream projects that make UBK possibl
 ---
 
 *Last Updated: December 10, 2025*
-*Version: 0.9.9*
+*Version: 0.9.8*
