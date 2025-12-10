@@ -212,86 +212,280 @@ EOF
 }
 
 ################################################################################
-# Intercom Integration
+# Intercom Integration (Easy Asterisk)
 ################################################################################
 
-install_intercom() {
-    log_info "Installing Intercom addon..."
-    
-    local intercom_addon_path="${ADDON_DIR}/intercom"
-    mkdir -p "$intercom_addon_path"
-    
-    # Create Intercom configuration
-    cat > "${intercom_addon_path}/config.conf" <<'EOF'
-[intercom]
-enabled = true
-version = 1.0
-description = Intercom System Integration for UBK Kiosk
+# GitHub repository details
+EASY_ASTERISK_REPO="outis1one/easy-asterisk"
+EASY_ASTERISK_RAW_URL="https://raw.githubusercontent.com/${EASY_ASTERISK_REPO}/main"
+EASY_ASTERISK_API_URL="https://api.github.com/repos/${EASY_ASTERISK_REPO}/contents"
 
-[intercom_server]
-host = localhost
-port = 8888
-protocol = HTTP
+# Local installation paths
+EASY_ASTERISK_INSTALL_DIR="/opt/easy-asterisk"
+EASY_ASTERISK_VERSION_FILE="${EASY_ASTERISK_INSTALL_DIR}/.version"
+EASY_ASTERISK_CONFIG_BACKUP="${EASY_ASTERISK_INSTALL_DIR}/config_backup"
 
-[features]
-two_way_audio = true
-video_support = false
-call_recording = true
-presence_detection = true
-emergency_alert = true
+################################################################################
+# Function: get_latest_easy_asterisk_version
+# Description: Get the latest version of easy-asterisk from GitHub
+# Returns: Version string (e.g., "1.2.3") or empty string on failure
+################################################################################
+get_latest_easy_asterisk_version() {
+    log_info "Checking for latest Easy Asterisk version..."
 
-[devices]
-auto_discovery = true
-max_devices = 20
-timeout = 30
+    # Try to get file list from GitHub API
+    local files_json=$(curl -s "${EASY_ASTERISK_API_URL}" 2>/dev/null)
 
-[security]
-require_authentication = true
-enable_encryption = true
-allowed_ips = 0.0.0.0/0
-
-[audio]
-codec = opus
-sample_rate = 16000
-bit_depth = 16
-EOF
-
-    # Create initialization script
-    cat > "${intercom_addon_path}/init.sh" <<'EOF'
-#!/bin/bash
-
-ADDON_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-CONFIG_FILE="${ADDON_DIR}/config.conf"
-
-echo "[Intercom] Initializing addon..."
-
-# Check required packages
-for pkg in pulseaudio alsa-utils; do
-    if ! dpkg -l | grep -q "^ii  $pkg"; then
-        echo "[Intercom] Installing $pkg..."
-        sudo apt-get update
-        sudo apt-get install -y "$pkg"
+    if [ $? -ne 0 ] || [ -z "$files_json" ]; then
+        log_warning "Could not fetch file list from GitHub API"
+        return 1
     fi
-done
 
-# Load configuration
-if [ -f "$CONFIG_FILE" ]; then
-    echo "[Intercom] Configuration loaded"
-fi
+    # Extract easy-asterisk-v*.sh files and find the latest version
+    local latest_version=$(echo "$files_json" | grep -oP 'easy-asterisk-v\K[0-9]+\.[0-9]+\.[0-9]+(?=\.sh)' | sort -V | tail -1)
 
-# Start audio services
-sudo systemctl restart pulseaudio || true
-sudo systemctl restart alsasound || true
+    if [ -z "$latest_version" ]; then
+        log_warning "No version files found in repository"
+        return 1
+    fi
 
-echo "[Intercom] Addon initialized successfully"
-EOF
+    echo "$latest_version"
+    return 0
+}
 
-    chmod +x "${intercom_addon_path}/init.sh"
-    
-    # Run initialization
-    bash "${intercom_addon_path}/init.sh"
-    
-    log_success "Intercom addon installed"
+################################################################################
+# Function: get_installed_easy_asterisk_version
+# Description: Get the currently installed version of easy-asterisk
+# Returns: Version string or empty if not installed
+################################################################################
+get_installed_easy_asterisk_version() {
+    if [ -f "$EASY_ASTERISK_VERSION_FILE" ]; then
+        cat "$EASY_ASTERISK_VERSION_FILE"
+        return 0
+    fi
+
+    echo ""
+    return 1
+}
+
+################################################################################
+# Function: backup_easy_asterisk_configs
+# Description: Backup existing configuration files before update
+# Returns: 0 on success, 1 on failure
+################################################################################
+backup_easy_asterisk_configs() {
+    log_info "Backing up Easy Asterisk configurations..."
+
+    if [ ! -d "$EASY_ASTERISK_INSTALL_DIR" ]; then
+        log_info "No existing installation to backup"
+        return 0
+    fi
+
+    # Create backup directory with timestamp
+    local backup_dir="${EASY_ASTERISK_CONFIG_BACKUP}/$(date +%Y%m%d_%H%M%S)"
+    mkdir -p "$backup_dir"
+
+    # Backup common config directories and files
+    for item in config etc *.conf *.cfg; do
+        if [ -e "${EASY_ASTERISK_INSTALL_DIR}/${item}" ]; then
+            cp -r "${EASY_ASTERISK_INSTALL_DIR}/${item}" "$backup_dir/" 2>/dev/null || true
+        fi
+    done
+
+    # Also backup Asterisk configs if they exist
+    if [ -d "/etc/asterisk" ]; then
+        mkdir -p "${backup_dir}/asterisk_etc"
+        cp -r /etc/asterisk/*.conf "${backup_dir}/asterisk_etc/" 2>/dev/null || true
+    fi
+
+    log_success "Configuration backup created at: $backup_dir"
+    return 0
+}
+
+################################################################################
+# Function: restore_easy_asterisk_configs
+# Description: Restore configuration files after update
+# Parameters: $1 - Backup directory path
+# Returns: 0 on success, 1 on failure
+################################################################################
+restore_easy_asterisk_configs() {
+    local backup_dir="$1"
+
+    if [ -z "$backup_dir" ] || [ ! -d "$backup_dir" ]; then
+        log_info "No backup to restore"
+        return 0
+    fi
+
+    log_info "Restoring Easy Asterisk configurations..."
+
+    # Restore backed up items
+    for item in $(ls -A "$backup_dir"); do
+        if [ "$item" != "asterisk_etc" ]; then
+            cp -r "${backup_dir}/${item}" "${EASY_ASTERISK_INSTALL_DIR}/" 2>/dev/null || true
+        fi
+    done
+
+    # Restore Asterisk configs if they were backed up
+    if [ -d "${backup_dir}/asterisk_etc" ]; then
+        cp -r "${backup_dir}/asterisk_etc"/*.conf /etc/asterisk/ 2>/dev/null || true
+    fi
+
+    log_success "Configuration restored"
+    return 0
+}
+
+################################################################################
+# Function: download_and_install_easy_asterisk
+# Description: Download and run the Easy Asterisk installation script
+# Parameters: $1 - Version to install
+# Returns: 0 on success, 1 on failure
+################################################################################
+download_and_install_easy_asterisk() {
+    local version="$1"
+    local script_name="easy-asterisk-v${version}.sh"
+    local script_url="${EASY_ASTERISK_RAW_URL}/${script_name}"
+    local temp_script="/tmp/${script_name}"
+
+    log_info "Downloading Easy Asterisk v${version}..."
+
+    # Download the installation script
+    if ! curl -fsSL "$script_url" -o "$temp_script"; then
+        log_error "Failed to download Easy Asterisk installation script"
+        log_error "URL: $script_url"
+        return 1
+    fi
+
+    # Verify the script was downloaded
+    if [ ! -f "$temp_script" ] || [ ! -s "$temp_script" ]; then
+        log_error "Downloaded script is empty or missing"
+        return 1
+    fi
+
+    # Make script executable
+    chmod +x "$temp_script"
+
+    log_info "Running Easy Asterisk installation script..."
+    log_info "This may take several minutes..."
+
+    # Run the installation script
+    if bash "$temp_script"; then
+        log_success "Easy Asterisk installation completed"
+
+        # Save version information
+        mkdir -p "$EASY_ASTERISK_INSTALL_DIR"
+        echo "$version" > "$EASY_ASTERISK_VERSION_FILE"
+
+        # Clean up temp file
+        rm -f "$temp_script"
+        return 0
+    else
+        log_error "Easy Asterisk installation failed"
+        rm -f "$temp_script"
+        return 1
+    fi
+}
+
+################################################################################
+# Function: install_intercom
+# Description: Install or update Easy Asterisk Intercom addon
+# Returns: 0 on success, 1 on failure
+################################################################################
+install_intercom() {
+    echo ""
+    echo -e "${BLUE}================================${NC}"
+    echo -e "${BLUE}Easy Asterisk Intercom Setup${NC}"
+    echo -e "${BLUE}================================${NC}"
+    echo ""
+
+    # Get latest version from GitHub
+    local latest_version=$(get_latest_easy_asterisk_version)
+
+    if [ -z "$latest_version" ]; then
+        log_error "Could not determine latest version"
+        log_error "Please check your internet connection and that the repository is accessible"
+        log_error "Repository: https://github.com/${EASY_ASTERISK_REPO}"
+        return 1
+    fi
+
+    log_info "Latest version available: v${latest_version}"
+
+    # Check if already installed
+    local installed_version=$(get_installed_easy_asterisk_version)
+
+    if [ -n "$installed_version" ]; then
+        log_info "Currently installed version: v${installed_version}"
+
+        # Compare versions
+        if [ "$installed_version" = "$latest_version" ]; then
+            echo ""
+            log_info "Easy Asterisk v${installed_version} is already installed (latest version)"
+            echo ""
+            read -p "Do you want to re-run the installation? (y/N): " rerun_choice
+
+            if [[ ! "$rerun_choice" =~ ^[Yy]$ ]]; then
+                log_info "Installation cancelled"
+                return 0
+            fi
+
+            log_info "Re-running installation (configs will be preserved)..."
+        else
+            echo ""
+            log_info "Update available: v${installed_version} → v${latest_version}"
+            echo ""
+            read -p "Do you want to update? (Y/n): " update_choice
+
+            if [[ "$update_choice" =~ ^[Nn]$ ]]; then
+                log_info "Update cancelled"
+                return 0
+            fi
+
+            log_info "Updating Easy Asterisk..."
+        fi
+
+        # Backup existing configurations
+        backup_easy_asterisk_configs
+        local backup_dir=$(ls -td "${EASY_ASTERISK_CONFIG_BACKUP}"/* 2>/dev/null | head -1)
+    else
+        log_info "Easy Asterisk is not currently installed"
+        echo ""
+        read -p "Do you want to install Easy Asterisk v${latest_version}? (Y/n): " install_choice
+
+        if [[ "$install_choice" =~ ^[Nn]$ ]]; then
+            log_info "Installation cancelled"
+            return 0
+        fi
+    fi
+
+    # Download and install
+    if download_and_install_easy_asterisk "$latest_version"; then
+        # Restore configurations if this was an update/rerun
+        if [ -n "$backup_dir" ]; then
+            restore_easy_asterisk_configs "$backup_dir"
+        fi
+
+        echo ""
+        log_success "Easy Asterisk Intercom is ready!"
+        log_info "Installation directory: $EASY_ASTERISK_INSTALL_DIR"
+        log_info "Version: v${latest_version}"
+
+        if [ -n "$installed_version" ] && [ "$installed_version" != "$latest_version" ]; then
+            log_success "Successfully updated from v${installed_version} to v${latest_version}"
+            log_info "Your configurations have been preserved"
+        fi
+
+        echo ""
+        return 0
+    else
+        log_error "Installation failed"
+
+        # Attempt to restore from backup if update failed
+        if [ -n "$backup_dir" ]; then
+            log_warning "Attempting to restore previous configuration..."
+            restore_easy_asterisk_configs "$backup_dir"
+        fi
+
+        return 1
+    fi
 }
 
 ################################################################################
@@ -305,7 +499,7 @@ display_addon_menu() {
         echo -e "${BLUE}   UBK Kiosk v${SCRIPT_VERSION} Addon Menu${NC}"
         echo -e "${BLUE}================================${NC}"
         echo "1) Install Easy Asterisk"
-        echo "2) Install Intercom"
+        echo "2) Install/Update Intercom (Easy Asterisk)"
         echo "3) Install Custom Addon"
         echo "4) List Installed Addons"
         echo "5) Configure Easy Asterisk"
@@ -400,25 +594,63 @@ configure_easy_asterisk() {
 }
 
 configure_intercom() {
-    local config_file="${ADDON_DIR}/intercom/config.conf"
-    
-    if [ ! -f "$config_file" ]; then
-        log_error "Intercom not installed"
-        return
+    # Check if Easy Asterisk is installed
+    if [ ! -d "$EASY_ASTERISK_INSTALL_DIR" ]; then
+        log_error "Easy Asterisk Intercom is not installed"
+        log_info "Please install it first using option 2 from the Addons menu"
+        return 1
     fi
-    
-    log_info "Configuring Intercom..."
-    
-    read -p "Enter Intercom server host [localhost]: " intercom_host
-    intercom_host="${intercom_host:-localhost}"
-    
-    read -p "Enter Intercom server port [8888]: " intercom_port
-    intercom_port="${intercom_port:-8888}"
-    
-    sed -i "s/^host = .*/host = $intercom_host/" "$config_file"
-    sed -i "s/^port = .*/port = $intercom_port/" "$config_file"
-    
-    log_success "Intercom configuration updated"
+
+    local installed_version=$(get_installed_easy_asterisk_version)
+
+    echo ""
+    echo -e "${BLUE}================================${NC}"
+    echo -e "${BLUE}Easy Asterisk Configuration${NC}"
+    echo -e "${BLUE}================================${NC}"
+    echo ""
+    log_info "Installed version: v${installed_version}"
+    log_info "Installation directory: $EASY_ASTERISK_INSTALL_DIR"
+    echo ""
+
+    # Check if the easy-asterisk installation has a configuration script
+    if [ -x "${EASY_ASTERISK_INSTALL_DIR}/configure.sh" ]; then
+        log_info "Running Easy Asterisk configuration script..."
+        bash "${EASY_ASTERISK_INSTALL_DIR}/configure.sh"
+    elif [ -d "/etc/asterisk" ]; then
+        log_info "Asterisk configuration files are located in /etc/asterisk/"
+        echo ""
+        echo "Common configuration files:"
+        echo "  - /etc/asterisk/sip.conf (SIP configuration)"
+        echo "  - /etc/asterisk/extensions.conf (Dialplan)"
+        echo "  - /etc/asterisk/pjsip.conf (PJSIP configuration)"
+        echo ""
+        read -p "Do you want to edit a configuration file? (y/N): " edit_choice
+
+        if [[ "$edit_choice" =~ ^[Yy]$ ]]; then
+            echo ""
+            echo "Available configuration files:"
+            ls -1 /etc/asterisk/*.conf 2>/dev/null | nl
+            echo ""
+            read -p "Enter file number to edit (or q to cancel): " file_num
+
+            if [[ "$file_num" =~ ^[0-9]+$ ]]; then
+                local config_file=$(ls -1 /etc/asterisk/*.conf 2>/dev/null | sed -n "${file_num}p")
+                if [ -f "$config_file" ]; then
+                    ${EDITOR:-nano} "$config_file"
+                    log_success "Configuration file edited: $config_file"
+                    log_info "Restarting Asterisk to apply changes..."
+                    systemctl restart asterisk
+                else
+                    log_error "Invalid file selection"
+                fi
+            fi
+        fi
+    else
+        log_warning "No configuration interface found"
+        log_info "You may need to manually configure Easy Asterisk"
+    fi
+
+    echo ""
 }
 
 view_addon_logs() {
