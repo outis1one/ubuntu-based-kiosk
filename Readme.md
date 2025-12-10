@@ -48,9 +48,9 @@ Home/office kiosk for reusing old hardware, displaying:
 # Enable SSH during installation
 
 # Download and run installer
-wget https://github.com/outis1one/ubk/raw/main/install_kiosk_0.9.8.sh
-chmod +x install_kiosk_0.9.8.sh
-./install_kiosk_0.9.8.sh
+wget https://github.com/outis1one/ubk/raw/main/install_kiosk_v0.9.9.sh
+chmod +x install_kiosk_v0.9.9.sh
+./install_kiosk_v0.9.9.sh
 ```
 
 The installer will guide you through configuration during setup.
@@ -111,6 +111,14 @@ The installer will guide you through configuration during setup.
 ---
 
 ## Optional Add-ons
+
+### Communication
+- **Easy Asterisk Intercom** - Voice communication and intercom system
+  - Downloads latest version from Easy Asterisk repository
+  - Automatic update detection and installation
+  - Configuration preservation during updates
+  - Full Asterisk PBX integration
+  - SIP/PJSIP support for IP phones and softphones
 
 ### Audio
 - **Lyrion Music Server (LMS)** - Formerly Logitech Media Server
@@ -385,14 +393,60 @@ smb://WORKGROUP/COMPUTER/PrinterName
 
 ```bash
 # Run installer script again to access menu
-./install_kiosk_0.9.8.sh
+./install_kiosk_0.9.9.sh
 
 # Menu structure:
 # 1. Core Settings - Sites, WiFi, schedules, passwords, full reinstall, complete uninstall
-# 2. Addons - LMS, CUPS, VNC, VPNs
+# 2. Addons - Easy Asterisk Intercom, LMS, CUPS, VNC, VPNs
 # 3. Advanced - Diagnostics, logs, Electron updates, virtual consoles, emergency hotspot
 # 4. Restart Kiosk Display
 ```
+
+### Installing Easy Asterisk Intercom
+
+The Easy Asterisk Intercom addon provides voice communication capabilities to your kiosk system.
+
+**Access the addon menu:**
+```bash
+./install_kiosk_v0.9.9.sh
+# Select: 2) Manage Addons
+# Then: 2) Install/Update Intercom (Easy Asterisk)
+```
+
+**Features:**
+- **Automatic installation** - Downloads and installs the latest version from the Easy Asterisk repository
+- **Update detection** - Checks for newer versions and prompts to update
+- **Safe re-runs** - Can be run multiple times without breaking existing configurations
+- **Config preservation** - Automatically backs up and restores configurations during updates
+- **Full Asterisk PBX** - Complete telephony features including SIP, extensions, voicemail
+
+**Installation behavior:**
+- **First install:** Downloads latest version from https://github.com/outis1one/easy-asterisk
+- **Already installed (latest):** Prompts to re-run installation (preserves configs)
+- **Update available:** Prompts to update and shows version difference
+- **All scenarios:** Configuration files in `/etc/asterisk/` and installation settings are preserved
+
+**Managing Easy Asterisk:**
+```bash
+# Check installation status
+systemctl status asterisk
+
+# View Asterisk console
+asterisk -rvvv
+
+# Restart Asterisk
+systemctl restart asterisk
+
+# Configure intercom
+./install_kiosk_v0.9.9.sh
+# Select: 2) Manage Addons → 6) Configure Intercom
+```
+
+**Installation location:**
+- Installation files: `/opt/easy-asterisk/`
+- Configuration: `/etc/asterisk/`
+- Version tracking: `/opt/easy-asterisk/.version`
+- Config backups: `/opt/easy-asterisk/config_backup/`
 
 ### Updating Electron
 
@@ -918,12 +972,16 @@ See the LICENSE file in the repository for full terms.
 
 ## Project Status & Future Plans
 
-**Current Version:** 0.9.8 - Named Sites & Navigation Menu
+**Current Version:** 0.9.9 - Easy Asterisk Intercom Integration
+
+**Recent Updates (v0.9.9):**
+- Easy Asterisk Intercom addon with automatic updates
+- Smart version detection and configuration preservation
+- Enhanced addon management system
 
 **Planned Features:**
 - Web-based GUI configuration interface
 - All-in-one ISO installer
-- Voice communication integration (Asterisk/Baresip)
 - Enhanced Raspberry Pi support and testing
 
 **Known Limitations:**
@@ -960,5 +1018,5 @@ Special thanks to the maintainers of all upstream projects that make UBK possibl
 
 ---
 
-*Last Updated: December 2, 2025*
-*Version: 0.9.8*
+*Last Updated: December 10, 2025*
+*Version: 0.9.9*
