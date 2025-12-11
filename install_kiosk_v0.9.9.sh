@@ -9175,20 +9175,29 @@ addon_easy_asterisk_intercom() {
         fi
 
         echo
-        # Ensure Asterisk service is enabled and running
+        # Ensure Asterisk service is enabled and running (with timeout protection)
         echo "Checking Asterisk service status..."
-        if timeout 5 systemctl is-active asterisk &>/dev/null; then
-            log_success "Asterisk service is running"
+
+        # Use timeout if available, otherwise skip detailed checks
+        if command -v timeout &>/dev/null; then
+            if timeout 5 systemctl is-active asterisk &>/dev/null; then
+                log_success "Asterisk service is running"
+            else
+                echo "Attempting to start Asterisk service..."
+                sudo systemctl enable asterisk 2>/dev/null || true
+                sudo systemctl start asterisk 2>/dev/null || true
+                sleep 3
+                if timeout 5 systemctl is-active asterisk &>/dev/null; then
+                    log_success "Asterisk service started successfully"
+                else
+                    log_warning "Asterisk service status unknown - check manually"
+                fi
+            fi
         else
-            echo "Attempting to start Asterisk service..."
+            # No timeout command, just attempt to start and move on
             sudo systemctl enable asterisk 2>/dev/null || true
             sudo systemctl start asterisk 2>/dev/null || true
-            sleep 3
-            if timeout 5 systemctl is-active asterisk &>/dev/null; then
-                log_success "Asterisk service started successfully"
-            else
-                log_warning "Asterisk service status unknown - check manually with: systemctl status asterisk"
-            fi
+            echo "Service start attempted - verify with: systemctl status asterisk"
         fi
 
         echo
