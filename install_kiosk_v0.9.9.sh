@@ -8992,21 +8992,21 @@ backup_easy_asterisk_configs() {
         return 0
     fi
 
-    # Create backup directory with timestamp
+    # Create backup directory with timestamp (using sudo)
     local backup_dir="${EASY_ASTERISK_CONFIG_BACKUP}/$(date +%Y%m%d_%H%M%S)"
-    mkdir -p "$backup_dir"
+    sudo mkdir -p "$backup_dir"
 
     # Backup common config directories and files
     for item in config etc *.conf *.cfg; do
         if [ -e "${EASY_ASTERISK_INSTALL_DIR}/${item}" ]; then
-            cp -r "${EASY_ASTERISK_INSTALL_DIR}/${item}" "$backup_dir/" 2>/dev/null || true
+            sudo cp -r "${EASY_ASTERISK_INSTALL_DIR}/${item}" "$backup_dir/" 2>/dev/null || true
         fi
     done
 
     # Also backup Asterisk configs if they exist
     if [ -d "/etc/asterisk" ]; then
-        mkdir -p "${backup_dir}/asterisk_etc"
-        cp -r /etc/asterisk/*.conf "${backup_dir}/asterisk_etc/" 2>/dev/null || true
+        sudo mkdir -p "${backup_dir}/asterisk_etc"
+        sudo cp -r /etc/asterisk/*.conf "${backup_dir}/asterisk_etc/" 2>/dev/null || true
     fi
 
     log_success "Configuration backup created"
@@ -9020,16 +9020,16 @@ restore_easy_asterisk_configs() {
         return 0
     fi
 
-    # Restore backed up items
+    # Restore backed up items (using sudo)
     for item in $(ls -A "$backup_dir" 2>/dev/null); do
         if [ "$item" != "asterisk_etc" ]; then
-            cp -r "${backup_dir}/${item}" "${EASY_ASTERISK_INSTALL_DIR}/" 2>/dev/null || true
+            sudo cp -r "${backup_dir}/${item}" "${EASY_ASTERISK_INSTALL_DIR}/" 2>/dev/null || true
         fi
     done
 
     # Restore Asterisk configs if they were backed up
     if [ -d "${backup_dir}/asterisk_etc" ]; then
-        cp -r "${backup_dir}/asterisk_etc"/*.conf /etc/asterisk/ 2>/dev/null || true
+        sudo cp -r "${backup_dir}/asterisk_etc"/*.conf /etc/asterisk/ 2>/dev/null || true
     fi
 
     log_success "Configuration restored"
@@ -9172,6 +9172,22 @@ addon_easy_asterisk_intercom() {
         if [ -n "$installed_version" ] && [ "$installed_version" != "$latest_version" ]; then
             log_success "Successfully updated from v${installed_version} to v${latest_version}"
             echo "Your configurations have been preserved"
+        fi
+
+        echo
+        # Ensure Asterisk service is enabled and running
+        echo "Ensuring Asterisk service is running..."
+        if ! systemctl is-active asterisk &>/dev/null; then
+            sudo systemctl enable asterisk 2>/dev/null
+            sudo systemctl start asterisk 2>/dev/null
+            sleep 2
+            if systemctl is-active asterisk &>/dev/null; then
+                log_success "Asterisk service started"
+            else
+                log_warning "Asterisk service may need manual start: sudo systemctl start asterisk"
+            fi
+        else
+            log_success "Asterisk service is running"
         fi
 
         echo
