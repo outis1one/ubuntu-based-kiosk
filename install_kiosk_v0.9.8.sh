@@ -514,15 +514,23 @@ show_addon_status() {
     [[ -x /usr/bin/tailscale ]] && { any_addon=true; echo "Tailscale: ✓ Installed"; }
     [[ -x /usr/bin/netbird ]] && { any_addon=true; echo "Netbird: ✓ Installed"; }
 
-    # Easy Asterisk Intercom - FAST CHECK
+    # Easy Asterisk Server - FAST CHECK
     if [[ -f "${EASY_ASTERISK_VERSION_FILE:-/opt/easy-asterisk/.version}" ]]; then
         any_addon=true
         local ea_version=$(cat "${EASY_ASTERISK_VERSION_FILE:-/opt/easy-asterisk/.version}" 2>/dev/null || echo "Unknown")
         if systemctl is-active asterisk &>/dev/null; then
-            echo "Easy Asterisk: ✓ Running (v${ea_version})"
+            echo "Easy Asterisk Server: ✓ Running (v${ea_version})"
         else
-            echo "Easy Asterisk: ✓ Installed (v${ea_version}) - Not running"
+            echo "Easy Asterisk Server: ✓ Installed (v${ea_version}) - Not running"
         fi
+    fi
+
+    # Easy Asterisk Client (Baresip) - FAST CHECK
+    local client_version_file="/home/${KIOSK_USER}/.baresip/.client_version"
+    if [[ -f "$client_version_file" ]] && command -v baresip &>/dev/null; then
+        any_addon=true
+        local client_ver=$(cat "$client_version_file" 2>/dev/null || echo "Unknown")
+        echo "Easy Asterisk Client: ✓ Installed (v${client_ver})"
     fi
 
     if ! $any_addon; then
@@ -9082,11 +9090,336 @@ download_and_install_easy_asterisk() {
     fi
 }
 
-addon_easy_asterisk_intercom() {
+# Client installation paths
+BARESIP_CONFIG_DIR="/home/${KIOSK_USER}/.baresip"
+BARESIP_CLIENT_VERSION_FILE="/home/${KIOSK_USER}/.baresip/.client_version"
+
+# Check if Baresip client is installed
+is_baresip_client_installed() {
+    if [ -f "$BARESIP_CLIENT_VERSION_FILE" ] && command -v baresip &>/dev/null; then
+        return 0
+    fi
+    return 1
+}
+
+# Get installed client version
+get_installed_client_version() {
+    if [ -f "$BARESIP_CLIENT_VERSION_FILE" ]; then
+        cat "$BARESIP_CLIENT_VERSION_FILE"
+        return 0
+    fi
+    echo ""
+    return 1
+}
+
+# Install Baresip SIP client packages
+install_baresip_packages() {
+    echo "Installing Baresip SIP client..."
+
+    # Update package lists
+    apt-get update -qq
+
+    # Install baresip and dependencies
+    if ! apt-get install -y baresip 2>/dev/null; then
+        log_error "Failed to install baresip package"
+        return 1
+    fi
+
+    # Install audio dependencies
+    apt-get install -y pulseaudio-utils pipewire-pulse 2>/dev/null || true
+
+    log_success "Baresip packages installed"
+    return 0
+}
+
+# Configure Baresip client
+configure_baresip_client() {
+    local server_ip="$1"
+    local server_port="$2"
+    local extension="$3"
+    local password="$4"
+    local auto_answer="$5"
+    local use_tls="$6"
+
+    # Determine transport and answer mode
+    local transport="udp"
+    local answermode="manual"
+    local media_enc=""
+
+    if [ "$use_tls" = "yes" ]; then
+        transport="tls"
+        media_enc=";mediaenc=srtp"
+    fi
+
+    if [ "$auto_answer" = "yes" ]; then
+        answermode="auto"
+    fi
+
+    # Create baresip config directory
+    mkdir -p "$BARESIP_CONFIG_DIR"
+    chown -R "${KIOSK_USER}:${KIOSK_USER}" "$BARESIP_CONFIG_DIR"
+
+    # Create accounts file
+    cat > "${BARESIP_CONFIG_DIR}/accounts" << EOF
+<sip:${extension}@${server_ip}:${server_port};transport=${transport}>;auth_pass=${password};answermode=${answermode}${media_enc}
+EOF
+
+    # Create basic config file if it doesn't exist
+    if [ ! -f "${BARESIP_CONFIG_DIR}/config" ]; then
+        cat > "${BARESIP_CONFIG_DIR}/config" << 'EOF'
+# Baresip configuration for Easy Asterisk Intercom
+
+# Audio settings
+audio_player             pulse,default
+audio_source             pulse,default
+audio_alert              pulse,default
+
+# Call settings
+call_local_timeout       120
+call_max_calls           4
+
+# Network settings
+net_interface
+
+# SIP settings
+sip_trans_bsize          128
+sip_verify_server        no
+
+# Module loading
+module                   pulse.so
+module                   account.so
+module                   contact.so
+module                   menu.so
+module                   stdio.so
+module                   uuid.so
+module                   debug_cmd.so
+EOF
+    fi
+
+    chown -R "${KIOSK_USER}:${KIOSK_USER}" "$BARESIP_CONFIG_DIR"
+    chmod 600 "${BARESIP_CONFIG_DIR}/accounts"
+
+    log_success "Baresip client configured"
+    return 0
+}
+
+# Create systemd user service for Baresip
+create_baresip_service() {
+    local user_service_dir="/home/${KIOSK_USER}/.config/systemd/user"
+
+    # Create directory
+    mkdir -p "$user_service_dir"
+
+    # Create service file
+    cat > "${user_service_dir}/baresip.service" << 'EOF'
+[Unit]
+Description=Baresip SIP Client
+After=pipewire.service pipewire-pulse.service
+Wants=pipewire-pulse.service
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/baresip -f %h/.baresip
+Restart=always
+RestartSec=5
+Environment=PULSE_SERVER=unix:/run/user/%U/pulse/native
+
+[Install]
+WantedBy=default.target
+EOF
+
+    chown -R "${KIOSK_USER}:${KIOSK_USER}" "/home/${KIOSK_USER}/.config"
+
+    # Enable and start the service as the kiosk user
+    local kiosk_uid=$(id -u "$KIOSK_USER")
+    local user_dbus="DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${kiosk_uid}/bus"
+
+    # Reload systemd user daemon and enable service
+    sudo -u "$KIOSK_USER" XDG_RUNTIME_DIR="/run/user/${kiosk_uid}" $user_dbus systemctl --user daemon-reload 2>/dev/null || true
+    sudo -u "$KIOSK_USER" XDG_RUNTIME_DIR="/run/user/${kiosk_uid}" $user_dbus systemctl --user enable baresip.service 2>/dev/null || true
+
+    log_success "Baresip systemd service created"
+    return 0
+}
+
+# Start Baresip service
+start_baresip_service() {
+    local kiosk_uid=$(id -u "$KIOSK_USER")
+    local user_dbus="DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${kiosk_uid}/bus"
+
+    sudo -u "$KIOSK_USER" XDG_RUNTIME_DIR="/run/user/${kiosk_uid}" $user_dbus systemctl --user start baresip.service 2>/dev/null
+
+    # Wait a moment and check status
+    sleep 2
+    if sudo -u "$KIOSK_USER" XDG_RUNTIME_DIR="/run/user/${kiosk_uid}" $user_dbus systemctl --user is-active baresip.service &>/dev/null; then
+        log_success "Baresip service started"
+        return 0
+    else
+        log_warning "Baresip service may not have started (will start on next login)"
+        return 0
+    fi
+}
+
+# Client-only installation
+install_easy_asterisk_client() {
     clear
     echo "════════════════════════════════════════════════════════════"
-    echo "   EASY ASTERISK INTERCOM SETUP                             "
+    echo "   EASY ASTERISK CLIENT INSTALLATION                        "
     echo "════════════════════════════════════════════════════════════"
+    echo
+    echo "This will install the Baresip SIP client to connect to an"
+    echo "existing Easy Asterisk server."
+    echo
+
+    # Check if already installed
+    if is_baresip_client_installed; then
+        local installed_ver=$(get_installed_client_version)
+        echo "Baresip client is already installed (v${installed_ver})"
+        echo
+        read -r -p "Do you want to reconfigure it? (y/N): " reconf_choice
+        if [[ ! "$reconf_choice" =~ ^[Yy]$ ]]; then
+            echo "Configuration cancelled"
+            pause
+            return 0
+        fi
+    fi
+
+    echo "Please enter your Easy Asterisk server details:"
+    echo "(These should match what was configured on the server)"
+    echo
+
+    # Get server IP/hostname
+    local server_ip=""
+    while [ -z "$server_ip" ]; do
+        read -r -p "Server IP or hostname: " server_ip
+        if [ -z "$server_ip" ]; then
+            log_error "Server address is required"
+        fi
+    done
+
+    # Get server port
+    local server_port=""
+    read -r -p "Server port [5060]: " server_port
+    server_port="${server_port:-5060}"
+
+    # Get extension
+    local extension=""
+    while [ -z "$extension" ]; do
+        read -r -p "Extension number (e.g., 201): " extension
+        if [ -z "$extension" ]; then
+            log_error "Extension is required"
+        fi
+    done
+
+    # Get password
+    local password=""
+    while [ -z "$password" ]; do
+        read -r -s -p "SIP Password: " password
+        echo
+        if [ -z "$password" ]; then
+            log_error "Password is required"
+        fi
+    done
+
+    # Auto-answer mode
+    echo
+    echo "Answer mode:"
+    echo "  1. Manual - Phone will ring, requires user to answer"
+    echo "  2. Auto   - Automatically answers incoming calls (intercom mode)"
+    local answer_choice=""
+    read -r -p "Select answer mode [1]: " answer_choice
+    local auto_answer="no"
+    if [ "$answer_choice" = "2" ]; then
+        auto_answer="yes"
+    fi
+
+    # TLS option
+    echo
+    read -r -p "Use TLS encryption? (y/N): " tls_choice
+    local use_tls="no"
+    if [[ "$tls_choice" =~ ^[Yy]$ ]]; then
+        use_tls="yes"
+        if [ "$server_port" = "5060" ]; then
+            server_port="5061"
+            echo "Note: Port changed to 5061 for TLS"
+        fi
+    fi
+
+    echo
+    echo "Configuration summary:"
+    echo "  Server:     ${server_ip}:${server_port}"
+    echo "  Extension:  ${extension}"
+    echo "  Answer:     $([ "$auto_answer" = "yes" ] && echo "Auto" || echo "Manual")"
+    echo "  TLS:        $([ "$use_tls" = "yes" ] && echo "Yes" || echo "No")"
+    echo
+
+    read -r -p "Proceed with installation? (Y/n): " proceed
+    if [[ "$proceed" =~ ^[Nn]$ ]]; then
+        echo "Installation cancelled"
+        pause
+        return 0
+    fi
+
+    echo
+    echo "Installing Baresip client..."
+
+    # Install packages
+    if ! install_baresip_packages; then
+        log_error "Failed to install Baresip packages"
+        pause
+        return 1
+    fi
+
+    # Configure client
+    if ! configure_baresip_client "$server_ip" "$server_port" "$extension" "$password" "$auto_answer" "$use_tls"; then
+        log_error "Failed to configure Baresip client"
+        pause
+        return 1
+    fi
+
+    # Create systemd service
+    if ! create_baresip_service; then
+        log_error "Failed to create Baresip service"
+        pause
+        return 1
+    fi
+
+    # Save version info
+    local latest_version=$(get_latest_easy_asterisk_version)
+    echo "${latest_version:-1.0.0}-client" > "$BARESIP_CLIENT_VERSION_FILE"
+    chown "${KIOSK_USER}:${KIOSK_USER}" "$BARESIP_CLIENT_VERSION_FILE"
+
+    # Try to start the service
+    start_baresip_service
+
+    echo
+    log_success "Easy Asterisk Client installed successfully!"
+    echo
+    echo "Client Configuration:"
+    echo "  Config dir:   ${BARESIP_CONFIG_DIR}"
+    echo "  Server:       ${server_ip}:${server_port}"
+    echo "  Extension:    ${extension}"
+    echo
+    echo "Management commands:"
+    echo "  Check status: systemctl --user status baresip"
+    echo "  Restart:      systemctl --user restart baresip"
+    echo "  View logs:    journalctl --user -u baresip -f"
+    echo
+    echo "Note: The client will auto-start when the user logs in."
+
+    pause
+    return 0
+}
+
+# Server-only installation (launches the Easy Asterisk interactive installer)
+install_easy_asterisk_server() {
+    clear
+    echo "════════════════════════════════════════════════════════════"
+    echo "   EASY ASTERISK SERVER INSTALLATION                        "
+    echo "════════════════════════════════════════════════════════════"
+    echo
+    echo "This will download and run the Easy Asterisk installer."
+    echo "Select 'Server only' when prompted in the installer."
     echo
 
     # Get latest version from GitHub
@@ -9095,8 +9428,7 @@ addon_easy_asterisk_intercom() {
 
     if [ -z "$latest_version" ]; then
         log_error "Could not determine latest version"
-        log_error "Please check your internet connection and that the repository is accessible"
-        log_error "Repository: https://github.com/${EASY_ASTERISK_REPO}"
+        log_error "Please check your internet connection"
         pause
         return 1
     fi
@@ -9110,42 +9442,15 @@ addon_easy_asterisk_intercom() {
     if [ -n "$installed_version" ]; then
         echo "Currently installed version: v${installed_version}"
         echo
-
-        # Compare versions
-        if [ "$installed_version" = "$latest_version" ]; then
-            log_success "Easy Asterisk v${installed_version} is already installed (latest version)"
-            echo
-            read -r -p "Do you want to re-run the installation? (y/N): " rerun_choice
-
-            if [[ ! "$rerun_choice" =~ ^[Yy]$ ]]; then
-                echo "Installation cancelled"
-                pause
-                return 0
-            fi
-
-            echo "Re-running installation (configs will be preserved)..."
-        else
-            echo "Update available: v${installed_version} → v${latest_version}"
-            echo
-            read -r -p "Do you want to update? (Y/n): " update_choice
-
-            if [[ "$update_choice" =~ ^[Nn]$ ]]; then
-                echo "Update cancelled"
-                pause
-                return 0
-            fi
-
-            echo "Updating Easy Asterisk..."
+        read -r -p "Re-run the installer? (y/N): " rerun_choice
+        if [[ ! "$rerun_choice" =~ ^[Yy]$ ]]; then
+            echo "Installation cancelled"
+            pause
+            return 0
         fi
-
-        # Backup existing configurations
         backup_easy_asterisk_configs
-        local backup_dir=$(ls -td "${EASY_ASTERISK_CONFIG_BACKUP}"/* 2>/dev/null | head -1)
     else
-        echo "Easy Asterisk is not currently installed"
-        echo
-        read -r -p "Do you want to install Easy Asterisk v${latest_version}? (Y/n): " install_choice
-
+        read -r -p "Install Easy Asterisk Server v${latest_version}? (Y/n): " install_choice
         if [[ "$install_choice" =~ ^[Nn]$ ]]; then
             echo "Installation cancelled"
             pause
@@ -9154,40 +9459,144 @@ addon_easy_asterisk_intercom() {
     fi
 
     echo
-    # Download and install
     if download_and_install_easy_asterisk "$latest_version"; then
-        # Restore configurations if this was an update/rerun
-        if [ -n "$backup_dir" ]; then
-            restore_easy_asterisk_configs "$backup_dir"
-        fi
-
         echo
-        log_success "Easy Asterisk Intercom is ready!"
-        echo "Installation directory: $EASY_ASTERISK_INSTALL_DIR"
-        echo "Version: v${latest_version}"
-
-        if [ -n "$installed_version" ] && [ "$installed_version" != "$latest_version" ]; then
-            log_success "Successfully updated from v${installed_version} to v${latest_version}"
-            echo "Your configurations have been preserved"
-        fi
-
+        log_success "Easy Asterisk Server installation completed!"
         echo
         echo "Management commands:"
         echo "  Check status:    systemctl status asterisk"
         echo "  Asterisk CLI:    asterisk -rvvv"
         echo "  Restart:         systemctl restart asterisk"
-        echo
     else
         log_error "Installation failed"
-
-        # Attempt to restore from backup if update failed
-        if [ -n "$backup_dir" ]; then
-            echo "Attempting to restore previous configuration..."
-            restore_easy_asterisk_configs "$backup_dir"
-        fi
     fi
 
     pause
+}
+
+# Full installation (server + client)
+install_easy_asterisk_full() {
+    clear
+    echo "════════════════════════════════════════════════════════════"
+    echo "   EASY ASTERISK FULL INSTALLATION                          "
+    echo "════════════════════════════════════════════════════════════"
+    echo
+    echo "This will download and run the Easy Asterisk installer."
+    echo "Select 'Full' when prompted to install both server and client."
+    echo
+
+    # Get latest version from GitHub
+    echo "Checking for latest version..."
+    local latest_version=$(get_latest_easy_asterisk_version)
+
+    if [ -z "$latest_version" ]; then
+        log_error "Could not determine latest version"
+        pause
+        return 1
+    fi
+
+    log_success "Latest version available: v${latest_version}"
+    echo
+
+    read -r -p "Install Easy Asterisk Full v${latest_version}? (Y/n): " install_choice
+    if [[ "$install_choice" =~ ^[Nn]$ ]]; then
+        echo "Installation cancelled"
+        pause
+        return 0
+    fi
+
+    echo
+    if download_and_install_easy_asterisk "$latest_version"; then
+        echo
+        log_success "Easy Asterisk Full installation completed!"
+    else
+        log_error "Installation failed"
+    fi
+
+    pause
+}
+
+# Show Easy Asterisk status
+show_easy_asterisk_status() {
+    echo "Current Installation Status:"
+    echo "────────────────────────────────────────────────────────────"
+
+    # Check server
+    local server_installed=false
+    if [ -f "$EASY_ASTERISK_VERSION_FILE" ]; then
+        local server_ver=$(cat "$EASY_ASTERISK_VERSION_FILE")
+        server_installed=true
+        if systemctl is-active asterisk &>/dev/null; then
+            echo "  Server:  ✓ Installed (v${server_ver}) - Running"
+        else
+            echo "  Server:  ✓ Installed (v${server_ver}) - Not running"
+        fi
+    else
+        echo "  Server:  ✗ Not installed"
+    fi
+
+    # Check client
+    if is_baresip_client_installed; then
+        local client_ver=$(get_installed_client_version)
+        local kiosk_uid=$(id -u "$KIOSK_USER" 2>/dev/null)
+        if [ -n "$kiosk_uid" ]; then
+            local user_dbus="DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/${kiosk_uid}/bus"
+            if sudo -u "$KIOSK_USER" XDG_RUNTIME_DIR="/run/user/${kiosk_uid}" $user_dbus systemctl --user is-active baresip.service &>/dev/null 2>&1; then
+                echo "  Client:  ✓ Installed (v${client_ver}) - Running"
+            else
+                echo "  Client:  ✓ Installed (v${client_ver}) - Not running"
+            fi
+        else
+            echo "  Client:  ✓ Installed (v${client_ver})"
+        fi
+    else
+        echo "  Client:  ✗ Not installed"
+    fi
+
+    echo "────────────────────────────────────────────────────────────"
+}
+
+# Main Easy Asterisk addon menu
+addon_easy_asterisk_intercom() {
+    while true; do
+        clear
+        echo "════════════════════════════════════════════════════════════"
+        echo "   EASY ASTERISK INTERCOM                                   "
+        echo "════════════════════════════════════════════════════════════"
+        echo
+
+        show_easy_asterisk_status
+        echo
+
+        echo "Installation Options:"
+        echo "  1. Install Client Only    (Baresip SIP client)"
+        echo "  2. Install Server Only    (Asterisk PBX server)"
+        echo "  3. Install Full           (Server + Client)"
+        echo
+        echo "  0. Return to Addons Menu"
+        echo
+
+        read -r -p "Select option: " choice
+
+        case "$choice" in
+            1)
+                install_easy_asterisk_client
+                ;;
+            2)
+                install_easy_asterisk_server
+                ;;
+            3)
+                install_easy_asterisk_full
+                ;;
+            0)
+                return 0
+                ;;
+            *)
+                log_error "Invalid option"
+                sleep 1
+                ;;
+        esac
+    done
 }
 
 ################################################################################
