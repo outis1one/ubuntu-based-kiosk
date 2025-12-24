@@ -10514,9 +10514,17 @@ upgrade_kiosk() {
     local script_path
     script_path="$(readlink -f "${BASH_SOURCE[0]}")"
 
+    # Verify the script exists and is readable
+    if [[ ! -f "$script_path" ]]; then
+        log_error "Cannot find script at: $script_path"
+        pause
+        return
+    fi
+
     echo
-    echo "[1/6] Stopping kiosk service..."
-    sudo systemctl stop kiosk 2>/dev/null || true
+    echo "[1/6] Stopping kiosk (LightDM)..."
+    # Kill any running electron process first
+    pkill -f "electron.*main.js" 2>/dev/null || true
     sleep 1
     log_success "Kiosk stopped"
 
@@ -10540,38 +10548,39 @@ upgrade_kiosk() {
     log_success "Old files removed"
 
     echo "[4/6] Extracting new app files from script..."
+    echo "  Script path: $script_path"
 
-    # Extract main.js (between MAINJS markers) - use flexible pattern matching
-    sed -n "/tee.*main\.js.*<<.*MAINJS/,/^MAINJS$/p" "$script_path" | tail -n +2 | head -n -1 | sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/main.js" > /dev/null
-    [[ -s "$KIOSK_DIR/main.js" ]] && echo "  ✓ main.js" || echo "  ✗ main.js failed"
+    # Helper function to extract heredoc content
+    extract_heredoc() {
+        local file_pattern="$1"
+        local end_marker="$2"
+        local output_file="$3"
 
-    # Extract preload.js (first occurrence between PRELOAD markers)
-    sed -n "/tee.*preload\.js.*<<.*PRELOAD/,/^PRELOAD$/p" "$script_path" | tail -n +2 | head -n -1 | sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/preload.js" > /dev/null
-    [[ -s "$KIOSK_DIR/preload.js" ]] && echo "  ✓ preload.js" || echo "  ✗ preload.js failed"
+        # Use awk for more reliable extraction
+        awk "
+            /tee.*${file_pattern}.*<</ { found=1; next }
+            /^${end_marker}\$/ { if(found) exit }
+            found { print }
+        " "$script_path" | sudo -u "$KIOSK_USER" tee "$output_file" > /dev/null
 
-    # Extract keyboard.html (first occurrence between KBHTML markers)
-    sed -n "/tee.*keyboard\.html.*<<.*KBHTML/,/^KBHTML$/p" "$script_path" | tail -n +2 | head -n -1 | sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/keyboard.html" > /dev/null
-    [[ -s "$KIOSK_DIR/keyboard.html" ]] && echo "  ✓ keyboard.html" || echo "  ✗ keyboard.html failed"
+        if [[ -s "$output_file" ]]; then
+            echo "  ✓ $(basename "$output_file")"
+            return 0
+        else
+            echo "  ✗ $(basename "$output_file") failed"
+            return 1
+        fi
+    }
 
-    # Extract pause-dialog.html
-    sed -n "/tee.*pause-dialog\.html.*<<.*PAUSEHTML/,/^PAUSEHTML$/p" "$script_path" | tail -n +2 | head -n -1 | sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/pause-dialog.html" > /dev/null
-    [[ -s "$KIOSK_DIR/pause-dialog.html" ]] && echo "  ✓ pause-dialog.html" || echo "  ✗ pause-dialog.html failed"
-
-    # Extract pin-entry.html
-    sed -n "/tee.*pin-entry\.html.*<<.*PINHTML/,/^PINHTML$/p" "$script_path" | tail -n +2 | head -n -1 | sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/pin-entry.html" > /dev/null
-    [[ -s "$KIOSK_DIR/pin-entry.html" ]] && echo "  ✓ pin-entry.html" || echo "  ✗ pin-entry.html failed"
-
-    # Extract inactivity-prompt-extended.html
-    sed -n "/tee.*inactivity-prompt-extended\.html.*<<.*INACTHTML/,/^INACTHTML$/p" "$script_path" | tail -n +2 | head -n -1 | sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/inactivity-prompt-extended.html" > /dev/null
-    [[ -s "$KIOSK_DIR/inactivity-prompt-extended.html" ]] && echo "  ✓ inactivity-prompt-extended.html" || echo "  ✗ inactivity-prompt-extended.html failed"
-
-    # Extract keyboard-button.html
-    sed -n "/tee.*keyboard-button\.html.*<<.*BTNHTML/,/^BTNHTML$/p" "$script_path" | tail -n +2 | head -n -1 | sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/keyboard-button.html" > /dev/null
-    [[ -s "$KIOSK_DIR/keyboard-button.html" ]] && echo "  ✓ keyboard-button.html" || echo "  ✗ keyboard-button.html failed"
-
-    # Extract package.json
-    sed -n "/tee.*package\.json.*<<.*PKGJSON/,/^PKGJSON$/p" "$script_path" | tail -n +2 | head -n -1 | sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/package.json" > /dev/null
-    [[ -s "$KIOSK_DIR/package.json" ]] && echo "  ✓ package.json" || echo "  ✗ package.json failed"
+    # Extract all files
+    extract_heredoc "main\.js" "MAINJS" "$KIOSK_DIR/main.js"
+    extract_heredoc "preload\.js" "PRELOAD" "$KIOSK_DIR/preload.js"
+    extract_heredoc "keyboard\.html" "KBHTML" "$KIOSK_DIR/keyboard.html"
+    extract_heredoc "pause-dialog\.html" "PAUSEHTML" "$KIOSK_DIR/pause-dialog.html"
+    extract_heredoc "pin-entry\.html" "PINHTML" "$KIOSK_DIR/pin-entry.html"
+    extract_heredoc "inactivity-prompt-extended\.html" "INACTHTML" "$KIOSK_DIR/inactivity-prompt-extended.html"
+    extract_heredoc "keyboard-button\.html" "BTNHTML" "$KIOSK_DIR/keyboard-button.html"
+    extract_heredoc "package\.json" "PKGJSON" "$KIOSK_DIR/package.json"
 
     # Set ownership
     sudo chown -R "$KIOSK_USER:$KIOSK_USER" "$KIOSK_DIR"
@@ -10647,7 +10656,7 @@ PWREOF
     sudo systemctl restart acpid 2>/dev/null || true
 
     echo "[6/6] Starting kiosk..."
-    sudo systemctl restart kiosk
+    sudo systemctl restart lightdm
     sleep 3
 
     echo
@@ -10690,10 +10699,13 @@ PWREOF
     [[ -d /etc/wireguard ]] && ls /etc/wireguard/*.conf &>/dev/null && echo "  • WireGuard VPN: configured"
 
     echo
-    if systemctl is-active --quiet kiosk; then
+    if systemctl is-active --quiet lightdm && pgrep -f "electron.*main.js" >/dev/null 2>&1; then
         log_success "Upgrade complete! Kiosk is running."
+    elif systemctl is-active --quiet lightdm; then
+        log_warning "LightDM running but Electron may not have started yet."
+        echo "  Check: journalctl -u lightdm -n 20"
     else
-        log_warning "Kiosk may not have started. Check: journalctl -u kiosk -n 50"
+        log_warning "Kiosk may not have started. Check: sudo systemctl status lightdm"
     fi
     echo
     pause
