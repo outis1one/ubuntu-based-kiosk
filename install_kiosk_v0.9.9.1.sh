@@ -10548,39 +10548,57 @@ upgrade_kiosk() {
     log_success "Old files removed"
 
     echo "[4/6] Extracting new app files from script..."
-    echo "  Script path: $script_path"
 
-    # Helper function to extract heredoc content
-    extract_heredoc() {
-        local file_pattern="$1"
+    # Helper function to extract heredoc content using line numbers
+    extract_file() {
+        local start_pattern="$1"
         local end_marker="$2"
         local output_file="$3"
+        local fname
+        fname=$(basename "$output_file")
 
-        # Use awk for more reliable extraction
-        awk "
-            /tee.*${file_pattern}.*<</ { found=1; next }
-            /^${end_marker}\$/ { if(found) exit }
-            found { print }
-        " "$script_path" | sudo -u "$KIOSK_USER" tee "$output_file" > /dev/null
+        # Find start line number
+        local start_line
+        start_line=$(grep -n "$start_pattern" "$script_path" | head -1 | cut -d: -f1)
+
+        if [[ -z "$start_line" ]]; then
+            echo "  ✗ $fname (pattern not found)"
+            return 1
+        fi
+
+        # Find the end marker after the start line
+        local end_offset
+        end_offset=$(tail -n +"$start_line" "$script_path" | grep -n "^${end_marker}$" | head -1 | cut -d: -f1)
+
+        if [[ -z "$end_offset" ]]; then
+            echo "  ✗ $fname (end marker not found)"
+            return 1
+        fi
+
+        # Calculate line range (skip heredoc start line, exclude end marker)
+        local content_start=$((start_line + 1))
+        local content_end=$((start_line + end_offset - 2))
+
+        sed -n "${content_start},${content_end}p" "$script_path" | sudo -u "$KIOSK_USER" tee "$output_file" > /dev/null
 
         if [[ -s "$output_file" ]]; then
-            echo "  ✓ $(basename "$output_file")"
+            echo "  ✓ $fname"
             return 0
         else
-            echo "  ✗ $(basename "$output_file") failed"
+            echo "  ✗ $fname (empty)"
             return 1
         fi
     }
 
-    # Extract all files
-    extract_heredoc "main\.js" "MAINJS" "$KIOSK_DIR/main.js"
-    extract_heredoc "preload\.js" "PRELOAD" "$KIOSK_DIR/preload.js"
-    extract_heredoc "keyboard\.html" "KBHTML" "$KIOSK_DIR/keyboard.html"
-    extract_heredoc "pause-dialog\.html" "PAUSEHTML" "$KIOSK_DIR/pause-dialog.html"
-    extract_heredoc "pin-entry\.html" "PINHTML" "$KIOSK_DIR/pin-entry.html"
-    extract_heredoc "inactivity-prompt-extended\.html" "INACTHTML" "$KIOSK_DIR/inactivity-prompt-extended.html"
-    extract_heredoc "keyboard-button\.html" "BTNHTML" "$KIOSK_DIR/keyboard-button.html"
-    extract_heredoc "package\.json" "PKGJSON" "$KIOSK_DIR/package.json"
+    # Extract all files using their unique heredoc markers
+    extract_file 'tee.*main\.js.*MAINJS' 'MAINJS' "$KIOSK_DIR/main.js"
+    extract_file 'tee.*preload\.js.*PRELOAD' 'PRELOAD' "$KIOSK_DIR/preload.js"
+    extract_file 'tee.*keyboard\.html.*KBHTML' 'KBHTML' "$KIOSK_DIR/keyboard.html"
+    extract_file 'tee.*pause-dialog\.html.*PAUSEHTML' 'PAUSEHTML' "$KIOSK_DIR/pause-dialog.html"
+    extract_file 'tee.*pin-entry\.html.*PINHTML' 'PINHTML' "$KIOSK_DIR/pin-entry.html"
+    extract_file 'tee.*inactivity-prompt-extended\.html.*INACTHTML' 'INACTHTML' "$KIOSK_DIR/inactivity-prompt-extended.html"
+    extract_file 'tee.*keyboard-button\.html.*BTNHTML' 'BTNHTML' "$KIOSK_DIR/keyboard-button.html"
+    extract_file 'tee.*package\.json.*PKGJSON' 'PKGJSON' "$KIOSK_DIR/package.json"
 
     # Set ownership
     sudo chown -R "$KIOSK_USER:$KIOSK_USER" "$KIOSK_DIR"
