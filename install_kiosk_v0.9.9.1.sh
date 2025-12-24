@@ -10541,36 +10541,36 @@ upgrade_kiosk() {
 
     echo "[4/6] Extracting new app files from script..."
 
-    # Extract main.js (between MAINJS markers)
-    sed -n "/^sudo.*tee.*main\.js.*<<'MAINJS'$/,/^MAINJS$/p" "$script_path" | tail -n +2 | head -n -1 | sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/main.js" > /dev/null
+    # Extract main.js (between MAINJS markers) - use flexible pattern matching
+    sed -n "/tee.*main\.js.*<<.*MAINJS/,/^MAINJS$/p" "$script_path" | tail -n +2 | head -n -1 | sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/main.js" > /dev/null
     [[ -s "$KIOSK_DIR/main.js" ]] && echo "  ✓ main.js" || echo "  ✗ main.js failed"
 
     # Extract preload.js (first occurrence between PRELOAD markers)
-    sed -n "/^sudo.*tee.*preload\.js.*<<'PRELOAD'$/,/^PRELOAD$/p" "$script_path" | tail -n +2 | head -n -1 | sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/preload.js" > /dev/null
+    sed -n "/tee.*preload\.js.*<<.*PRELOAD/,/^PRELOAD$/p" "$script_path" | tail -n +2 | head -n -1 | sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/preload.js" > /dev/null
     [[ -s "$KIOSK_DIR/preload.js" ]] && echo "  ✓ preload.js" || echo "  ✗ preload.js failed"
 
     # Extract keyboard.html (first occurrence between KBHTML markers)
-    sed -n "/^sudo.*tee.*keyboard\.html.*<<'KBHTML'$/,/^KBHTML$/p" "$script_path" | tail -n +2 | head -n -1 | sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/keyboard.html" > /dev/null
+    sed -n "/tee.*keyboard\.html.*<<.*KBHTML/,/^KBHTML$/p" "$script_path" | tail -n +2 | head -n -1 | sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/keyboard.html" > /dev/null
     [[ -s "$KIOSK_DIR/keyboard.html" ]] && echo "  ✓ keyboard.html" || echo "  ✗ keyboard.html failed"
 
     # Extract pause-dialog.html
-    sed -n "/^sudo.*tee.*pause-dialog\.html.*<<'PAUSEHTML'$/,/^PAUSEHTML$/p" "$script_path" | tail -n +2 | head -n -1 | sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/pause-dialog.html" > /dev/null
+    sed -n "/tee.*pause-dialog\.html.*<<.*PAUSEHTML/,/^PAUSEHTML$/p" "$script_path" | tail -n +2 | head -n -1 | sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/pause-dialog.html" > /dev/null
     [[ -s "$KIOSK_DIR/pause-dialog.html" ]] && echo "  ✓ pause-dialog.html" || echo "  ✗ pause-dialog.html failed"
 
     # Extract pin-entry.html
-    sed -n "/^.*tee.*pin-entry\.html.*<<'PINHTML'$/,/^PINHTML$/p" "$script_path" | tail -n +2 | head -n -1 | sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/pin-entry.html" > /dev/null
+    sed -n "/tee.*pin-entry\.html.*<<.*PINHTML/,/^PINHTML$/p" "$script_path" | tail -n +2 | head -n -1 | sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/pin-entry.html" > /dev/null
     [[ -s "$KIOSK_DIR/pin-entry.html" ]] && echo "  ✓ pin-entry.html" || echo "  ✗ pin-entry.html failed"
 
     # Extract inactivity-prompt-extended.html
-    sed -n "/^.*tee.*inactivity-prompt-extended\.html.*<<'INACTHTML'$/,/^INACTHTML$/p" "$script_path" | tail -n +2 | head -n -1 | sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/inactivity-prompt-extended.html" > /dev/null
+    sed -n "/tee.*inactivity-prompt-extended\.html.*<<.*INACTHTML/,/^INACTHTML$/p" "$script_path" | tail -n +2 | head -n -1 | sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/inactivity-prompt-extended.html" > /dev/null
     [[ -s "$KIOSK_DIR/inactivity-prompt-extended.html" ]] && echo "  ✓ inactivity-prompt-extended.html" || echo "  ✗ inactivity-prompt-extended.html failed"
 
     # Extract keyboard-button.html
-    sed -n "/^.*tee.*keyboard-button\.html.*<<'BTNHTML'$/,/^BTNHTML$/p" "$script_path" | tail -n +2 | head -n -1 | sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/keyboard-button.html" > /dev/null
+    sed -n "/tee.*keyboard-button\.html.*<<.*BTNHTML/,/^BTNHTML$/p" "$script_path" | tail -n +2 | head -n -1 | sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/keyboard-button.html" > /dev/null
     [[ -s "$KIOSK_DIR/keyboard-button.html" ]] && echo "  ✓ keyboard-button.html" || echo "  ✗ keyboard-button.html failed"
 
     # Extract package.json
-    sed -n "/^.*tee.*package\.json.*<<'PKGJSON'$/,/^PKGJSON$/p" "$script_path" | tail -n +2 | head -n -1 | sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/package.json" > /dev/null
+    sed -n "/tee.*package\.json.*<<.*PKGJSON/,/^PKGJSON$/p" "$script_path" | tail -n +2 | head -n -1 | sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/package.json" > /dev/null
     [[ -s "$KIOSK_DIR/package.json" ]] && echo "  ✓ package.json" || echo "  ✗ package.json failed"
 
     # Set ownership
