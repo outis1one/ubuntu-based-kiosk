@@ -10093,12 +10093,13 @@ export_settings() {
     echo "  • Core configuration (sites, touch controls, passwords)"
     echo "  • Schedules (power, display, quiet hours)"
     echo "  • Addon settings (Squeezelite, VNC, Easy Asterisk)"
+    echo "  • VPN configs (WireGuard, Netbird, OpenVPN)"
     echo
 
     local export_dir="/tmp/kiosk-backup-$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$export_dir"
 
-    echo "[1/6] Exporting core configuration..."
+    echo "[1/7] Exporting core configuration..."
     if [[ -f "$CONFIG_PATH" ]]; then
         sudo -u "$KIOSK_USER" cp "$CONFIG_PATH" "$export_dir/config.json"
         log_success "Core config exported"
@@ -10106,7 +10107,7 @@ export_settings() {
         log_warning "No core config found"
     fi
 
-    echo "[2/6] Exporting schedule timers..."
+    echo "[2/7] Exporting schedule timers..."
     local timer_count=0
     mkdir -p "$export_dir/timers"
     for timer in kiosk-shutdown kiosk-display-off kiosk-display-on kiosk-quiet-start kiosk-quiet-end kiosk-electron-reload; do
@@ -10118,7 +10119,7 @@ export_settings() {
     done
     [[ $timer_count -gt 0 ]] && log_success "Exported $timer_count schedule timers" || log_info "No schedules configured"
 
-    echo "[3/6] Exporting Squeezelite config..."
+    echo "[3/7] Exporting Squeezelite config..."
     if [[ -f /usr/local/bin/squeezelite-start.sh ]]; then
         sudo cp /usr/local/bin/squeezelite-start.sh "$export_dir/"
         log_success "Squeezelite config exported"
@@ -10126,7 +10127,7 @@ export_settings() {
         log_info "Squeezelite not installed"
     fi
 
-    echo "[4/6] Exporting VNC config..."
+    echo "[4/7] Exporting VNC config..."
     if [[ -f /etc/systemd/system/x11vnc.service ]]; then
         sudo cp /etc/systemd/system/x11vnc.service "$export_dir/"
         # Also copy password file if it exists
@@ -10139,7 +10140,7 @@ export_settings() {
         log_info "VNC not installed"
     fi
 
-    echo "[5/6] Exporting Easy Asterisk client config..."
+    echo "[5/7] Exporting Easy Asterisk client config..."
     if [[ -d "$KIOSK_HOME/.baresip" ]]; then
         mkdir -p "$export_dir/baresip"
         sudo cp -r "$KIOSK_HOME/.baresip/"* "$export_dir/baresip/" 2>/dev/null
@@ -10148,7 +10149,53 @@ export_settings() {
         log_info "Easy Asterisk client not installed"
     fi
 
-    echo "[6/6] Exporting quiet hours config..."
+    echo "[6/7] Exporting VPN configurations..."
+    local vpn_count=0
+    mkdir -p "$export_dir/vpn"
+
+    # WireGuard configs
+    if [[ -d /etc/wireguard ]] && ls /etc/wireguard/*.conf &>/dev/null; then
+        mkdir -p "$export_dir/vpn/wireguard"
+        sudo cp /etc/wireguard/*.conf "$export_dir/vpn/wireguard/" 2>/dev/null
+        log_success "WireGuard config exported"
+        ((vpn_count++))
+    fi
+
+    # Netbird config and state
+    if command -v netbird &>/dev/null; then
+        mkdir -p "$export_dir/vpn/netbird"
+        # Config file
+        [[ -f /etc/netbird/config.json ]] && sudo cp /etc/netbird/config.json "$export_dir/vpn/netbird/" 2>/dev/null
+        # State directory (contains machine keys, etc.)
+        if [[ -d /var/lib/netbird ]]; then
+            sudo cp -r /var/lib/netbird "$export_dir/vpn/netbird/state" 2>/dev/null
+        fi
+        # Also check for user config
+        [[ -d "$KIOSK_HOME/.netbird" ]] && sudo cp -r "$KIOSK_HOME/.netbird" "$export_dir/vpn/netbird/user-config" 2>/dev/null
+        log_success "Netbird config exported"
+        ((vpn_count++))
+    fi
+
+    # OpenVPN configs
+    if [[ -d /etc/openvpn ]] && [[ -n "$(ls -A /etc/openvpn 2>/dev/null)" ]]; then
+        mkdir -p "$export_dir/vpn/openvpn"
+        sudo cp -r /etc/openvpn/* "$export_dir/vpn/openvpn/" 2>/dev/null
+        log_success "OpenVPN config exported"
+        ((vpn_count++))
+    fi
+
+    # Tailscale - just note if installed (requires re-auth)
+    if command -v tailscale &>/dev/null; then
+        local ts_name=$(tailscale status --json 2>/dev/null | jq -r '.Self.HostName' 2>/dev/null || echo "")
+        echo "tailscale_installed=true" > "$export_dir/vpn/tailscale-info.txt"
+        [[ -n "$ts_name" ]] && echo "hostname=$ts_name" >> "$export_dir/vpn/tailscale-info.txt"
+        log_info "Tailscale installed (requires re-authentication after restore)"
+        ((vpn_count++))
+    fi
+
+    [[ $vpn_count -eq 0 ]] && log_info "No VPN configurations found"
+
+    echo "[7/7] Exporting quiet hours config..."
     if [[ -f /usr/local/bin/kiosk-quiet-start.sh ]]; then
         sudo cp /usr/local/bin/kiosk-quiet-start.sh "$export_dir/"
         sudo cp /usr/local/bin/kiosk-quiet-end.sh "$export_dir/" 2>/dev/null
@@ -10164,7 +10211,8 @@ export_settings() {
 
     # Fix permissions for tar
     sudo chmod -R 644 "$export_dir"/* 2>/dev/null
-    sudo chmod 755 "$export_dir" "$export_dir/timers" "$export_dir/vnc" "$export_dir/baresip" 2>/dev/null
+    sudo chmod -R 755 "$export_dir" 2>/dev/null
+    find "$export_dir" -type d -exec chmod 755 {} \; 2>/dev/null
 
     tar -czf "$home_dir/$archive_name" -C /tmp "$(basename $export_dir)"
     sudo rm -rf "$export_dir"
@@ -10221,14 +10269,14 @@ import_settings() {
     local backup_dir=$(find "$import_dir" -maxdepth 1 -type d -name "kiosk-backup-*" | head -1)
     [[ -z "$backup_dir" ]] && backup_dir="$import_dir"
 
-    echo "[1/6] Importing core configuration..."
+    echo "[1/7] Importing core configuration..."
     if [[ -f "$backup_dir/config.json" ]]; then
         sudo -u "$KIOSK_USER" cp "$backup_dir/config.json" "$CONFIG_PATH"
         sudo chown "$KIOSK_USER:$KIOSK_USER" "$CONFIG_PATH"
         log_success "Core config restored"
     fi
 
-    echo "[2/6] Importing schedule timers..."
+    echo "[2/7] Importing schedule timers..."
     if [[ -d "$backup_dir/timers" ]]; then
         local timer_count=0
         for timer_file in "$backup_dir/timers"/*.timer; do
@@ -10245,14 +10293,14 @@ import_settings() {
         [[ $timer_count -gt 0 ]] && log_success "Restored $timer_count schedule timers"
     fi
 
-    echo "[3/6] Importing Squeezelite config..."
+    echo "[3/7] Importing Squeezelite config..."
     if [[ -f "$backup_dir/squeezelite-start.sh" ]]; then
         sudo cp "$backup_dir/squeezelite-start.sh" /usr/local/bin/
         sudo chmod +x /usr/local/bin/squeezelite-start.sh
         log_success "Squeezelite config restored"
     fi
 
-    echo "[4/6] Importing VNC config..."
+    echo "[4/7] Importing VNC config..."
     if [[ -f "$backup_dir/x11vnc.service" ]]; then
         sudo cp "$backup_dir/x11vnc.service" /etc/systemd/system/
         if [[ -f "$backup_dir/vnc/passwd" ]]; then
@@ -10265,7 +10313,7 @@ import_settings() {
         log_success "VNC config restored"
     fi
 
-    echo "[5/6] Importing Easy Asterisk client config..."
+    echo "[5/7] Importing Easy Asterisk client config..."
     if [[ -d "$backup_dir/baresip" ]]; then
         sudo mkdir -p "$KIOSK_HOME/.baresip"
         sudo cp -r "$backup_dir/baresip/"* "$KIOSK_HOME/.baresip/"
@@ -10273,7 +10321,73 @@ import_settings() {
         log_success "Easy Asterisk client config restored"
     fi
 
-    echo "[6/6] Importing quiet hours config..."
+    echo "[6/7] Importing VPN configurations..."
+    local vpn_restored=false
+
+    # WireGuard
+    if [[ -d "$backup_dir/vpn/wireguard" ]]; then
+        sudo mkdir -p /etc/wireguard
+        for wg_conf in "$backup_dir/vpn/wireguard"/*.conf; do
+            [[ -f "$wg_conf" ]] || continue
+            local wg_name=$(basename "$wg_conf" .conf)
+            sudo cp "$wg_conf" /etc/wireguard/
+            sudo chmod 600 "/etc/wireguard/${wg_name}.conf"
+            sudo systemctl enable "wg-quick@${wg_name}" 2>/dev/null
+            sudo systemctl start "wg-quick@${wg_name}" 2>/dev/null
+        done
+        log_success "WireGuard config restored"
+        vpn_restored=true
+    fi
+
+    # Netbird
+    if [[ -d "$backup_dir/vpn/netbird" ]]; then
+        # Restore config file
+        if [[ -f "$backup_dir/vpn/netbird/config.json" ]]; then
+            sudo mkdir -p /etc/netbird
+            sudo cp "$backup_dir/vpn/netbird/config.json" /etc/netbird/
+        fi
+        # Restore state directory (contains machine keys)
+        if [[ -d "$backup_dir/vpn/netbird/state" ]]; then
+            sudo cp -r "$backup_dir/vpn/netbird/state" /var/lib/netbird
+            sudo chown -R root:root /var/lib/netbird
+        fi
+        # Restore user config
+        if [[ -d "$backup_dir/vpn/netbird/user-config" ]]; then
+            sudo cp -r "$backup_dir/vpn/netbird/user-config" "$KIOSK_HOME/.netbird"
+            sudo chown -R "$KIOSK_USER:$KIOSK_USER" "$KIOSK_HOME/.netbird"
+        fi
+        if command -v netbird &>/dev/null; then
+            sudo systemctl enable netbird 2>/dev/null
+            sudo systemctl start netbird 2>/dev/null
+            log_success "Netbird config restored"
+        else
+            log_warning "Netbird config restored but netbird not installed"
+            echo "  Install with: curl -fsSL https://pkgs.netbird.io/install.sh | sudo bash"
+        fi
+        vpn_restored=true
+    fi
+
+    # OpenVPN
+    if [[ -d "$backup_dir/vpn/openvpn" ]]; then
+        sudo mkdir -p /etc/openvpn
+        sudo cp -r "$backup_dir/vpn/openvpn/"* /etc/openvpn/
+        log_success "OpenVPN config restored"
+        vpn_restored=true
+    fi
+
+    # Tailscale info
+    if [[ -f "$backup_dir/vpn/tailscale-info.txt" ]]; then
+        if command -v tailscale &>/dev/null; then
+            log_info "Tailscale installed - run 'sudo tailscale up' to reconnect"
+        else
+            log_warning "Tailscale was configured but is not installed"
+            echo "  Install with: curl -fsSL https://tailscale.com/install.sh | sh"
+        fi
+    fi
+
+    [[ "$vpn_restored" == "false" ]] && log_info "No VPN configs in backup"
+
+    echo "[7/7] Importing quiet hours config..."
     if [[ -f "$backup_dir/kiosk-quiet-start.sh" ]]; then
         sudo cp "$backup_dir/kiosk-quiet-start.sh" /usr/local/bin/
         sudo chmod +x /usr/local/bin/kiosk-quiet-start.sh
