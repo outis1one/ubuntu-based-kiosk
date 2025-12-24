@@ -40,7 +40,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="0.9.8"
+SCRIPT_VERSION="0.9.8.1"
 KIOSK_USER="kiosk"
 BUILD_USER="${SUDO_USER:-$(whoami)}"
 KIOSK_HOME="/home/${KIOSK_USER}"
@@ -3896,6 +3896,7 @@ first_time_install() {
       libva2 libva-drm2 libva-x11-2 mesa-va-drivers \
       libegl-mesa0 libegl1-mesa-dev libgles2-mesa-dev \
       pipewire pipewire-pulse pipewire-alsa wireplumber pipewire-audio-client-libraries alsa-utils libnotify-bin \
+      gstreamer1.0-pipewire libspa-0.2-bluetooth \
       systemd-timesyncd acpid xbindkeys xdotool python3-evdev
     
     if lspci | grep -i "VGA.*Intel" >/dev/null 2>&1; then
@@ -3923,7 +3924,48 @@ first_time_install() {
     echo "[5/27] Setting up kiosk directories..."
     sudo mkdir -p "$KIOSK_DIR"
     sudo chown -R "$KIOSK_USER:$KIOSK_USER" "$KIOSK_HOME"
-    
+
+    # Configure PipeWire noise cancellation for microphone
+    echo "[5.5/27] Configuring audio noise cancellation..."
+    sudo mkdir -p "$KIOSK_HOME/.config/pipewire/pipewire.conf.d"
+    sudo -u "$KIOSK_USER" tee "$KIOSK_HOME/.config/pipewire/pipewire.conf.d/99-noise-cancellation.conf" > /dev/null <<'NOISECFG'
+# PipeWire noise cancellation configuration for kiosk microphone
+# This creates a virtual source with echo cancellation and noise suppression
+
+context.modules = [
+    {   name = libpipewire-module-echo-cancel
+        args = {
+            # audio.channels = 1
+            # capture.props = {
+            #     node.name = "Echo Cancellation Capture"
+            # }
+            # source.props = {
+            #     node.name = "Echo Cancellation Source"
+            #     node.description = "Noise-Cancelled Microphone"
+            # }
+            # sink.props = {
+            #     node.name = "Echo Cancellation Sink"
+            # }
+            # playback.props = {
+            #     node.name = "Echo Cancellation Playback"
+            # }
+            aec.method = webrtc
+            aec.args = {
+                # WebRTC audio processing settings
+                webrtc.gain_control = true
+                webrtc.extended_filter = true
+                webrtc.high_pass_filter = true
+                webrtc.noise_suppression = true
+                webrtc.noise_suppression_level = 3
+                webrtc.voice_detection = true
+            }
+        }
+    }
+]
+NOISECFG
+    sudo chown -R "$KIOSK_USER:$KIOSK_USER" "$KIOSK_HOME/.config"
+    log_success "Audio noise cancellation configured"
+
     echo "[6/27] Installing Node.js..."
     if ! command -v node &>/dev/null; then
         curl -fsSL https://deb.nodesource.com/setup_20.x | sudo -E bash -
@@ -3961,7 +4003,7 @@ const path=require('path');
 const os=require('os');
 
 const CONFIG_FILE=path.join(__dirname,'config.json');
-const VERSION='0.9.7-5';
+const VERSION='0.9.8.1';
 
 let mainWindow,views=[],hiddenViews=[],tabs=[],currentIndex=0,showingHidden=false;
 let pinWindow=null,promptWindow=null,pauseWindow=null,htmlKeyboardWindow=null;
@@ -5469,6 +5511,12 @@ function createWindow(){
 
 if(!app.requestSingleInstanceLock())app.quit();
 
+// Handle SIGUSR1 from power button trigger script
+process.on('SIGUSR1',()=>{
+  console.log('[POWER] Received SIGUSR1 signal - showing power menu');
+  showPowerMenu();
+});
+
 app.on('certificate-error',(e,w,u,er,c,cb)=>{
   e.preventDefault();
   cb(true);
@@ -5815,6 +5863,12 @@ sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/pause-dialog.html" > /dev/null <<'PAUSEHTM
       margin-top: 20px;
       line-height: 1.6;
     }
+    .countdown {
+      font-size: 16px;
+      color: #e74c3c;
+      margin-top: 15px;
+      font-weight: bold;
+    }
   </style>
 </head>
 <body>
@@ -5849,14 +5903,29 @@ sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/pause-dialog.html" > /dev/null <<'PAUSEHTM
     <div class="info">
       After the time expires, normal rotation and return-to-home logic will resume.
     </div>
+    <div class="countdown" id="countdown">Auto-closing in 30 seconds...</div>
   </div>
 
   <script>
     const {ipcRenderer} = require('electron');
+    let timeLeft = 30;
+    let countdownInterval;
 
     function selectTime(minutes) {
+      clearInterval(countdownInterval);
       ipcRenderer.send('pause-time-selected', minutes);
     }
+
+    function updateCountdown() {
+      timeLeft--;
+      document.getElementById('countdown').textContent = 'Auto-closing in ' + timeLeft + ' seconds...';
+      if (timeLeft <= 0) {
+        clearInterval(countdownInterval);
+        selectTime(0);
+      }
+    }
+
+    countdownInterval = setInterval(updateCountdown, 1000);
   </script>
 </body>
 </html>
