@@ -5257,12 +5257,12 @@ function showPowerMenu(){
 
   // For normal mode, use custom overlay with 30-second timeout
   console.log('[POWER] Showing custom power menu overlay');
-  if(mainWindow&&!mainWindow.isDestroyed()){
-    mainWindow.webContents.send('display-power-menu',{
-      version:VERSION,
-      localIP:localIP,
-      vpnIP:vpnIP.trim()
-    });
+  const powerInfo={version:VERSION,localIP:localIP,vpnIP:vpnIP.trim()};
+  // Send to all views (preload.js runs in views, not mainWindow)
+  for(const view of views){
+    if(view&&view.webContents&&!view.webContents.isDestroyed()){
+      view.webContents.send('display-power-menu',powerInfo);
+    }
   }
 }
 
@@ -10359,10 +10359,11 @@ export_settings() {
 
     local export_dir="/tmp/kiosk-backup-$(date +%Y%m%d-%H%M%S)"
     mkdir -p "$export_dir"
+    chmod 777 "$export_dir"
 
     echo "[1/7] Exporting core configuration..."
     if [[ -f "$CONFIG_PATH" ]]; then
-        sudo -u "$KIOSK_USER" cp "$CONFIG_PATH" "$export_dir/config.json"
+        sudo cp "$CONFIG_PATH" "$export_dir/config.json"
         log_success "Core config exported"
     else
         log_warning "No core config found"
@@ -10482,12 +10483,12 @@ export_settings() {
         home_dir="/tmp"
     fi
 
-    # Fix permissions for tar
-    sudo chmod -R 644 "$export_dir"/* 2>/dev/null
-    sudo chmod -R 755 "$export_dir" 2>/dev/null
-    find "$export_dir" -type d -exec chmod 755 {} \; 2>/dev/null
+    # Fix permissions for tar (make readable by all)
+    sudo chmod -R a+r "$export_dir" 2>/dev/null
+    sudo find "$export_dir" -type d -exec chmod a+rx {} \; 2>/dev/null
 
-    tar -czf "$home_dir/$archive_name" -C /tmp "$(basename "$export_dir")"
+    sudo tar -czf "$home_dir/$archive_name" -C /tmp "$(basename "$export_dir")"
+    sudo chown "${SUDO_USER:-$USER}:${SUDO_USER:-$USER}" "$home_dir/$archive_name" 2>/dev/null
     sudo rm -rf "$export_dir"
 
     echo
@@ -10574,10 +10575,12 @@ import_settings() {
 
     local import_dir="/tmp/kiosk-import-$$"
     mkdir -p "$import_dir"
+    chmod 777 "$import_dir"
 
     echo
     echo "Extracting backup..."
-    tar -xzf "$import_file" -C "$import_dir"
+    sudo tar -xzf "$import_file" -C "$import_dir"
+    sudo chmod -R a+r "$import_dir"
 
     # Find the extracted directory
     local backup_dir=$(find "$import_dir" -maxdepth 1 -type d -name "kiosk-backup-*" | head -1)
@@ -10585,7 +10588,7 @@ import_settings() {
 
     echo "[1/7] Importing core configuration..."
     if [[ -f "$backup_dir/config.json" ]]; then
-        sudo -u "$KIOSK_USER" cp "$backup_dir/config.json" "$CONFIG_PATH"
+        sudo cp "$backup_dir/config.json" "$CONFIG_PATH"
         sudo chown "$KIOSK_USER:$KIOSK_USER" "$CONFIG_PATH"
         log_success "Core config restored"
     fi
