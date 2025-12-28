@@ -5531,8 +5531,16 @@ if(!app.requestSingleInstanceLock())app.quit();
 
 // Handle SIGUSR1 from power button trigger script
 process.on('SIGUSR1',()=>{
-  console.log('[POWER] Received SIGUSR1 signal - showing power menu');
-  showPowerMenu();
+  console.log('[POWER] Received SIGUSR1 signal');
+  try{
+    if(mainWindow&&!mainWindow.isDestroyed()){
+      showPowerMenu();
+    }else{
+      console.log('[POWER] mainWindow not ready');
+    }
+  }catch(e){
+    console.error('[POWER] Error:',e.message);
+  }
 });
 
 app.on('certificate-error',(e,w,u,er,c,cb)=>{
