@@ -5473,6 +5473,9 @@ function createWindow(){
           }
         })();
       `).catch(()=>{});
+    }else if(key==='Control'||key==='Alt'){
+      // Ignore modifier keys - they don't work as standalone keys
+      return;
     }else{
       view.webContents.executeJavaScript(`
         (function(){
@@ -7192,87 +7195,36 @@ sudo apt install -y evtest 2>/dev/null || true
 # Get kiosk UID
 local kiosk_uid=$(id -u "$KIOSK_USER")
 
-# Create enhanced trigger script with multiple methods
-sudo -u "$KIOSK_USER" tee "$KIOSK_HOME/trigger-power-menu.sh" > /dev/null <<PWREOF
+# Create simple, reliable power button trigger script (runs as root from ACPI)
+sudo tee /usr/local/bin/kiosk-power-button.sh > /dev/null <<'PWREOF'
 #!/bin/bash
-export DISPLAY=:0
-export XAUTHORITY=/home/kiosk/.Xauthority
-export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$kiosk_uid/bus
+# Power button handler - sends SIGUSR1 to Electron to show power menu
+# This runs as ROOT from acpid, so it can signal any process
 
-logger "KIOSK: Power button pressed - triggering menu"
+logger "KIOSK POWER: Button pressed"
 
-# Give display time to be ready
-sleep 0.3
+# Find the Electron main process (runs as kiosk user)
+PIDS=$(pgrep -u kiosk -f "electron" 2>/dev/null)
 
-# Find the Electron main process (the one running main.js)
-ELECTRON_PID=\$(pgrep -f "electron.*main\.js" 2>/dev/null | head -1)
-if [ -z "\$ELECTRON_PID" ]; then
-  ELECTRON_PID=\$(pgrep -f "/kiosk/node_modules/.bin/electron" 2>/dev/null | head -1)
-fi
-if [ -z "\$ELECTRON_PID" ]; then
-  ELECTRON_PID=\$(pgrep -u kiosk -f "electron" 2>/dev/null | head -1)
+if [ -z "$PIDS" ]; then
+    logger "KIOSK POWER: No Electron process found"
+    exit 1
 fi
 
-logger "KIOSK: Found Electron PID: \$ELECTRON_PID"
-
-# Method 1: Send SIGUSR1 directly to Electron main process (most reliable)
-if [ -n "\$ELECTRON_PID" ]; then
-  logger "KIOSK: Sending SIGUSR1 to Electron PID \$ELECTRON_PID"
-  kill -USR1 \$ELECTRON_PID 2>/dev/null
-  if [ \$? -eq 0 ]; then
-    logger "KIOSK: Power menu triggered via SIGUSR1"
-    exit 0
-  fi
-fi
-
-# Method 2: Find window by multiple search patterns
-for pattern in "electron" "Electron" "kiosk"; do
-  WINDOW=\$(xdotool search --class "\$pattern" 2>/dev/null | head -1)
-  if [ -n "\$WINDOW" ]; then
-    logger "KIOSK: Found window \$WINDOW via pattern '\$pattern'"
-    xdotool windowactivate --sync \$WINDOW 2>/dev/null
-    sleep 0.2
-    xdotool key --window \$WINDOW --clearmodifiers ctrl+alt+Delete 2>/dev/null
-    if [ \$? -eq 0 ]; then
-      logger "KIOSK: Power menu triggered via xdotool (pattern: \$pattern)"
-      exit 0
-    fi
-  fi
+# Send SIGUSR1 to all Electron processes (the main one will handle it)
+for PID in $PIDS; do
+    logger "KIOSK POWER: Sending SIGUSR1 to PID $PID"
+    kill -USR1 $PID 2>/dev/null
 done
 
-# Method 3: Find window by PID
-if [ -n "\$ELECTRON_PID" ]; then
-  WINDOW_BY_PID=\$(xdotool search --pid \$ELECTRON_PID 2>/dev/null | head -1)
-  if [ -n "\$WINDOW_BY_PID" ]; then
-    logger "KIOSK: Found window by PID: \$WINDOW_BY_PID"
-    xdotool windowactivate --sync \$WINDOW_BY_PID 2>/dev/null
-    sleep 0.2
-    xdotool key --window \$WINDOW_BY_PID --clearmodifiers ctrl+alt+Delete 2>/dev/null
-    if [ \$? -eq 0 ]; then
-      logger "KIOSK: Power menu triggered via PID window"
-      exit 0
-    fi
-  fi
-fi
-
-# Method 4: Direct key injection to focused window
-logger "KIOSK: Trying direct key injection"
-xdotool key --clearmodifiers ctrl+alt+Delete 2>/dev/null
-if [ \$? -eq 0 ]; then
-  logger "KIOSK: Power menu triggered via direct injection"
-  exit 0
-fi
-
-# Method 5: Use ydotool if available (for Wayland compatibility)
-if command -v ydotool &>/dev/null; then
-  logger "KIOSK: Trying ydotool"
-  ydotool key 29:1 56:1 111:1 111:0 56:0 29:0 2>/dev/null  # Ctrl+Alt+Del
-fi
-
-logger "KIOSK: All power button trigger methods completed"
+logger "KIOSK POWER: Signal sent"
 PWREOF
 
-sudo chmod +x "$KIOSK_HOME/trigger-power-menu.sh"
+sudo chmod +x /usr/local/bin/kiosk-power-button.sh
+
+# Also create the old location for backwards compatibility
+sudo cp /usr/local/bin/kiosk-power-button.sh "$KIOSK_HOME/trigger-power-menu.sh"
+sudo chown "$KIOSK_USER:$KIOSK_USER" "$KIOSK_HOME/trigger-power-menu.sh"
 
 # Create test script for debugging
 sudo tee /usr/local/bin/test-power-button > /dev/null <<'TESTEOF'
@@ -7285,40 +7237,48 @@ if systemctl is-active --quiet acpid; then
   echo "  ✓ acpid is running"
 else
   echo "  ✗ acpid is NOT running"
-  echo "  Fix: sudo systemctl start acpid"
+  echo "  Fix: sudo systemctl enable --now acpid"
 fi
 echo
 
-echo "2. Checking acpi events..."
-if [ -d /etc/acpi/events ]; then
-  echo "  Event files found:"
-  ls -la /etc/acpi/events/kiosk-* 2>/dev/null || echo "  ✗ No kiosk event files"
+echo "2. Checking ACPI event handler..."
+if [ -f /etc/acpi/events/kiosk-power-button ]; then
+  echo "  ✓ Event handler exists"
+  cat /etc/acpi/events/kiosk-power-button
 else
-  echo "  ✗ /etc/acpi/events not found"
+  echo "  ✗ Event handler not found"
 fi
 echo
 
-echo "3. Testing Electron window detection..."
-ELECTRON_WINDOW=$(DISPLAY=:0 xdotool search --class "electron" 2>/dev/null | head -1)
-if [ -n "$ELECTRON_WINDOW" ]; then
-  echo "  ✓ Found Electron window: $ELECTRON_WINDOW"
+echo "3. Checking power button script..."
+if [ -x /usr/local/bin/kiosk-power-button.sh ]; then
+  echo "  ✓ Script exists and is executable"
 else
-  echo "  ✗ Electron window not found"
-  echo "  Is the kiosk running?"
+  echo "  ✗ Script not found or not executable"
 fi
 echo
 
-echo "4. Manual trigger test (run as kiosk user)..."
-echo "  sudo -u kiosk /home/kiosk/trigger-power-menu.sh"
+echo "4. Checking Electron process..."
+PIDS=$(pgrep -u kiosk -f "electron" 2>/dev/null)
+if [ -n "$PIDS" ]; then
+  echo "  ✓ Found Electron PIDs: $PIDS"
+else
+  echo "  ✗ No Electron process found"
+fi
 echo
 
-echo "5. Watch acpi events (press Ctrl+C to stop)..."
-echo "  sudo acpi_listen"
+echo "5. Testing power button trigger NOW..."
+if [ -x /usr/local/bin/kiosk-power-button.sh ]; then
+  echo "  Running: /usr/local/bin/kiosk-power-button.sh"
+  /usr/local/bin/kiosk-power-button.sh
+  echo "  Check if power menu appeared!"
+else
+  echo "  Script not found"
+fi
 echo
 
-echo "6. Test hardware button (install evtest first: sudo apt install evtest)..."
-echo "  sudo evtest"
-echo "  Then press power button and look for button/power events"
+echo "6. To watch ACPI events: sudo acpi_listen"
+echo "   Then press power button and look for 'button/power' events"
 TESTEOF
 
 sudo chmod +x /usr/local/bin/test-power-button
@@ -7326,29 +7286,22 @@ sudo chmod +x /usr/local/bin/test-power-button
 # Remove old configs
 sudo rm -f /etc/acpi/events/powerbtn* /etc/acpi/events/power* 2>/dev/null
 
-# Create MULTIPLE event handlers for different power button formats
-# Format 1: Standard power button
-sudo tee /etc/acpi/events/kiosk-power-button > /dev/null <<EOF
+# Create ACPI event handler for power button
+# The script runs as root (from acpid) and sends SIGUSR1 to Electron
+sudo tee /etc/acpi/events/kiosk-power-button > /dev/null <<'EOF'
 event=button/power.*
-action=sudo -u $KIOSK_USER $KIOSK_HOME/trigger-power-menu.sh
+action=/usr/local/bin/kiosk-power-button.sh
 EOF
 
-# Format 2: PBTN variant
-sudo tee /etc/acpi/events/kiosk-power-pbtn > /dev/null <<EOF
+# Also catch specific variants
+sudo tee /etc/acpi/events/kiosk-power-pbtn > /dev/null <<'EOF'
 event=button/power PBTN
-action=sudo -u $KIOSK_USER $KIOSK_HOME/trigger-power-menu.sh
+action=/usr/local/bin/kiosk-power-button.sh
 EOF
 
-# Format 3: PWR variant
-sudo tee /etc/acpi/events/kiosk-power-pwr > /dev/null <<EOF
-event=button/power PWR
-action=sudo -u $KIOSK_USER $KIOSK_HOME/trigger-power-menu.sh
-EOF
-
-# Format 4: Catch-all
-sudo tee /etc/acpi/events/kiosk-power-any > /dev/null <<EOF
-event=button/power
-action=sudo -u $KIOSK_USER $KIOSK_HOME/trigger-power-menu.sh
+sudo tee /etc/acpi/events/kiosk-power-pwr > /dev/null <<'EOF'
+event=button/power PWRF
+action=/usr/local/bin/kiosk-power-button.sh
 EOF
 
 # Configure systemd to ignore power button (let acpid handle it)
@@ -10625,60 +10578,30 @@ upgrade_kiosk() {
         rm -f "$config_backup"
     fi
 
-    # Regenerate power button trigger script with latest fixes
+    # Install simplified power button handler
     echo "  Updating power button handler..."
-    local kiosk_uid
-    kiosk_uid=$(id -u "$KIOSK_USER")
-    sudo -u "$KIOSK_USER" tee "$KIOSK_HOME/trigger-power-menu.sh" > /dev/null <<PWREOF
+    sudo tee /usr/local/bin/kiosk-power-button.sh > /dev/null <<'PWREOF'
 #!/bin/bash
-export DISPLAY=:0
-export XAUTHORITY=/home/kiosk/.Xauthority
-export DBUS_SESSION_BUS_ADDRESS=unix:path=/run/user/$kiosk_uid/bus
-
-logger "KIOSK: Power button pressed - triggering menu"
-sleep 0.3
-
-# Find the Electron main process
-ELECTRON_PID=\$(pgrep -f "electron.*main\.js" 2>/dev/null | head -1)
-if [ -z "\$ELECTRON_PID" ]; then
-  ELECTRON_PID=\$(pgrep -f "/kiosk/node_modules/.bin/electron" 2>/dev/null | head -1)
+# Power button handler - sends SIGUSR1 to Electron to show power menu
+logger "KIOSK POWER: Button pressed"
+PIDS=$(pgrep -u kiosk -f "electron" 2>/dev/null)
+if [ -z "$PIDS" ]; then
+    logger "KIOSK POWER: No Electron process found"
+    exit 1
 fi
-if [ -z "\$ELECTRON_PID" ]; then
-  ELECTRON_PID=\$(pgrep -u kiosk -f "electron" 2>/dev/null | head -1)
-fi
-
-logger "KIOSK: Found Electron PID: \$ELECTRON_PID"
-
-# Method 1: Send SIGUSR1 directly to Electron main process (most reliable)
-if [ -n "\$ELECTRON_PID" ]; then
-  logger "KIOSK: Sending SIGUSR1 to Electron PID \$ELECTRON_PID"
-  kill -USR1 \$ELECTRON_PID 2>/dev/null
-  if [ \$? -eq 0 ]; then
-    logger "KIOSK: Power menu triggered via SIGUSR1"
-    exit 0
-  fi
-fi
-
-# Method 2: Find window by multiple search patterns
-for pattern in "electron" "Electron" "kiosk"; do
-  WINDOW=\$(xdotool search --class "\$pattern" 2>/dev/null | head -1)
-  if [ -n "\$WINDOW" ]; then
-    logger "KIOSK: Found window \$WINDOW via pattern '\$pattern'"
-    xdotool windowactivate --sync \$WINDOW 2>/dev/null
-    sleep 0.2
-    xdotool key --window \$WINDOW --clearmodifiers ctrl+alt+Delete 2>/dev/null
-    if [ \$? -eq 0 ]; then
-      logger "KIOSK: Power menu triggered via xdotool"
-      exit 0
-    fi
-  fi
+for PID in $PIDS; do
+    logger "KIOSK POWER: Sending SIGUSR1 to PID $PID"
+    kill -USR1 $PID 2>/dev/null
 done
-
-# Method 3: Direct key injection
-xdotool key --clearmodifiers ctrl+alt+Delete 2>/dev/null
-logger "KIOSK: All power button trigger methods completed"
+logger "KIOSK POWER: Signal sent"
 PWREOF
-    sudo chmod +x "$KIOSK_HOME/trigger-power-menu.sh"
+    sudo chmod +x /usr/local/bin/kiosk-power-button.sh
+
+    # Update ACPI event handler
+    sudo tee /etc/acpi/events/kiosk-power-button > /dev/null <<'EOF'
+event=button/power.*
+action=/usr/local/bin/kiosk-power-button.sh
+EOF
     sudo systemctl restart acpid 2>/dev/null || true
 
     echo "[6/6] Starting kiosk..."
