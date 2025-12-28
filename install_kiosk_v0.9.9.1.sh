@@ -4038,6 +4038,8 @@ const VERSION='0.9.9.1';
 
 let mainWindow,views=[],hiddenViews=[],tabs=[],currentIndex=0,showingHidden=false;
 let pinWindow=null,promptWindow=null,pauseWindow=null,htmlKeyboardWindow=null;
+let pinWindowTimer=null,pauseWindowTimer=null;
+const DIALOG_TIMEOUT=30000; // 30 seconds for secondary screens
 let tabIndexToViewIndex=[];
 let currentHiddenIndex=0;
 
@@ -4953,10 +4955,23 @@ function showPauseDialog(){
   pauseWindow.loadFile(path.join(__dirname,'pause-dialog.html'));
 
   pauseWindow.on('closed',()=>{
+    if(pauseWindowTimer){clearTimeout(pauseWindowTimer);pauseWindowTimer=null;}
     pauseWindow=null;
   });
 
+  // Set 30-second auto-dismiss timer
+  if(pauseWindowTimer){clearTimeout(pauseWindowTimer);}
+  pauseWindowTimer=setTimeout(()=>{
+    console.log('[PAUSE] Auto-dismissing dialog after 30 seconds');
+    if(pauseWindow&&!pauseWindow.isDestroyed()){
+      pauseWindow.close();
+    }
+    pauseWindow=null;
+    pauseWindowTimer=null;
+  },DIALOG_TIMEOUT);
+
   ipcMain.once('pause-time-selected',(event,minutes)=>{
+    if(pauseWindowTimer){clearTimeout(pauseWindowTimer);pauseWindowTimer=null;}
     if(pauseWindow&&!pauseWindow.isDestroyed()){
       pauseWindow.close();
     }
@@ -5126,7 +5141,7 @@ function showPinEntry(){
     pinWindow.focus();
     return;
   }
-  
+
   pinWindow=new BrowserWindow({
     width:500,
     height:650,
@@ -5136,19 +5151,35 @@ function showPinEntry(){
     modal:true,
     webPreferences:{nodeIntegration:true,contextIsolation:false}
   });
-  
+
   pinWindow.loadFile(path.join(__dirname,'pin-entry.html'));
-  pinWindow.on('closed',()=>{pinWindow=null;});
-  
+  pinWindow.on('closed',()=>{
+    if(pinWindowTimer){clearTimeout(pinWindowTimer);pinWindowTimer=null;}
+    pinWindow=null;
+  });
+
+  // Set 30-second auto-dismiss timer
+  if(pinWindowTimer){clearTimeout(pinWindowTimer);}
+  pinWindowTimer=setTimeout(()=>{
+    console.log('[PIN] Auto-dismissing after 30 seconds');
+    if(pinWindow&&!pinWindow.isDestroyed()){
+      pinWindow.close();
+    }
+    pinWindow=null;
+    pinWindowTimer=null;
+  },DIALOG_TIMEOUT);
+
   ipcMain.once('pin-correct',()=>{
+    if(pinWindowTimer){clearTimeout(pinWindowTimer);pinWindowTimer=null;}
     if(pinWindow&&!pinWindow.isDestroyed()){
       pinWindow.close();
     }
     pinWindow=null;
     showHiddenTab(currentHiddenIndex);
   });
-  
+
   ipcMain.once('pin-cancelled',()=>{
+    if(pinWindowTimer){clearTimeout(pinWindowTimer);pinWindowTimer=null;}
     if(pinWindow&&!pinWindow.isDestroyed()){
       pinWindow.close();
     }
@@ -5204,13 +5235,11 @@ function showPowerMenu(){
     }
   }
 
-  let ipInfo='Local: '+localIP;
-  if(vpnIP){
-    ipInfo+='\nVPN: '+vpnIP.trim();
-  }
-
+  // For lockout mode, use native dialog (limited options, overlay not available)
   if(isLockedOut){
     console.log('[SECURITY] Showing limited power menu - system is locked out');
+    let ipInfo='Local: '+localIP;
+    if(vpnIP){ipInfo+='\nVPN: '+vpnIP.trim();}
     const targetWindow=(lockoutWindow&&!lockoutWindow.isDestroyed())?lockoutWindow:mainWindow;
     const r=dialog.showMessageBoxSync(targetWindow,{
       type:'question',
@@ -5226,18 +5255,15 @@ function showPowerMenu(){
     return;
   }
 
-  const r=dialog.showMessageBoxSync(mainWindow,{
-    type:'question',
-    buttons:['Shutdown','Restart','Reload','Cancel'],
-    defaultId:3,
-    title:'Power Options',
-    message:'What would you like to do?\n\nVersion: '+VERSION+'\n'+ipInfo,
-    noLink:true
-  });
-
-  if(r===0)exec('systemctl poweroff');
-  else if(r===1)exec('systemctl reboot');
-  else if(r===2){app.relaunch();app.quit();}
+  // For normal mode, use custom overlay with 30-second timeout
+  console.log('[POWER] Showing custom power menu overlay');
+  if(mainWindow&&!mainWindow.isDestroyed()){
+    mainWindow.webContents.send('display-power-menu',{
+      version:VERSION,
+      localIP:localIP,
+      vpnIP:vpnIP.trim()
+    });
+  }
 }
 
 function createWindow(){
@@ -5379,6 +5405,12 @@ function createWindow(){
   ipcMain.on('swipe-left',()=>{nextTab();});
   ipcMain.on('swipe-right',()=>{prevTab();});
   ipcMain.on('show-power-menu',showPowerMenu);
+  ipcMain.on('power-action',(event,action)=>{
+    console.log('[POWER] Action requested:',action);
+    if(action==='shutdown')exec('systemctl poweroff');
+    else if(action==='restart')exec('systemctl reboot');
+    else if(action==='reload'){app.relaunch();app.quit();}
+  });
   ipcMain.on('toggle-hidden',toggleHidden);
   ipcMain.on('return-to-tabs',forceReturnToTabs);
   ipcMain.on('user-activity',markActivity);
@@ -6780,6 +6812,169 @@ window.addEventListener('DOMContentLoaded',()=>{
       console.error('[NAV] Error hiding menu:',err);
     }
   }
+
+  // Power menu overlay (with 30-second auto-dismiss)
+  let powerMenu=null;
+  let powerMenuVisible=false;
+  let powerMenuTimer=null;
+  const POWER_MENU_TIMEOUT=30000;
+  let powerMenuInfo={version:'',localIP:'',vpnIP:''};
+
+  function createPowerMenu(){
+    if(powerMenu)return;
+    console.log('[POWER-MENU] Creating power menu');
+
+    powerMenu=document.createElement('div');
+    powerMenu.id='electron-power-menu';
+    powerMenu.style.cssText=`
+      position:fixed;top:0;left:0;width:100%;height:100%;
+      background:rgba(0,0,0,0.9);display:none;align-items:center;justify-content:center;
+      z-index:999998;pointer-events:auto;
+    `;
+
+    const content=document.createElement('div');
+    content.style.cssText=`
+      position:relative;background:rgba(44,62,80,0.98);border-radius:20px;padding:40px;
+      min-width:400px;max-width:90%;box-shadow:0 10px 40px rgba(0,0,0,0.5);text-align:center;
+    `;
+
+    const closeBtn=document.createElement('div');
+    closeBtn.innerHTML='✕';
+    closeBtn.style.cssText=`
+      position:absolute;top:10px;right:10px;font-size:32px;color:white;
+      cursor:pointer;width:40px;height:40px;display:flex;align-items:center;
+      justify-content:center;border-radius:50%;background:rgba(231,76,60,0.8);
+      user-select:none;
+    `;
+    closeBtn.addEventListener('click',(e)=>{
+      e.preventDefault();
+      e.stopPropagation();
+      hidePowerMenu();
+    });
+    content.appendChild(closeBtn);
+
+    const title=document.createElement('h2');
+    title.textContent='Power Options';
+    title.style.cssText='color:white;margin-bottom:20px;font-size:28px;';
+    content.appendChild(title);
+
+    const infoDiv=document.createElement('div');
+    infoDiv.id='power-menu-info';
+    infoDiv.style.cssText='color:#bdc3c7;margin-bottom:30px;font-size:14px;line-height:1.6;';
+    content.appendChild(infoDiv);
+
+    const buttonsDiv=document.createElement('div');
+    buttonsDiv.style.cssText='display:flex;flex-direction:column;gap:15px;';
+
+    const btnStyle=`
+      padding:20px 40px;font-size:20px;border:none;border-radius:10px;
+      cursor:pointer;font-weight:bold;transition:transform 0.2s,opacity 0.2s;
+    `;
+
+    const shutdownBtn=document.createElement('button');
+    shutdownBtn.textContent='⏻ Shutdown';
+    shutdownBtn.style.cssText=btnStyle+'background:#e74c3c;color:white;';
+    shutdownBtn.addEventListener('click',()=>{
+      hidePowerMenu();
+      ipcRenderer.send('power-action','shutdown');
+    });
+
+    const restartBtn=document.createElement('button');
+    restartBtn.textContent='↻ Restart';
+    restartBtn.style.cssText=btnStyle+'background:#f39c12;color:white;';
+    restartBtn.addEventListener('click',()=>{
+      hidePowerMenu();
+      ipcRenderer.send('power-action','restart');
+    });
+
+    const reloadBtn=document.createElement('button');
+    reloadBtn.textContent='⟳ Reload App';
+    reloadBtn.style.cssText=btnStyle+'background:#3498db;color:white;';
+    reloadBtn.addEventListener('click',()=>{
+      hidePowerMenu();
+      ipcRenderer.send('power-action','reload');
+    });
+
+    const cancelBtn=document.createElement('button');
+    cancelBtn.textContent='Cancel';
+    cancelBtn.style.cssText=btnStyle+'background:#7f8c8d;color:white;';
+    cancelBtn.addEventListener('click',()=>{
+      hidePowerMenu();
+    });
+
+    buttonsDiv.appendChild(shutdownBtn);
+    buttonsDiv.appendChild(restartBtn);
+    buttonsDiv.appendChild(reloadBtn);
+    buttonsDiv.appendChild(cancelBtn);
+    content.appendChild(buttonsDiv);
+
+    powerMenu.appendChild(content);
+
+    powerMenu.addEventListener('click',(e)=>{
+      if(e.target===powerMenu){
+        hidePowerMenu();
+      }
+    });
+
+    content.addEventListener('click',(e)=>{
+      e.stopPropagation();
+    });
+
+    document.body.appendChild(powerMenu);
+  }
+
+  function showPowerMenu(info){
+    console.log('[POWER-MENU] Showing power menu');
+    try{
+      if(!powerMenu)createPowerMenu();
+
+      // Update info display
+      const infoDiv=document.getElementById('power-menu-info');
+      if(infoDiv&&info){
+        let infoText='Version: '+info.version+'<br>Local: '+info.localIP;
+        if(info.vpnIP){
+          infoText+='<br>VPN: '+info.vpnIP;
+        }
+        infoDiv.innerHTML=infoText;
+      }
+
+      powerMenu.style.display='flex';
+      powerMenuVisible=true;
+
+      // Set 30-second auto-dismiss timer
+      if(powerMenuTimer){
+        clearTimeout(powerMenuTimer);
+      }
+      powerMenuTimer=setTimeout(()=>{
+        console.log('[POWER-MENU] Auto-dismissing after 30 seconds');
+        hidePowerMenu();
+      },POWER_MENU_TIMEOUT);
+
+    }catch(err){
+      console.error('[POWER-MENU] Error showing menu:',err);
+    }
+  }
+
+  function hidePowerMenu(){
+    console.log('[POWER-MENU] Hiding power menu');
+    try{
+      if(powerMenuTimer){
+        clearTimeout(powerMenuTimer);
+        powerMenuTimer=null;
+      }
+      if(powerMenu){
+        powerMenu.style.display='none';
+      }
+      powerMenuVisible=false;
+    }catch(err){
+      console.error('[POWER-MENU] Error hiding menu:',err);
+    }
+  }
+
+  // Listen for power menu display request from main process
+  ipcRenderer.on('display-power-menu',(event,info)=>{
+    showPowerMenu(info);
+  });
 
   function loadSitesIntoNav(){
     console.log('[NAV] Requesting config from main process');
