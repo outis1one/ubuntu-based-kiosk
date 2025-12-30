@@ -1,9 +1,9 @@
-# Ubuntu Based Kiosk (UBK)
+# Ubuntu Based Kiosk
 
 **Current Version:** 0.9.9 (check script header for latest version)
 **Built with Claude Sonnet 4/.5 AI assistance**
 **License:** GPL v3 - Keep derivatives open source
-**Repository:** https://github.com/outis1one/ubk/
+**Repository:** https://github.com/outis1one/ubuntu-based-kiosk/
 
 ---
 
@@ -48,9 +48,9 @@ Home/office kiosk for reusing old hardware, displaying:
 # Enable SSH during installation
 
 # Download and run installer
-wget https://github.com/outis1one/ubk/raw/main/install_kiosk_v0.9.8.sh
-chmod +x install_kiosk_v0.9.8.sh
-./install_kiosk_v0.9.8.sh
+wget https://github.com/outis1one/ubuntu-based-kiosk/raw/main/ubuntu-based-kiosk.sh
+chmod +x ubuntu-based-kiosk.sh
+./ubuntu-based-kiosk.sh
 ```
 
 The installer will guide you through configuration during setup.
@@ -393,7 +393,7 @@ smb://WORKGROUP/COMPUTER/PrinterName
 
 ```bash
 # Run installer script again to access menu
-./install_kiosk_v0.9.8.sh
+./ubuntu-based-kiosk.sh
 
 # Menu structure:
 # 1. Core Settings - Sites, WiFi, schedules, passwords, full reinstall, complete uninstall
@@ -408,7 +408,7 @@ The Easy Asterisk Intercom addon provides voice communication capabilities to yo
 
 **Access the addon menu:**
 ```bash
-./install_kiosk_v0.9.8.sh
+./ubuntu-based-kiosk.sh
 # Select: 2) Addons
 # Then: 4) Easy Asterisk Intercom
 ```
@@ -438,7 +438,7 @@ asterisk -rvvv
 systemctl restart asterisk
 
 # Configure intercom (rerun installation to update)
-./install_kiosk_v0.9.8.sh
+./ubuntu-based-kiosk.sh
 # Select: 2) Addons → 4) Easy Asterisk Intercom
 ```
 
@@ -822,7 +822,7 @@ Full system cleanup that removes all kiosk components and restores the system to
 **Access:**
 ```bash
 # Core Settings menu → option 11
-./install_kiosk_0.9.8.sh
+./ubuntu-based-kiosk.sh
 # Choose: Core Settings → Complete Uninstall
 ```
 
@@ -950,9 +950,9 @@ This project bundles or installs several open-source components under their resp
 
 ---
 
-## UBK Project License
+## Ubuntu Based Kiosk Project License
 
-The UBK installer script and original code components are licensed under **GPL-3.0-or-later**.
+The Ubuntu Based Kiosk installer script and original code components are licensed under **GPL-3.0-or-later**.
 
 See the LICENSE file in the repository for full terms.
 
@@ -1005,9 +1005,9 @@ Contributions welcome! Please:
 
 ## Support & Community
 
-- **Repository:** https://github.com/outis1one/ubk/
-- **Issues:** https://github.com/outis1one/ubk/issues
-- **Discussions:** https://github.com/outis1one/ubk/discussions
+- **Repository:** https://github.com/outis1one/ubuntu-based-kiosk/
+- **Issues:** https://github.com/outis1one/ubuntu-based-kiosk/issues
+- **Discussions:** https://github.com/outis1one/ubuntu-based-kiosk/discussions
 
 ---
 
@@ -1015,7 +1015,7 @@ Contributions welcome! Please:
 
 Built with assistance from **Claude Sonnet 4/.5** (Anthropic AI)
 
-Special thanks to the maintainers of all upstream projects that make UBK possible.
+Special thanks to the maintainers of all upstream projects that make Ubuntu Based Kiosk possible.
 
 ---
 

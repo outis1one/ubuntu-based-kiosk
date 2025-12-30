@@ -1,6 +1,6 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk (UBK) v0.9.9.1       ###
+###   Ubuntu Based Kiosk v0.9.9.1             ###
 ################################################################################
 #
 # RELEASE v0.9.9.1 - Silent Upgrade & Power Button Fixes
@@ -27,7 +27,7 @@
 #
 # Built with Claude Sonnet 4/.5 AI assistance
 # License: GPL v3 - Keep derivatives open source
-# Repository: https://github.com/outis1one/ubk/
+# Repository: https://github.com/outis1one/ubuntu-based-kiosk/
 #
 # TARGET SYSTEMS:
 # - Ubuntu 24.04+ Server (minimal install recommended)
