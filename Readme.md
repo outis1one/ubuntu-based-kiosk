@@ -1,6 +1,6 @@
 # Ubuntu Based Kiosk
 
-**Current Version:** 0.9.9 (check script header for latest version)
+**Current Version:** 0.9.9.1 (check script header for latest version)
 **Built with Claude Sonnet 4/.5 AI assistance**
 **License:** GPL v3 - Keep derivatives open source
 **Repository:** https://github.com/outis1one/ubuntu-based-kiosk/
