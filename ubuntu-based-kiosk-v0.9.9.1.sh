@@ -10823,7 +10823,7 @@ upgrade_kiosk() {
         # Extract content and write to file (use sudo tee for reliability)
         sed -n "${content_start},${content_end}p" "$script_path" | sudo tee "$output_file" > /dev/null
 
-        if [[ -s "$output_file" ]]; then
+        if sudo test -s "$output_file"; then
             echo "  ✓ $fname (lines $content_start-$content_end)"
             return 0
         else
