@@ -796,7 +796,14 @@ configure_timezone() {
     
     if [[ -n "$new_tz" ]]; then
         if timedatectl list-timezones | grep -q "^${new_tz}$"; then
-            sudo timedatectl set-timezone "$new_tz" && log_success "Timezone updated to $new_tz"
+            if sudo timedatectl set-timezone "$new_tz"; then
+                log_success "Timezone updated to $new_tz"
+            else
+                # Fallback: set timezone directly without D-Bus
+                sudo ln -sf "/usr/share/zoneinfo/$new_tz" /etc/localtime
+                echo "$new_tz" | sudo tee /etc/timezone > /dev/null
+                log_success "Timezone updated to $new_tz (direct)"
+            fi
         else
             log_error "Invalid timezone: $new_tz"
         fi
@@ -3908,7 +3915,10 @@ first_time_install() {
     echo
     read -r -p "Proceed with installation? (y/n): " proceed
     [[ ! "$proceed" =~ ^[Yy]$ ]] && exit 0
-    
+
+    # Cache sudo credentials upfront so they don't expire mid-install
+    sudo -v
+
     echo
     echo "[1/27] Installing packages..."
     sudo apt update
