@@ -4204,8 +4204,8 @@ function showLockoutScreen(){
     frame:false,
     backgroundColor:'#000000',
     webPreferences:{
-      nodeIntegration:true,
-      contextIsolation:false
+      contextIsolation:true,
+      preload:path.join(__dirname,'popup-preload.js')
     }
   });
 
@@ -4262,20 +4262,17 @@ function showLockoutScreen(){
         <div class="error" id="error">Incorrect password</div>
       </div>
       <script>
-        const crypto=require('crypto');
-        const{ipcRenderer}=require('electron');
-
         function checkPassword(){
           const pass=document.getElementById('password').value;
-          const hash=crypto.createHash('sha256').update(pass).digest('hex');
-          ipcRenderer.send('check-lockout-password',hash);
+          const hash=window.electronAPI.hashPassword(pass);
+          window.electronAPI.send('check-lockout-password',hash);
         }
 
         document.getElementById('password').addEventListener('keydown',(e)=>{
           if(e.key==='Enter')checkPassword();
         });
 
-        ipcRenderer.on('password-incorrect',()=>{
+        window.electronAPI.on('password-incorrect',()=>{
           document.getElementById('error').style.display='block';
           document.getElementById('password').value='';
           document.getElementById('password').focus();
@@ -4886,9 +4883,9 @@ function showInactivityPrompt(){
     alwaysOnTop:true,
     parent:mainWindow,
     modal:true,
-    webPreferences:{nodeIntegration:true,contextIsolation:false}
+    webPreferences:{contextIsolation:true,preload:path.join(__dirname,'popup-preload.js')}
   });
-  
+
   promptWindow.loadFile(path.join(__dirname,'inactivity-prompt-extended.html'));
   
   promptWindow.on('closed',()=>{
@@ -4953,7 +4950,7 @@ function showPauseDialog(){
     alwaysOnTop:true,
     parent:mainWindow,
     modal:true,
-    webPreferences:{nodeIntegration:true,contextIsolation:false}
+    webPreferences:{contextIsolation:true,preload:path.join(__dirname,'popup-preload.js')}
   });
 
   pauseWindow.loadFile(path.join(__dirname,'pause-dialog.html'));
@@ -5031,12 +5028,12 @@ function showHTMLKeyboard(){
     skipTaskbar:true,
     focusable:false,
     webPreferences:{
-      nodeIntegration:true,
-      contextIsolation:false,
+      contextIsolation:true,
+      preload:path.join(__dirname,'popup-preload.js'),
       backgroundThrottling:false
     }
   });
-  
+
   htmlKeyboardWindow.loadFile(path.join(__dirname,'keyboard.html'));
   
   htmlKeyboardWindow.webContents.on('did-finish-load',()=>{
@@ -5153,7 +5150,7 @@ function showPinEntry(){
     alwaysOnTop:true,
     parent:mainWindow,
     modal:true,
-    webPreferences:{nodeIntegration:true,contextIsolation:false}
+    webPreferences:{contextIsolation:true,preload:path.join(__dirname,'popup-preload.js')}
   });
 
   pinWindow.loadFile(path.join(__dirname,'pin-entry.html'));
@@ -5798,10 +5795,9 @@ sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/keyboard.html" > /dev/null <<'KBHTML'
   </div>
   
   <script>
-    const { ipcRenderer } = require('electron');
     let shiftPressed = false;
     let capsLock = false;
-    
+
     // CRITICAL: Do NOT preventDefault on keyboard events
     // This allows physical keyboard to work alongside OSK
     window.addEventListener('keydown', (e) => {
@@ -5812,7 +5808,7 @@ sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/keyboard.html" > /dev/null <<'KBHTML'
         updateCapsDisplay();
       }
     }, {passive: true});
-    
+
     function updateKeyDisplay() {
       const keys = document.querySelectorAll('.key[data-key]');
       keys.forEach(key => {
@@ -5826,67 +5822,67 @@ sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/keyboard.html" > /dev/null <<'KBHTML'
         }
       });
     }
-    
+
     function typeKey(element) {
       const special = element.getAttribute('data-special');
       if (special) {
-        ipcRenderer.send('keyboard-type', special);
+        window.electronAPI.send('keyboard-type', special);
         return;
       }
-      
+
       const baseKey = element.getAttribute('data-key');
       const shiftKey = element.getAttribute('data-shift');
       let finalKey = baseKey;
-      
+
       if (/^[a-z]$/.test(baseKey)) {
         const shouldBeUpper = (shiftPressed && !capsLock) || (!shiftPressed && capsLock);
         finalKey = shouldBeUpper ? baseKey.toUpperCase() : baseKey.toLowerCase();
       } else if (shiftPressed && shiftKey) {
         finalKey = shiftKey;
       }
-      
-      ipcRenderer.send('keyboard-type', finalKey);
-      
+
+      window.electronAPI.send('keyboard-type', finalKey);
+
       if (shiftPressed) {
         shiftPressed = false;
         updateShiftDisplay();
         updateKeyDisplay();
       }
     }
-    
+
     function toggleShift() {
       shiftPressed = !shiftPressed;
       updateShiftDisplay();
       updateKeyDisplay();
     }
-    
+
     function toggleCaps() {
       capsLock = !capsLock;
       updateCapsDisplay();
       updateKeyDisplay();
     }
-    
+
     function updateShiftDisplay() {
       document.querySelectorAll('.shift').forEach(key => {
         if (shiftPressed) key.classList.add('active');
         else key.classList.remove('active');
       });
     }
-    
+
     function updateCapsDisplay() {
       const capsKey = document.getElementById('caps-key');
       if (capsLock) capsKey.classList.add('active');
       else capsKey.classList.remove('active');
     }
-    
+
     function closeKeyboard() {
-      ipcRenderer.send('close-keyboard');
+      window.electronAPI.send('close-keyboard');
     }
-    
+
     updateKeyDisplay();
-    
+
     // Tell main process we're ready
-    ipcRenderer.send('keyboard-ready');
+    window.electronAPI.send('keyboard-ready');
   </script>
 </body>
 </html>
@@ -5991,13 +5987,12 @@ sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/pause-dialog.html" > /dev/null <<'PAUSEHTM
   </div>
 
   <script>
-    const {ipcRenderer} = require('electron');
     let timeLeft = 30;
     let countdownInterval;
 
     function selectTime(minutes) {
       clearInterval(countdownInterval);
-      ipcRenderer.send('pause-time-selected', minutes);
+      window.electronAPI.send('pause-time-selected', minutes);
     }
 
     function updateCountdown() {
@@ -6100,17 +6095,8 @@ echo "[15/27] Creating PIN entry dialog..."
     <div class="info">Default PIN: 1234 (4-8 digits)</div>
   </div>
   <script>
-    const {ipcRenderer} = require('electron');
-    const fs = require('fs');
-    const path = require('path');
-    const pinFile = path.join(__dirname, '.jitsi-pin');
-    let correctPin = '1234';
+    let correctPin = window.electronAPI.readPin();
     let enteredPin = '';
-    try {
-      const stored = fs.readFileSync(pinFile, 'utf8').trim();
-      if (stored !== 'NOPIN') correctPin = stored;
-      else correctPin = null;
-    } catch(e) {}
     function updateDisplay() {
       const display = document.getElementById('pin-display');
       if (enteredPin.length === 0) {
@@ -6137,7 +6123,7 @@ echo "[15/27] Creating PIN entry dialog..."
         return;
       }
       if (correctPin === null || enteredPin === correctPin) {
-        ipcRenderer.send('pin-correct');
+        window.electronAPI.send('pin-correct');
       } else {
         document.getElementById('error').textContent = '❌ Incorrect PIN';
         document.getElementById('error').style.display = 'block';
@@ -6145,7 +6131,7 @@ echo "[15/27] Creating PIN entry dialog..."
         updateDisplay();
       }
     }
-    function cancel() { ipcRenderer.send('pin-cancelled'); }
+    function cancel() { window.electronAPI.send('pin-cancelled'); }
     document.addEventListener('keydown', (e) => {
       if (e.key >= '0' && e.key <= '9') addDigit(e.key);
       else if (e.key === 'Backspace') backspace();
@@ -6264,7 +6250,6 @@ echo "[15/27] Creating inactivity prompt..."
     </div>
   </div>
   <script>
-    const {ipcRenderer} = require('electron');
     let count = 15;
     const interval = setInterval(() => {
       count--;
@@ -6273,17 +6258,17 @@ echo "[15/27] Creating inactivity prompt..."
         clearInterval(interval);
       }
     }, 1000);
-    
+
     function imHere(minutes) {
       clearInterval(interval);
       console.log('[PROMPT] User selected: '+(minutes===0?'Continue':minutes+' minutes'));
-      ipcRenderer.send('user-still-here', minutes);
+      window.electronAPI.send('user-still-here', minutes);
     }
 
-   function goHome() {
+    function goHome() {
       clearInterval(interval);
       console.log('[PROMPT] User requested immediate home return');
-      ipcRenderer.send('user-still-here', -1);
+      window.electronAPI.send('user-still-here', -1);
     }
     
     document.addEventListener('keydown', (e) => {
@@ -6302,6 +6287,27 @@ INACTHTML
     echo "1234" | sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/.jitsi-pin" >/dev/null
     sudo -u "$KIOSK_USER" chmod 600 "$KIOSK_DIR/.jitsi-pin"
     log_success "Default PIN: 1234"
+
+echo "[15.5/27] Creating popup-preload.js..."
+sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/popup-preload.js" > /dev/null <<'POPUPPRELOAD'
+const{contextBridge,ipcRenderer}=require('electron');
+const crypto=require('crypto');
+const fs=require('fs');
+const path=require('path');
+contextBridge.exposeInMainWorld('electronAPI',{
+  send:(channel,data)=>ipcRenderer.send(channel,data),
+  on:(channel,cb)=>{ipcRenderer.on(channel,(_e,...args)=>cb(...args));},
+  once:(channel,cb)=>{ipcRenderer.once(channel,(_e,...args)=>cb(...args));},
+  hashPassword:(pass)=>crypto.createHash('sha256').update(pass).digest('hex'),
+  readPin:()=>{
+    try{
+      const stored=fs.readFileSync(path.join(__dirname,'.jitsi-pin'),'utf8').trim();
+      return stored==='NOPIN'?null:stored;
+    }catch(e){return'1234';}
+  }
+});
+POPUPPRELOAD
+
 ###########################################################################
 ############################start-preload##################################
 ###########################################################################
@@ -8747,50 +8753,49 @@ install_html_keyboard() {
   </div>
   
   <script>
-    const { ipcRenderer } = require('electron');
     let shiftPressed = false;
     let capsLock = false;
-    
+
     const shiftMap = {
       '1':'!', '2':'@', '3':'#', '4':'$', '5':'%',
       '6':'^', '7':'&', '8':'*', '9':'(', '0':')',
       '-':'_', '=':'+', '[':'{', ']':'}', '\\':'|',
       ';':':', '\'':'"', ',':'<', '.':'>', '/':'?'
     };
-    
+
     function typeKey(element) {
       const special = element.getAttribute('data-special');
       if (special) {
-        ipcRenderer.send('keyboard-type', special);
+        window.electronAPI.send('keyboard-type', special);
         return;
       }
-      
+
       const baseKey = element.getAttribute('data-key');
       const shiftKey = element.getAttribute('data-shift');
       let finalKey = baseKey;
-      
+
       if (/^[a-z]$/.test(baseKey)) {
         const shouldBeUpper = (shiftPressed && !capsLock) || (!shiftPressed && capsLock);
         finalKey = shouldBeUpper ? baseKey.toUpperCase() : baseKey.toLowerCase();
       } else if (shiftPressed && shiftKey) {
         finalKey = shiftKey;
       }
-      
-      ipcRenderer.send('keyboard-type', finalKey);
-      
+
+      window.electronAPI.send('keyboard-type', finalKey);
+
       if (shiftPressed) {
         shiftPressed = false;
         updateShiftDisplay();
         updateKeyDisplay();
       }
     }
-    
+
     function toggleShift() {
       shiftPressed = !shiftPressed;
       updateShiftDisplay();
       updateKeyDisplay();
     }
-    
+
     function toggleCaps() {
       capsLock = !capsLock;
       const capsKey = document.getElementById('caps-key');
@@ -8801,7 +8806,7 @@ install_html_keyboard() {
       }
       updateKeyDisplay();
     }
-    
+
     function updateShiftDisplay() {
       const shiftKeys = document.querySelectorAll('.shift');
       shiftKeys.forEach(key => {
@@ -8812,7 +8817,7 @@ install_html_keyboard() {
         }
       });
     }
-    
+
     function updateKeyDisplay() {
       const keys = document.querySelectorAll('.key[data-key]');
       keys.forEach(key => {
@@ -8826,17 +8831,17 @@ install_html_keyboard() {
         }
       });
     }
-    
+
     function closeKeyboard() {
-      ipcRenderer.send('close-keyboard');
+      window.electronAPI.send('close-keyboard');
     }
-    
+
     updateKeyDisplay();
   </script>
 </body>
 </html>
 KBHTML
-    
+
     sudo chown "$KIOSK_USER:$KIOSK_USER" "$KIOSK_DIR/keyboard.html"
     log_success "keyboard.html created"
     
@@ -8960,15 +8965,15 @@ function showHTMLKeyboard(){
     frame:false,
     alwaysOnTop:true,
     skipTaskbar:true,
-    webPreferences:{nodeIntegration:true,contextIsolation:false}
+    webPreferences:{contextIsolation:true,preload:path.join(__dirname,'popup-preload.js')}
   });
-  
+
   htmlKeyboardWindow.loadFile(path.join(__dirname,'keyboard.html'));
-  
+
   htmlKeyboardWindow.on('closed',()=>{
     htmlKeyboardWindow=null;
   });
-  
+
   // Focus first input field after keyboard shows
   setTimeout(()=>{
     let view=null;
@@ -10845,6 +10850,7 @@ upgrade_kiosk() {
     # Extract all files using their unique heredoc markers
     extract_file 'tee.*main\.js.*MAINJS' 'MAINJS' "$KIOSK_DIR/main.js"
     extract_file 'tee.*preload\.js.*PRELOAD' 'PRELOAD' "$KIOSK_DIR/preload.js"
+    extract_file 'tee.*popup-preload\.js.*POPUPPRELOAD' 'POPUPPRELOAD' "$KIOSK_DIR/popup-preload.js"
     extract_file 'tee.*keyboard\.html.*KBHTML' 'KBHTML' "$KIOSK_DIR/keyboard.html"
     extract_file 'tee.*pause-dialog\.html.*PAUSEHTML' 'PAUSEHTML' "$KIOSK_DIR/pause-dialog.html"
     extract_file 'tee.*pin-entry\.html.*PINHTML' 'PINHTML' "$KIOSK_DIR/pin-entry.html"
