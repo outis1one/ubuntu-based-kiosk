@@ -1,9 +1,9 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk v0.9.9.1             ###
+###   Ubuntu Based Kiosk v1.0.0                ###
 ################################################################################
 #
-# RELEASE v0.9.9.1 - Silent Upgrade & Power Button Fixes
+# RELEASE v1.0.0 - Silent Upgrade & Power Button Fixes
 # - Silent upgrade: no user input required, extracts files from script
 # - Import now allows selecting backup by number instead of typing path
 # - Improved power button handler with better Electron process detection
@@ -55,7 +55,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="0.9.9.1"
+SCRIPT_VERSION="1.0.0"
 KIOSK_USER="kiosk"
 BUILD_USER="${SUDO_USER:-$(whoami)}"
 KIOSK_HOME="/home/${KIOSK_USER}"
@@ -4044,7 +4044,7 @@ process.on('uncaughtException',(e)=>{
 });
 
 const CONFIG_FILE=path.join(__dirname,'config.json');
-const VERSION='0.9.9.1';
+const VERSION='1.0.0';
 
 let mainWindow,views=[],hiddenViews=[],tabs=[],currentIndex=0,showingHidden=false;
 let pinWindow=null,promptWindow=null,pauseWindow=null,htmlKeyboardWindow=null;
