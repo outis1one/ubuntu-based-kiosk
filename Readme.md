@@ -1,7 +1,7 @@
 # Ubuntu Based Kiosk
 
-**Current Version:** 0.9.9.1 (check script header for latest version)
-**Built with Claude Sonnet 4/.5 AI assistance**
+**Current Version:** 1.0.0 (check script header for latest version)
+**Built with Claude Sonnet 4.6 AI assistance**
 **License:** GPL v3 - Keep derivatives open source
 **Repository:** https://github.com/outis1one/ubuntu-based-kiosk/
 
@@ -48,9 +48,9 @@ Home/office kiosk for reusing old hardware, displaying:
 # Enable SSH during installation
 
 # Download and run installer
-wget https://github.com/outis1one/ubuntu-based-kiosk/raw/main/ubuntu-based-kiosk.sh
-chmod +x ubuntu-based-kiosk.sh
-./ubuntu-based-kiosk.sh
+wget https://github.com/outis1one/ubuntu-based-kiosk/raw/main/ubuntu-based-kiosk-v1.0.0.sh
+chmod +x ubuntu-based-kiosk-v1.0.0.sh
+./ubuntu-based-kiosk-v1.0.0.sh
 ```
 
 The installer will guide you through configuration during setup.
@@ -393,7 +393,7 @@ smb://WORKGROUP/COMPUTER/PrinterName
 
 ```bash
 # Run installer script again to access menu
-./ubuntu-based-kiosk.sh
+./ubuntu-based-kiosk-v1.0.0.sh
 
 # Menu structure:
 # 1. Core Settings - Sites, WiFi, schedules, passwords, full reinstall, complete uninstall
@@ -408,7 +408,7 @@ The Easy Asterisk Intercom addon provides voice communication capabilities to yo
 
 **Access the addon menu:**
 ```bash
-./ubuntu-based-kiosk.sh
+./ubuntu-based-kiosk-v1.0.0.sh
 # Select: 2) Addons
 # Then: 4) Easy Asterisk Intercom
 ```
@@ -438,7 +438,7 @@ asterisk -rvvv
 systemctl restart asterisk
 
 # Configure intercom (rerun installation to update)
-./ubuntu-based-kiosk.sh
+./ubuntu-based-kiosk-v1.0.0.sh
 # Select: 2) Addons → 4) Easy Asterisk Intercom
 ```
 
@@ -822,7 +822,7 @@ Full system cleanup that removes all kiosk components and restores the system to
 **Access:**
 ```bash
 # Core Settings menu → option 11
-./ubuntu-based-kiosk.sh
+./ubuntu-based-kiosk-v1.0.0.sh
 # Choose: Core Settings → Complete Uninstall
 ```
 
@@ -972,9 +972,19 @@ See the LICENSE file in the repository for full terms.
 
 ## Project Status & Future Plans
 
-**Current Version:** 0.9.8 - Named Sites & Easy Asterisk Intercom
+**Current Version:** 1.0.0
 
-**Recent Updates (v0.9.8):**
+**Recent Updates (v1.0.0):**
+- **Upgrade fix:** file extraction now correctly verifies written files on Ubuntu 22.04+ systems where the kiosk home directory has restrictive permissions (750)
+- **Install fix:** sudo credentials primed upfront before the long apt install step, preventing cache expiry at the timezone prompt
+- **Timezone fix:** fallback to direct `/etc/localtime` symlink when `timedatectl` fails via D-Bus
+
+**Previous (v0.9.9.1):**
+- Silent upgrade: no user input required, extracts files directly from script
+- Power button fixes
+- Import allows selecting backup by number instead of typing path
+
+**Previous (v0.9.8):**
 - Easy Asterisk Intercom addon with automatic updates
 - Smart version detection and configuration preservation
 - Named websites feature for user-friendly site identification
@@ -1013,11 +1023,11 @@ Contributions welcome! Please:
 
 ## Credits
 
-Built with assistance from **Claude Sonnet 4/.5** (Anthropic AI)
+Built with assistance from **Claude Sonnet 4.6** (Anthropic AI)
 
 Special thanks to the maintainers of all upstream projects that make Ubuntu Based Kiosk possible.
 
 ---
 
-*Last Updated: December 10, 2025*
-*Version: 0.9.8*
+*Last Updated: April 21, 2026*
+*Version: 1.0.0*
