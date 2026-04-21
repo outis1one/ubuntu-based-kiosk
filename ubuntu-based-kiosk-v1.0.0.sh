@@ -1,9 +1,9 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk v0.9.9.1             ###
+###   Ubuntu Based Kiosk v1.0.0                ###
 ################################################################################
 #
-# RELEASE v0.9.9.1 - Silent Upgrade & Power Button Fixes
+# RELEASE v1.0.0 - Silent Upgrade & Power Button Fixes
 # - Silent upgrade: no user input required, extracts files from script
 # - Import now allows selecting backup by number instead of typing path
 # - Improved power button handler with better Electron process detection
@@ -55,7 +55,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="0.9.9.1"
+SCRIPT_VERSION="1.0.0"
 KIOSK_USER="kiosk"
 BUILD_USER="${SUDO_USER:-$(whoami)}"
 KIOSK_HOME="/home/${KIOSK_USER}"
@@ -796,7 +796,14 @@ configure_timezone() {
     
     if [[ -n "$new_tz" ]]; then
         if timedatectl list-timezones | grep -q "^${new_tz}$"; then
-            sudo timedatectl set-timezone "$new_tz" && log_success "Timezone updated to $new_tz"
+            if sudo timedatectl set-timezone "$new_tz"; then
+                log_success "Timezone updated to $new_tz"
+            else
+                # Fallback: set timezone directly without D-Bus
+                sudo ln -sf "/usr/share/zoneinfo/$new_tz" /etc/localtime
+                echo "$new_tz" | sudo tee /etc/timezone > /dev/null
+                log_success "Timezone updated to $new_tz (direct)"
+            fi
         else
             log_error "Invalid timezone: $new_tz"
         fi
@@ -3908,7 +3915,10 @@ first_time_install() {
     echo
     read -r -p "Proceed with installation? (y/n): " proceed
     [[ ! "$proceed" =~ ^[Yy]$ ]] && exit 0
-    
+
+    # Cache sudo credentials upfront so they don't expire mid-install
+    sudo -v
+
     echo
     echo "[1/27] Installing packages..."
     sudo apt update
@@ -4034,7 +4044,7 @@ process.on('uncaughtException',(e)=>{
 });
 
 const CONFIG_FILE=path.join(__dirname,'config.json');
-const VERSION='0.9.9.1';
+const VERSION='1.0.0';
 
 let mainWindow,views=[],hiddenViews=[],tabs=[],currentIndex=0,showingHidden=false;
 let pinWindow=null,promptWindow=null,pauseWindow=null,htmlKeyboardWindow=null;
@@ -10823,7 +10833,7 @@ upgrade_kiosk() {
         # Extract content and write to file (use sudo tee for reliability)
         sed -n "${content_start},${content_end}p" "$script_path" | sudo tee "$output_file" > /dev/null
 
-        if [[ -s "$output_file" ]]; then
+        if sudo test -s "$output_file"; then
             echo "  ✓ $fname (lines $content_start-$content_end)"
             return 0
         else
