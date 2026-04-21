@@ -7202,7 +7202,7 @@ PRELOAD
   "version": "1.0.0",
   "main": "main.js",
   "dependencies": {
-    "electron": "^39.2.4"
+    "electron": "^41.2.1"
   }
 }
 PKGJSON

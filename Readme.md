@@ -149,7 +149,7 @@ The installer will guide you through configuration during setup.
 ## What This Script Installs
 
 ### Core Components
-- **Electron** v39.2.4 (Chromium-based app framework)
+- **Electron** v41.2.1 (Chromium-based app framework)
 - **Node.js** v20.x with npm
 - **Openbox** - Lightweight window manager
 - **LightDM** - Display manager with autologin
