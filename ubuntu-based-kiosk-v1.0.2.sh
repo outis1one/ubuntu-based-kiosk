@@ -7260,13 +7260,26 @@ PKGJSON
     echo "[17/27] Installing Electron packages..."
     echo "Note: npm may show deprecation warnings (safe to ignore)"
     sudo -u "$KIOSK_USER" bash -lc "cd '$KIOSK_DIR' && npm install --unsafe-perm"
-    
+
+    # Verify electron binary downloaded (npm install succeeds even if the binary download fails)
+    local electron_bin="$KIOSK_DIR/node_modules/electron/dist/electron"
+    if [[ ! -f "$electron_bin" ]]; then
+        log_warning "Electron binary not found after npm install — retrying download..."
+        sudo -u "$KIOSK_USER" bash -lc "cd '$KIOSK_DIR' && ELECTRON_FORCE_DOWNLOAD=true node node_modules/electron/install.js" || true
+    fi
+    if [[ ! -f "$electron_bin" ]]; then
+        log_error "Electron binary download failed. Check network connectivity and retry:"
+        log_error "  cd $KIOSK_DIR && sudo -u $KIOSK_USER ELECTRON_FORCE_DOWNLOAD=true npm install electron --unsafe-perm"
+        exit 1
+    fi
+    log_success "Electron binary verified"
+
     local sandbox="$KIOSK_DIR/node_modules/electron/dist/chrome-sandbox"
     if [[ -f "$sandbox" ]]; then
         sudo chown root:root "$sandbox"
         sudo chmod 4755 "$sandbox"
     fi
-    
+
 sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/start.sh" > /dev/null <<'LAUNCHER'
 #!/bin/bash
 cd /home/kiosk/kiosk-app
