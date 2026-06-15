@@ -114,6 +114,92 @@ The installer will guide you through configuration during setup.
 
 ## Optional Add-ons
 
+### Authentication
+
+#### Authelia Auto-Login (SSO)
+
+Automatically authenticates the kiosk against a self-hosted [Authelia](https://www.authelia.com) instance on every startup. The Authelia password is **not stored in plain text** — it is encrypted with AES-256-CBC using a key derived from the machine's unique `/etc/machine-id`, so the encrypted blob is useless on any other machine.
+
+**Access via menu:** `Addons → 5. Authelia Auto-Login`
+
+After running the addon it prints the full server-side setup, but the summary is below.
+
+##### Kiosk side (SSH in and run the installer)
+
+```bash
+ssh user@kiosk-machine
+./$(ls ubuntu-based-kiosk-v*.sh | sort -V | tail -1)
+# Addons → 5. Authelia Auto-Login
+# Enter your Authelia URL, username, and password when prompted
+```
+
+##### Authelia server side (Dockerized)
+
+**Step 1 — Generate the argon2 password hash** (run on your Docker host):
+
+```bash
+docker run --rm authelia/authelia:latest \
+  authelia crypto hash generate argon2 \
+  --password 'yourpassword'
+```
+
+Copy the `$argon2id$...` output — that is your hash.
+
+**Step 2 — Add a kiosk user** to `~/docker/authelia/config/users.yml`:
+
+```yaml
+kiosk:
+  displayname: "Kiosk Display"
+  password: '$argon2id$v=19$m=65536,t=3,p=4$<paste hash here>'
+  email: kiosk@local.com
+  groups:
+    - kiosk
+```
+
+**Step 3 — Configure session duration and access control** in `~/docker/authelia/config/configuration.yml`:
+
+```yaml
+session:
+  expiration: 1y       # absolute session lifetime
+  inactivity: 90d      # idle timeout before logout
+  remember_me: 1y      # duration granted by keepMeLoggedIn
+
+access_control:
+  default_policy: deny
+  rules:
+    # Allow kiosk group to reach any subdomain with one-factor auth
+    - domain: '*.yourdomain.com'
+      subject: 'group:kiosk'
+      policy: one_factor
+    # Optional: bypass Authelia entirely for the kiosk's static IP
+    # - domain: '*.yourdomain.com'
+    #   networks: ['192.168.1.50/32']
+    #   policy: bypass
+```
+
+**Step 4 — Restart Authelia:**
+
+```bash
+docker compose restart authelia
+```
+
+##### How it works
+
+On every kiosk startup, Electron calls Authelia's `/api/firstfactor` endpoint with `keepMeLoggedIn: true` **before** any sites load. Authelia responds with a `Set-Cookie` header that Electron absorbs into its default session. All BrowserViews then load with that session cookie already present.
+
+Because Electron's session persists to disk across reboots (`/home/kiosk/.config/kiosk-app/`), the cookie also survives restarts — the API call on startup just refreshes or extends it.
+
+##### Authelia vs HTTP Basic Auth
+
+Both can be used at the same time — they serve different purposes:
+
+| Method | Where configured | When to use |
+|--------|-----------------|-------------|
+| **Authelia SSO** | `Addons → Authelia Auto-Login` (global) | Sites protected by an Authelia reverse proxy |
+| **HTTP Basic Auth** | Per-site username/password in tab config | Sites that show a browser popup asking for credentials |
+
+---
+
 ### Communication
 - **Easy Asterisk Intercom** - Voice communication and intercom system
   - Downloads latest version from Easy Asterisk repository
@@ -399,7 +485,7 @@ smb://WORKGROUP/COMPUTER/PrinterName
 
 # Menu structure:
 # 1. Core Settings - Sites, WiFi, schedules, passwords, full reinstall, complete uninstall
-# 2. Addons - Easy Asterisk Intercom, LMS, CUPS, VNC, VPNs
+# 2. Addons - Authelia Auto-Login, Easy Asterisk Intercom, LMS, CUPS, VNC, VPNs
 # 3. Advanced - Diagnostics, logs, Electron updates, virtual consoles, emergency hotspot
 # 4. Restart Kiosk Display
 ```

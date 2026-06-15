@@ -10007,9 +10007,55 @@ process.stdout.write(Buffer.concat([iv,enc]).toString('base64'));
     sudo chown "$KIOSK_USER:$KIOSK_USER" "$config_file"
 
     echo
-    echo "✓ Authelia config saved."
-    echo "  To clear it later, remove autheliaURL / autheliaUsername /"
-    echo "  autheliaEncryptedPassword from $config_file"
+    echo "✓ Authelia config saved (password encrypted, NOT stored in plain text)."
+    echo
+    echo "════════════════════════════════════════════════════════════"
+    echo "       AUTHELIA SERVER-SIDE SETUP (Dockerized)"
+    echo "════════════════════════════════════════════════════════════"
+    echo
+    echo "1. Generate the argon2 password hash on your Docker host:"
+    echo
+    echo "   docker run --rm authelia/authelia:latest \\"
+    echo "     authelia crypto hash generate argon2 \\"
+    echo "     --password 'yourpassword'"
+    echo
+    echo "   Copy the \$argon2id\$... output — that is your hash."
+    echo
+    echo "2. Add a kiosk user to ~/docker/authelia/config/users.yml:"
+    echo
+    echo "   kiosk:"
+    echo "     displayname: \"Kiosk Display\""
+    echo "     password: '\$argon2id\$v=19\$m=65536,t=3,p=4\$<paste hash here>'"
+    echo "     email: kiosk@local.com"
+    echo "     groups:"
+    echo "       - kiosk"
+    echo
+    echo "3. Add to ~/docker/authelia/config/configuration.yml:"
+    echo
+    echo "   session:"
+    echo "     expiration: 1y"
+    echo "     inactivity: 90d"
+    echo "     remember_me: 1y"
+    echo
+    echo "   access_control:"
+    echo "     default_policy: deny"
+    echo "     rules:"
+    echo "       - domain: '*.yourdomain.com'"
+    echo "         subject: 'group:kiosk'"
+    echo "         policy: one_factor"
+    echo
+    echo "4. Restart Authelia on your Docker host:"
+    echo "   docker compose restart authelia"
+    echo
+    echo "────────────────────────────────────────────────────────────"
+    echo "  NOTE: HTTP Basic Auth (per-site username/password) still"
+    echo "  works alongside Authelia for sites that use browser-popup"
+    echo "  authentication rather than Authelia SSO."
+    echo "────────────────────────────────────────────────────────────"
+    echo
+    echo "  To clear Authelia config later, remove autheliaURL /"
+    echo "  autheliaUsername / autheliaEncryptedPassword from:"
+    echo "  $config_file"
     echo
     read -r -p "Restart kiosk display now? [y/N]: " restart
     if [[ "$restart" == "y" || "$restart" == "Y" ]]; then
