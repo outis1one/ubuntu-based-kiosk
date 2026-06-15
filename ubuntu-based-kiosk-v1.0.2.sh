@@ -9979,15 +9979,15 @@ configure_authelia() {
     echo
 
     local config_file="$KIOSK_DIR/config.json"
-    if [[ ! -f "$config_file" ]]; then
+    if ! sudo test -f "$config_file"; then
         echo "✗ config.json not found — run a full install first."
         read -r -p "Press Enter to return..." _; return
     fi
 
     # Show current status
     local current_url current_user
-    current_url=$(jq -r '.autheliaURL // ""' "$config_file" 2>/dev/null)
-    current_user=$(jq -r '.autheliaUsername // ""' "$config_file" 2>/dev/null)
+    current_url=$(sudo -u "$KIOSK_USER" jq -r '.autheliaURL // ""' "$config_file" 2>/dev/null)
+    current_user=$(sudo -u "$KIOSK_USER" jq -r '.autheliaUsername // ""' "$config_file" 2>/dev/null)
     if [[ -n "$current_url" ]]; then
         echo "Current config:"
         echo "  URL:      $current_url"
@@ -10025,11 +10025,11 @@ process.stdout.write(Buffer.concat([iv,enc]).toString('base64'));
 
     local tmp
     tmp=$(mktemp)
-    jq --arg url "$authelia_url" \
+    sudo -u "$KIOSK_USER" jq --arg url "$authelia_url" \
        --arg user "$authelia_user" \
        --arg enc "$encrypted" \
        '. + {autheliaURL: $url, autheliaUsername: $user, autheliaEncryptedPassword: $enc}' \
-       "$config_file" > "$tmp" && mv "$tmp" "$config_file"
+       "$config_file" > "$tmp" && sudo mv "$tmp" "$config_file"
     sudo chown "$KIOSK_USER:$KIOSK_USER" "$config_file"
 
     echo
