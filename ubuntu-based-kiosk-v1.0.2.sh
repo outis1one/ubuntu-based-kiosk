@@ -7259,17 +7259,49 @@ PKGJSON
 
     echo "[17/27] Installing Electron packages..."
     echo "Note: npm may show deprecation warnings (safe to ignore)"
+    echo "Note: Electron binary is ~120MB — download may take several minutes"
+
+    # Increase npm fetch timeouts before install (default 60s is too short for ~120MB)
+    sudo -u "$KIOSK_USER" bash -lc "
+        npm config set fetch-timeout 600000
+        npm config set fetch-retries 5
+        npm config set fetch-retry-mintimeout 30000
+        npm config set fetch-retry-maxtimeout 300000
+    "
     sudo -u "$KIOSK_USER" bash -lc "cd '$KIOSK_DIR' && npm install --unsafe-perm"
 
     # Verify electron binary downloaded (npm install succeeds even if the binary download fails)
     local electron_bin="$KIOSK_DIR/node_modules/electron/dist/electron"
+
     if [[ ! -f "$electron_bin" ]]; then
-        log_warning "Electron binary not found after npm install — retrying download..."
+        log_warning "Electron binary not found after npm install — retrying via install.js..."
         sudo -u "$KIOSK_USER" bash -lc "cd '$KIOSK_DIR' && ELECTRON_FORCE_DOWNLOAD=true node node_modules/electron/install.js" || true
     fi
+
+    # Last resort: direct wget download of the binary zip
     if [[ ! -f "$electron_bin" ]]; then
-        log_error "Electron binary download failed. Check network connectivity and retry:"
-        log_error "  cd $KIOSK_DIR && sudo -u $KIOSK_USER ELECTRON_FORCE_DOWNLOAD=true npm install electron --unsafe-perm"
+        log_warning "Attempting direct wget download of Electron binary..."
+        local electron_ver
+        electron_ver=$(sudo -u "$KIOSK_USER" node -e \
+            "try{console.log(require('$KIOSK_DIR/node_modules/electron/package.json').version)}catch(e){}" 2>/dev/null)
+        if [[ -n "$electron_ver" ]]; then
+            local electron_url="https://github.com/electron/electron/releases/download/v${electron_ver}/electron-v${electron_ver}-linux-x64.zip"
+            log_info "Downloading Electron v${electron_ver} directly (~120MB)..."
+            local tmp_zip
+            tmp_zip=$(mktemp --suffix=.zip)
+            if wget --timeout=300 --tries=3 --show-progress -O "$tmp_zip" "$electron_url" 2>&1; then
+                sudo -u "$KIOSK_USER" mkdir -p "$KIOSK_DIR/node_modules/electron/dist"
+                sudo -u "$KIOSK_USER" unzip -o "$tmp_zip" -d "$KIOSK_DIR/node_modules/electron/dist/"
+                sudo -u "$KIOSK_USER" chmod +x "$electron_bin"
+            fi
+            rm -f "$tmp_zip"
+        fi
+    fi
+
+    if [[ ! -f "$electron_bin" ]]; then
+        log_error "Electron binary download failed after all attempts."
+        log_error "Check your internet connection and re-run the installer."
+        log_error "The binary is downloaded from: https://github.com/electron/electron/releases"
         exit 1
     fi
     log_success "Electron binary verified"
@@ -7278,6 +7310,7 @@ PKGJSON
     if [[ -f "$sandbox" ]]; then
         sudo chown root:root "$sandbox"
         sudo chmod 4755 "$sandbox"
+        log_success "Chrome sandbox permissions set"
     fi
 
 sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/start.sh" > /dev/null <<'LAUNCHER'
