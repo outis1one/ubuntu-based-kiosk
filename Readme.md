@@ -1,6 +1,6 @@
 # Ubuntu Based Kiosk
 
-**Current Version:** 1.0.0 (check script header for latest version)
+**Current Version:** 1.0.1 (check script header for latest version)
 **Built with Claude Sonnet 4.6 AI assistance**
 **License:** GPL v3 - Keep derivatives open source
 **Repository:** https://github.com/outis1one/ubuntu-based-kiosk/
@@ -47,10 +47,12 @@ Home/office kiosk for reusing old hardware, displaying:
 # Configure WiFi if no ethernet available
 # Enable SSH during installation
 
-# Download and run installer
-wget https://github.com/outis1one/ubuntu-based-kiosk/raw/main/ubuntu-based-kiosk-v1.0.0.sh
-chmod +x ubuntu-based-kiosk-v1.0.0.sh
-./ubuntu-based-kiosk-v1.0.0.sh
+# Download and run the latest installer
+LATEST=$(curl -fsSL https://api.github.com/repos/outis1one/ubuntu-based-kiosk/contents \
+  | grep -oP 'ubuntu-based-kiosk-v[0-9.]+\.sh' \
+  | grep -v beta | sort -V | tail -1)
+wget "https://github.com/outis1one/ubuntu-based-kiosk/raw/main/$LATEST"
+chmod +x "$LATEST" && ./"$LATEST"
 ```
 
 The installer will guide you through configuration during setup.
@@ -149,7 +151,7 @@ The installer will guide you through configuration during setup.
 ## What This Script Installs
 
 ### Core Components
-- **Electron** v41.2.1 (Chromium-based app framework)
+- **Electron** v42.x (Chromium-based app framework)
 - **Node.js** v20.x with npm
 - **Openbox** - Lightweight window manager
 - **LightDM** - Display manager with autologin
@@ -393,7 +395,7 @@ smb://WORKGROUP/COMPUTER/PrinterName
 
 ```bash
 # Run installer script again to access menu
-./ubuntu-based-kiosk-v1.0.0.sh
+./$(ls ubuntu-based-kiosk-v*.sh | sort -V | tail -1)
 
 # Menu structure:
 # 1. Core Settings - Sites, WiFi, schedules, passwords, full reinstall, complete uninstall
@@ -408,7 +410,7 @@ The Easy Asterisk Intercom addon provides voice communication capabilities to yo
 
 **Access the addon menu:**
 ```bash
-./ubuntu-based-kiosk-v1.0.0.sh
+./$(ls ubuntu-based-kiosk-v*.sh | sort -V | tail -1)
 # Select: 2) Addons
 # Then: 4) Easy Asterisk Intercom
 ```
@@ -438,7 +440,7 @@ asterisk -rvvv
 systemctl restart asterisk
 
 # Configure intercom (rerun installation to update)
-./ubuntu-based-kiosk-v1.0.0.sh
+./$(ls ubuntu-based-kiosk-v*.sh | sort -V | tail -1)
 # Select: 2) Addons → 4) Easy Asterisk Intercom
 ```
 
@@ -822,7 +824,7 @@ Full system cleanup that removes all kiosk components and restores the system to
 **Access:**
 ```bash
 # Core Settings menu → option 11
-./ubuntu-based-kiosk-v1.0.0.sh
+./$(ls ubuntu-based-kiosk-v*.sh | sort -V | tail -1)
 # Choose: Core Settings → Complete Uninstall
 ```
 
@@ -972,9 +974,13 @@ See the LICENSE file in the repository for full terms.
 
 ## Project Status & Future Plans
 
-**Current Version:** 1.0.0
+**Current Version:** 1.0.1
 
-**Recent Updates (v1.0.0):**
+**Recent Updates (v1.0.1):**
+- **Node.js upgrade:** 20 LTS → 22 LTS
+- **Electron upgrade:** v39/41 → v42.x
+
+**Previous (v1.0.0):**
 - **Upgrade fix:** file extraction now correctly verifies written files on Ubuntu 22.04+ systems where the kiosk home directory has restrictive permissions (750)
 - **Install fix:** sudo credentials primed upfront before the long apt install step, preventing cache expiry at the timezone prompt
 - **Timezone fix:** fallback to direct `/etc/localtime` symlink when `timedatectl` fails via D-Bus
@@ -1029,5 +1035,5 @@ Special thanks to the maintainers of all upstream projects that make Ubuntu Base
 
 ---
 
-*Last Updated: April 21, 2026*
-*Version: 1.0.0*
+*Last Updated: June 15, 2026*
+*Version: 1.0.1*
