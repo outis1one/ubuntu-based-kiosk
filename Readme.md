@@ -1,6 +1,6 @@
 # Ubuntu Based Kiosk
 
-**Current Version:** 1.0.1 (check script header for latest version)
+**Current Version:** 1.0.2 (check script header for latest version)
 **Built with Claude Sonnet 4.6 AI assistance**
 **License:** GPL v3 - Keep derivatives open source
 **Repository:** https://github.com/outis1one/ubuntu-based-kiosk/
@@ -1060,9 +1060,14 @@ See the LICENSE file in the repository for full terms.
 
 ## Project Status & Future Plans
 
-**Current Version:** 1.0.1
+**Current Version:** 1.0.2
 
-**Recent Updates (v1.0.1):**
+**Recent Updates (v1.0.2):**
+- **Authelia Auto-Login addon** (`Addons → 5`) — authenticates with Authelia SSO on every startup; password stored encrypted (AES-256 keyed from machine ID, not plain text); prints full Dockerized Authelia server-side setup after configuration
+- **Bug fix:** PipeWire config dirs were created as root at step [5.5/27], causing "Permission denied" on fresh installs
+- **README:** install commands no longer hardcode version numbers — always fetch latest from GitHub
+
+**Previous (v1.0.1):**
 - **Node.js upgrade:** 20 LTS → 22 LTS
 - **Electron upgrade:** v39/41 → v42.x
 
@@ -1122,4 +1127,4 @@ Special thanks to the maintainers of all upstream projects that make Ubuntu Base
 ---
 
 *Last Updated: June 15, 2026*
-*Version: 1.0.1*
+*Version: 1.0.2*
