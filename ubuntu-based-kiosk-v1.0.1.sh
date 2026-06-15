@@ -4029,11 +4029,12 @@ NOISECFG
 ###################################################################
 echo "[13/27] Installing Electron..."
 sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/main.js" > /dev/null <<'MAINJS'
-const {app,BrowserWindow,BrowserView,globalShortcut,ipcMain,dialog}=require('electron');
+const {app,BrowserWindow,BrowserView,globalShortcut,ipcMain,dialog,session}=require('electron');
 const {exec}=require('child_process');
 const fs=require('fs');
 const path=require('path');
 const os=require('os');
+const crypto=require('crypto');
 
 // Suppress EPIPE errors (happen when no terminal attached)
 process.stdout.on('error',(e)=>{if(e.code!=='EPIPE')throw e;});
@@ -4100,6 +4101,11 @@ let lockoutActivityTime=Date.now();
 let requirePasswordAfterDisplay=false;
 let lastScheduledLockCheck=0;
 
+// Authelia auto-login state
+let autheliaURL='';
+let autheliaUsername='';
+let autheliaEncryptedPassword='';
+
 function loadConfig(){
   try{
     if(!fs.existsSync(CONFIG_FILE)){
@@ -4123,6 +4129,9 @@ function loadConfig(){
     lockoutActiveStart=config.lockoutActiveStart||"";
     lockoutActiveEnd=config.lockoutActiveEnd||"";
     requirePasswordOnBoot=(config.requirePasswordOnBoot===true);
+    autheliaURL=config.autheliaURL||'';
+    autheliaUsername=config.autheliaUsername||'';
+    autheliaEncryptedPassword=config.autheliaEncryptedPassword||'';
 
     console.log('[CONFIG] ═════════════════════════════════');
     console.log('[CONFIG] Home tab index:',homeTabIndex);
@@ -5276,8 +5285,36 @@ function showPowerMenu(){
   }
 }
 
-function createWindow(){
+async function autheliaAuthenticate(){
+  if(!autheliaURL||!autheliaUsername||!autheliaEncryptedPassword)return;
+  try{
+    const machineId=fs.readFileSync('/etc/machine-id','utf8').trim();
+    const key=crypto.scryptSync(machineId,'kiosk-authelia-v1',32);
+    const buf=Buffer.from(autheliaEncryptedPassword,'base64');
+    const iv=buf.subarray(0,16);
+    const enc=buf.subarray(16);
+    const decipher=crypto.createDecipheriv('aes-256-cbc',key,iv);
+    const password=Buffer.concat([decipher.update(enc),decipher.final()]).toString('utf8');
+
+    const res=await session.defaultSession.fetch(`${autheliaURL}/api/firstfactor`,{
+      method:'POST',
+      headers:{'Content-Type':'application/json','User-Agent':'kiosk/1.0'},
+      body:JSON.stringify({username:autheliaUsername,password,keepMeLoggedIn:true,requestMethod:'GET',targetURL:''})
+    });
+    const body=await res.json().catch(()=>({}));
+    if(res.ok&&body.status==='OK'){
+      console.log('[AUTHELIA] Authenticated as',autheliaUsername);
+    }else{
+      console.error('[AUTHELIA] Auth failed:',res.status,body.message||'');
+    }
+  }catch(e){
+    console.error('[AUTHELIA] Error:',e.message);
+  }
+}
+
+async function createWindow(){
   tabs=loadConfig();
+  await autheliaAuthenticate();
   
   mainWindow=new BrowserWindow({
     fullscreen:true,
@@ -9903,6 +9940,83 @@ show_easy_asterisk_status() {
     echo "────────────────────────────────────────────────────────────"
 }
 
+configure_authelia() {
+    clear
+    echo "════════════════════════════════════════════════════════════"
+    echo "              Authelia Auto-Login Setup"
+    echo "════════════════════════════════════════════════════════════"
+    echo
+    echo "Stores encrypted Authelia credentials so the kiosk"
+    echo "authenticates automatically on every startup."
+    echo "Password is encrypted with this machine's unique ID —"
+    echo "the encrypted blob is useless on any other machine."
+    echo
+
+    local config_file="$KIOSK_DIR/config.json"
+    if [[ ! -f "$config_file" ]]; then
+        echo "✗ config.json not found — run a full install first."
+        read -r -p "Press Enter to return..." _; return
+    fi
+
+    # Show current status
+    local current_url current_user
+    current_url=$(jq -r '.autheliaURL // ""' "$config_file" 2>/dev/null)
+    current_user=$(jq -r '.autheliaUsername // ""' "$config_file" 2>/dev/null)
+    if [[ -n "$current_url" ]]; then
+        echo "Current config:"
+        echo "  URL:      $current_url"
+        echo "  Username: $current_user"
+        echo
+        read -r -p "Overwrite existing Authelia config? [y/N]: " confirm
+        [[ "$confirm" != "y" && "$confirm" != "Y" ]] && return
+        echo
+    fi
+
+    read -r -p "Authelia URL (e.g. https://auth.yourdomain.com): " authelia_url
+    [[ -z "$authelia_url" ]] && echo "Cancelled." && read -r -p "Press Enter..." _; [[ -z "$authelia_url" ]] && return
+    read -r -p "Authelia username: " authelia_user
+    [[ -z "$authelia_user" ]] && echo "Cancelled." && read -r -p "Press Enter..." _; [[ -z "$authelia_user" ]] && return
+    read -r -s -p "Authelia password: " authelia_pass
+    echo
+    [[ -z "$authelia_pass" ]] && echo "Cancelled." && read -r -p "Press Enter..." _; [[ -z "$authelia_pass" ]] && return
+
+    echo "Encrypting with machine ID..."
+    local encrypted
+    encrypted=$(node -e "
+const crypto=require('crypto'),fs=require('fs');
+const id=fs.readFileSync('/etc/machine-id','utf8').trim();
+const key=crypto.scryptSync(id,'kiosk-authelia-v1',32);
+const iv=crypto.randomBytes(16);
+const c=crypto.createCipheriv('aes-256-cbc',key,iv);
+const enc=Buffer.concat([c.update(process.argv[1],'utf8'),c.final()]);
+process.stdout.write(Buffer.concat([iv,enc]).toString('base64'));
+" "$authelia_pass" 2>/dev/null)
+
+    if [[ -z "$encrypted" ]]; then
+        echo "✗ Encryption failed — is Node.js installed?"
+        read -r -p "Press Enter..." _; return
+    fi
+
+    local tmp
+    tmp=$(mktemp)
+    jq --arg url "$authelia_url" \
+       --arg user "$authelia_user" \
+       --arg enc "$encrypted" \
+       '. + {autheliaURL: $url, autheliaUsername: $user, autheliaEncryptedPassword: $enc}' \
+       "$config_file" > "$tmp" && mv "$tmp" "$config_file"
+    sudo chown "$KIOSK_USER:$KIOSK_USER" "$config_file"
+
+    echo
+    echo "✓ Authelia config saved."
+    echo "  To clear it later, remove autheliaURL / autheliaUsername /"
+    echo "  autheliaEncryptedPassword from $config_file"
+    echo
+    read -r -p "Restart kiosk display now? [y/N]: " restart
+    if [[ "$restart" == "y" || "$restart" == "Y" ]]; then
+        sudo systemctl restart lightdm
+    fi
+}
+
 # Main Easy Asterisk addon menu
 addon_easy_asterisk_intercom() {
     while true; do
@@ -11086,15 +11200,17 @@ addons_menu() {
         echo "  2. CUPS Printing"
         echo "  3. Remote Access (VNC/VPN)"
         echo "  4. Easy Asterisk Intercom"
+        echo "  5. Authelia Auto-Login"
         echo "  0. Return"
         echo
-        read -r -p "Choose [0-4]: " choice
+        read -r -p "Choose [0-5]: " choice
 
         case "$choice" in
             1) addon_lms_squeezelite ;;
             2) addon_cups ;;
             3) remote_access_menu ;;
             4) addon_easy_asterisk_intercom ;;
+            5) configure_authelia ;;
             0) return ;;
         esac
     done
