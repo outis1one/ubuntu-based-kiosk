@@ -7260,13 +7260,26 @@ PKGJSON
     echo "[17/27] Installing Electron packages..."
     echo "Note: npm may show deprecation warnings (safe to ignore)"
     sudo -u "$KIOSK_USER" bash -lc "cd '$KIOSK_DIR' && npm install --unsafe-perm"
-    
+
+    # Verify electron binary downloaded (npm install succeeds even if the binary download fails)
+    local electron_bin="$KIOSK_DIR/node_modules/electron/dist/electron"
+    if [[ ! -f "$electron_bin" ]]; then
+        log_warning "Electron binary not found after npm install — retrying download..."
+        sudo -u "$KIOSK_USER" bash -lc "cd '$KIOSK_DIR' && ELECTRON_FORCE_DOWNLOAD=true node node_modules/electron/install.js" || true
+    fi
+    if [[ ! -f "$electron_bin" ]]; then
+        log_error "Electron binary download failed. Check network connectivity and retry:"
+        log_error "  cd $KIOSK_DIR && sudo -u $KIOSK_USER ELECTRON_FORCE_DOWNLOAD=true npm install electron --unsafe-perm"
+        exit 1
+    fi
+    log_success "Electron binary verified"
+
     local sandbox="$KIOSK_DIR/node_modules/electron/dist/chrome-sandbox"
     if [[ -f "$sandbox" ]]; then
         sudo chown root:root "$sandbox"
         sudo chmod 4755 "$sandbox"
     fi
-    
+
 sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/start.sh" > /dev/null <<'LAUNCHER'
 #!/bin/bash
 cd /home/kiosk/kiosk-app
@@ -9966,15 +9979,15 @@ configure_authelia() {
     echo
 
     local config_file="$KIOSK_DIR/config.json"
-    if [[ ! -f "$config_file" ]]; then
+    if ! sudo test -f "$config_file"; then
         echo "✗ config.json not found — run a full install first."
         read -r -p "Press Enter to return..." _; return
     fi
 
     # Show current status
     local current_url current_user
-    current_url=$(jq -r '.autheliaURL // ""' "$config_file" 2>/dev/null)
-    current_user=$(jq -r '.autheliaUsername // ""' "$config_file" 2>/dev/null)
+    current_url=$(sudo -u "$KIOSK_USER" jq -r '.autheliaURL // ""' "$config_file" 2>/dev/null)
+    current_user=$(sudo -u "$KIOSK_USER" jq -r '.autheliaUsername // ""' "$config_file" 2>/dev/null)
     if [[ -n "$current_url" ]]; then
         echo "Current config:"
         echo "  URL:      $current_url"
@@ -10012,11 +10025,11 @@ process.stdout.write(Buffer.concat([iv,enc]).toString('base64'));
 
     local tmp
     tmp=$(mktemp)
-    jq --arg url "$authelia_url" \
+    sudo -u "$KIOSK_USER" jq --arg url "$authelia_url" \
        --arg user "$authelia_user" \
        --arg enc "$encrypted" \
        '. + {autheliaURL: $url, autheliaUsername: $user, autheliaEncryptedPassword: $enc}' \
-       "$config_file" > "$tmp" && mv "$tmp" "$config_file"
+       "$config_file" > "$tmp" && sudo mv "$tmp" "$config_file"
     sudo chown "$KIOSK_USER:$KIOSK_USER" "$config_file"
 
     echo
