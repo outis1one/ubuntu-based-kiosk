@@ -7270,48 +7270,7 @@ PKGJSON
     "
     sudo -u "$KIOSK_USER" bash -lc "cd '$KIOSK_DIR' && npm install --unsafe-perm"
 
-    # Verify electron binary downloaded (npm install succeeds even if the binary download fails)
-    local electron_bin="$KIOSK_DIR/node_modules/electron/dist/electron"
-
-    if [[ ! -f "$electron_bin" ]]; then
-        log_warning "Electron binary not found after npm install — retrying via install.js..."
-        sudo -u "$KIOSK_USER" bash -lc "cd '$KIOSK_DIR' && ELECTRON_FORCE_DOWNLOAD=true node node_modules/electron/install.js" || true
-    fi
-
-    # Last resort: direct wget download of the binary zip
-    if [[ ! -f "$electron_bin" ]]; then
-        log_warning "Attempting direct wget download of Electron binary..."
-        local electron_ver
-        electron_ver=$(sudo -u "$KIOSK_USER" node -e \
-            "try{console.log(require('$KIOSK_DIR/node_modules/electron/package.json').version)}catch(e){}" 2>/dev/null)
-        if [[ -n "$electron_ver" ]]; then
-            local electron_url="https://github.com/electron/electron/releases/download/v${electron_ver}/electron-v${electron_ver}-linux-x64.zip"
-            log_info "Downloading Electron v${electron_ver} directly (~120MB)..."
-            local tmp_zip
-            tmp_zip=$(mktemp --suffix=.zip)
-            if wget --timeout=300 --tries=3 --show-progress -O "$tmp_zip" "$electron_url" 2>&1; then
-                sudo -u "$KIOSK_USER" mkdir -p "$KIOSK_DIR/node_modules/electron/dist"
-                sudo -u "$KIOSK_USER" unzip -o "$tmp_zip" -d "$KIOSK_DIR/node_modules/electron/dist/"
-                sudo -u "$KIOSK_USER" chmod +x "$electron_bin"
-            fi
-            rm -f "$tmp_zip"
-        fi
-    fi
-
-    if [[ ! -f "$electron_bin" ]]; then
-        log_error "Electron binary download failed after all attempts."
-        log_error "Check your internet connection and re-run the installer."
-        log_error "The binary is downloaded from: https://github.com/electron/electron/releases"
-        exit 1
-    fi
-    log_success "Electron binary verified"
-
-    local sandbox="$KIOSK_DIR/node_modules/electron/dist/chrome-sandbox"
-    if [[ -f "$sandbox" ]]; then
-        sudo chown root:root "$sandbox"
-        sudo chmod 4755 "$sandbox"
-        log_success "Chrome sandbox permissions set"
-    fi
+    install_electron_binary || exit 1
 
 sudo -u "$KIOSK_USER" tee "$KIOSK_DIR/start.sh" > /dev/null <<'LAUNCHER'
 #!/bin/bash
@@ -10956,6 +10915,91 @@ import_settings() {
     pause
 }
 
+# Shared helper: verify Electron binary exists, download if missing, fix sandbox perms.
+# Called from both fresh install (step 17/27) and upgrade (step 5/6).
+install_electron_binary() {
+    local electron_bin="$KIOSK_DIR/node_modules/electron/dist/electron"
+
+    if [[ ! -f "$electron_bin" ]]; then
+        log_warning "Electron binary missing — retrying via install.js..."
+        sudo -u "$KIOSK_USER" bash -lc "cd '$KIOSK_DIR' && ELECTRON_FORCE_DOWNLOAD=true node node_modules/electron/install.js" || true
+    fi
+
+    if [[ ! -f "$electron_bin" ]]; then
+        log_warning "Attempting direct wget download of Electron binary (~120MB)..."
+        local electron_ver
+        electron_ver=$(sudo -u "$KIOSK_USER" node -e \
+            "try{console.log(require('$KIOSK_DIR/node_modules/electron/package.json').version)}catch(e){}" 2>/dev/null)
+        if [[ -n "$electron_ver" ]]; then
+            local electron_url="https://github.com/electron/electron/releases/download/v${electron_ver}/electron-v${electron_ver}-linux-x64.zip"
+            log_info "Downloading Electron v${electron_ver} directly..."
+            local tmp_zip
+            tmp_zip=$(mktemp --suffix=.zip)
+            if wget --timeout=300 --tries=3 --show-progress -O "$tmp_zip" "$electron_url" 2>&1; then
+                sudo -u "$KIOSK_USER" mkdir -p "$KIOSK_DIR/node_modules/electron/dist"
+                sudo -u "$KIOSK_USER" unzip -o "$tmp_zip" -d "$KIOSK_DIR/node_modules/electron/dist/"
+                sudo -u "$KIOSK_USER" chmod +x "$electron_bin"
+            fi
+            rm -f "$tmp_zip"
+        fi
+    fi
+
+    if [[ ! -f "$electron_bin" ]]; then
+        log_error "Electron binary download failed after all attempts."
+        log_error "Check your internet connection and re-run the installer."
+        return 1
+    fi
+    log_success "Electron binary verified"
+
+    # chrome-sandbox MUST be owned by root and setuid — without this Electron shows a blank screen
+    local sandbox="$KIOSK_DIR/node_modules/electron/dist/chrome-sandbox"
+    if [[ -f "$sandbox" ]]; then
+        sudo chown root:root "$sandbox"
+        sudo chmod 4755 "$sandbox"
+        log_success "Chrome sandbox permissions set (required for display)"
+    fi
+}
+
+# Repair option: re-verify/download electron binary and fix sandbox perms without full reinstall
+repair_electron() {
+    clear
+    echo "════════════════════════════════════════════════════════════"
+    echo "         Fix Blank Screen / Electron Repair"
+    echo "════════════════════════════════════════════════════════════"
+    echo
+    echo "This will:"
+    echo "  1. Check if Electron binary is present"
+    echo "  2. Download it if missing (~120MB)"
+    echo "  3. Fix chrome-sandbox permissions (setuid root)"
+    echo "  4. Restart the kiosk display"
+    echo
+    read -r -p "Continue? [y/N]: " confirm
+    [[ "$confirm" != "y" && "$confirm" != "Y" ]] && return
+
+    echo
+    sudo systemctl stop lightdm 2>/dev/null || true
+    sleep 1
+
+    if ! install_electron_binary; then
+        echo
+        log_error "Could not install Electron. Check internet and retry."
+        read -r -p "Press Enter..." _; return
+    fi
+
+    echo
+    log_info "Restarting kiosk display..."
+    sudo systemctl restart lightdm
+    sleep 3
+    if systemctl is-active --quiet lightdm && pgrep -f "electron.*main.js" >/dev/null 2>&1; then
+        log_success "Kiosk display is running."
+    else
+        log_warning "LightDM started but Electron may still be loading."
+        echo "  Check: sudo tail -20 $KIOSK_DIR/../electron.log"
+    fi
+    echo
+    read -r -p "Press Enter to return..." _
+}
+
 upgrade_kiosk() {
     clear
     echo "══════════════════════════════════════════════════════════"
@@ -11075,11 +11119,20 @@ upgrade_kiosk() {
     sudo chown -R "$KIOSK_USER:$KIOSK_USER" "$KIOSK_DIR"
 
     echo "[5/6] Installing npm dependencies..."
+    sudo -u "$KIOSK_USER" bash -lc "
+        npm config set fetch-timeout 600000
+        npm config set fetch-retries 5
+        npm config set fetch-retry-mintimeout 30000
+        npm config set fetch-retry-maxtimeout 300000
+    "
     if sudo -u "$KIOSK_USER" bash -lc "cd '$KIOSK_DIR' && npm install --unsafe-perm" 2>&1 | tail -5; then
         log_success "npm install complete"
     else
         log_warning "npm install may have had issues"
     fi
+
+    # Verify and fix Electron binary + chrome-sandbox (same logic as fresh install)
+    install_electron_binary
 
     # Restore config
     if [[ -f "$config_backup" ]]; then
@@ -11549,9 +11602,10 @@ advanced_menu() {
         echo "  9. Import Settings"
         echo " 10. Emergency Hotspot"
         echo " 11. Network Test"
+        echo " 12. Fix Blank Screen (Electron repair)"
         echo "  0. Return"
         echo
-        read -r -p "Choose [0-11]: " choice
+        read -r -p "Choose [0-12]: " choice
 
         case "$choice" in
             1) manual_electron_update ;;
@@ -11565,6 +11619,7 @@ advanced_menu() {
             9) import_settings ;;
             10) configure_emergency_hotspot ;;
             11) network_test ;;
+            12) repair_electron ;;
             0) return ;;
         esac
     done
