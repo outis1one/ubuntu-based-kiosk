@@ -3960,7 +3960,7 @@ first_time_install() {
 
     # Configure PipeWire noise cancellation for microphone
     echo "[5.5/27] Configuring audio noise cancellation..."
-    sudo mkdir -p "$KIOSK_HOME/.config/pipewire/pipewire.conf.d"
+    sudo -u "$KIOSK_USER" mkdir -p "$KIOSK_HOME/.config/pipewire/pipewire.conf.d"
     sudo -u "$KIOSK_USER" tee "$KIOSK_HOME/.config/pipewire/pipewire.conf.d/99-noise-cancellation.conf" > /dev/null <<'NOISECFG'
 # PipeWire noise cancellation configuration for kiosk microphone
 # This creates a virtual source with echo cancellation and noise suppression
