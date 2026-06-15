@@ -156,25 +156,35 @@ kiosk:
     - kiosk
 ```
 
-**Step 3 — Configure session duration and access control** in `~/docker/authelia/config/configuration.yml`:
+**Step 3 — MERGE into `~/docker/authelia/config/configuration.yml`** (do not replace your existing config):
+
+**access_control** — Add the kiosk rule **ABOVE** any existing `two_factor` rule. Authelia applies rules top-down — first match wins:
 
 ```yaml
-session:
-  expiration: 1y       # absolute session lifetime
-  inactivity: 90d      # idle timeout before logout
-  remember_me: 1y      # duration granted by keepMeLoggedIn
-
 access_control:
   default_policy: deny
   rules:
-    # Allow kiosk group to reach any subdomain with one-factor auth
+    # ADD THIS — kiosk can only do one_factor (no TOTP/WebAuthn via API)
     - domain: '*.yourdomain.com'
       subject: 'group:kiosk'
       policy: one_factor
-    # Optional: bypass Authelia entirely for the kiosk's static IP
+    # Keep your existing rules below — e.g.:
     # - domain: '*.yourdomain.com'
-    #   networks: ['192.168.1.50/32']
-    #   policy: bypass
+    #   policy: two_factor
+```
+
+**session** — Keep your existing session block as-is; no changes needed. The kiosk re-authenticates via API on every startup so session expiry barely matters for it.
+
+If you do **not** yet have a session block, add:
+
+```yaml
+session:
+  expiration: 8h
+  inactivity: 1h
+  remember_me: 7d
+  cookies:
+    - domain: yourdomain.com
+      authelia_url: https://auth.yourdomain.com
 ```
 
 **Step 4 — Restart Authelia:**

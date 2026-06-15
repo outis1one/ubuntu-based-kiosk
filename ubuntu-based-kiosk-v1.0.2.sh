@@ -10039,7 +10039,8 @@ process.stdout.write(Buffer.concat([iv,enc]).toString('base64'));
     echo
     echo "   Copy the \$argon2id\$... output — that is your hash."
     echo
-    echo "2. Add a kiosk user to ~/docker/authelia/config/users.yml:"
+    echo "2. ADD a kiosk user to ~/docker/authelia/config/users.yml"
+    echo "   (append — do not replace existing users):"
     echo
     echo "   kiosk:"
     echo "     displayname: \"Kiosk Display\""
@@ -10048,19 +10049,37 @@ process.stdout.write(Buffer.concat([iv,enc]).toString('base64'));
     echo "     groups:"
     echo "       - kiosk"
     echo
-    echo "3. Add to ~/docker/authelia/config/configuration.yml:"
+    echo "3. MERGE into ~/docker/authelia/config/configuration.yml:"
     echo
-    echo "   session:"
-    echo "     expiration: 1y"
-    echo "     inactivity: 90d"
-    echo "     remember_me: 1y"
+    echo "   ── access_control ─────────────────────────────────────"
+    echo "   Add the kiosk rule ABOVE any existing two_factor rule."
+    echo "   Authelia applies rules top-down — first match wins."
     echo
     echo "   access_control:"
     echo "     default_policy: deny"
     echo "     rules:"
+    echo "       # ADD THIS — kiosk can only do one_factor (no TOTP/WebAuthn via API)"
     echo "       - domain: '*.yourdomain.com'"
     echo "         subject: 'group:kiosk'"
     echo "         policy: one_factor"
+    echo "       # Keep your existing rules below — e.g.:"
+    echo "       # - domain: '*.yourdomain.com'"
+    echo "       #   policy: two_factor"
+    echo
+    echo "   ── session ─────────────────────────────────────────────"
+    echo "   Keep your existing session block — no changes needed."
+    echo "   The kiosk re-authenticates via API on every startup so"
+    echo "   session expiry barely matters for it."
+    echo
+    echo "   If you do NOT yet have a session block, add:"
+    echo
+    echo "   session:"
+    echo "     expiration: 8h"
+    echo "     inactivity: 1h"
+    echo "     remember_me: 7d"
+    echo "     cookies:"
+    echo "       - domain: yourdomain.com"
+    echo "         authelia_url: https://auth.yourdomain.com"
     echo
     echo "4. Restart Authelia on your Docker host:"
     echo "   docker compose restart authelia"
