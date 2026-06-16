@@ -7346,11 +7346,14 @@ for i in {1..10}; do
     sleep 1
 done
 
-# Enable multi-touch gesture support for any detected touch screen
-# Wacom devices require "Wacom Enable Touch Gesture" to be set (defaults to 0).
-# The set-prop call is silently ignored for non-Wacom devices that don't have this property.
-# Excludes touchpads — only targets touch screens and finger-touch digitizers.
+# Fix touch device coordinate mapping and enable multi-touch gestures.
+# Loop over all touch/finger input devices (excludes touchpads).
 while IFS= read -r dev; do
+  # Reset Coordinate Transformation Matrix to identity — without this,
+  # the Wacom driver can initialise the CTM to all-zeros, which maps
+  # every touch to (0,0) on screen and makes the touchscreen appear dead.
+  xinput set-prop "$dev" "Coordinate Transformation Matrix" 1 0 0 0 1 0 0 0 1 2>/dev/null || true
+  # Enable multi-touch gesture mode (Wacom-specific; ignored by other drivers).
   xinput set-prop "$dev" "Wacom Enable Touch Gesture" 1 2>/dev/null || true
 done < <(xinput list --name-only 2>/dev/null | grep -i "touch\|finger" | grep -iv "touchpad\|trackpad")
 
