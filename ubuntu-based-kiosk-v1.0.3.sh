@@ -69,6 +69,16 @@ set -euo pipefail
 ################################################################################
 
 SCRIPT_VERSION="1.0.3"
+
+# Resolve the real path to this script file.
+# When piped (curl|bash or wget|bash), BASH_SOURCE[0] is a pipe descriptor,
+# not a real file.  The upgrade function needs to read heredocs from a file,
+# so we detect the pipe case here and set SCRIPT_FILE accordingly.
+SCRIPT_FILE="$(readlink -f "${BASH_SOURCE[0]}" 2>/dev/null || true)"
+if [[ ! -f "$SCRIPT_FILE" ]]; then
+    SCRIPT_FILE=""   # running from a pipe — upgrade will warn the user
+fi
+
 KIOSK_USER="kiosk"
 BUILD_USER="${SUDO_USER:-$(whoami)}"
 KIOSK_HOME="/home/${KIOSK_USER}"
@@ -11167,19 +11177,26 @@ upgrade_kiosk() {
     echo
     echo "NO user input is required - upgrade runs automatically."
     echo
-    read -r -p "Continue with upgrade? (yes/no): " confirm
-    [[ "$confirm" != "yes" ]] && return
-
-    # Get the path of this script for extracting heredocs
-    local script_path
-    script_path="$(readlink -f "${BASH_SOURCE[0]}")"
-
-    # Verify the script exists and is readable
-    if [[ ! -f "$script_path" ]]; then
-        log_error "Cannot find script at: $script_path"
+    # Upgrade requires the script to be a real file on disk (not a pipe).
+    # The extract_file() helper greps the script for heredoc markers.
+    if [[ -z "$SCRIPT_FILE" ]]; then
+        echo
+        log_error "Upgrade cannot run when the script was piped (curl|bash / wget|bash)."
+        echo
+        echo "  Download the script to a file first, then run it:"
+        echo
+        echo "    wget -O kiosk.sh <url-from-github>"
+        echo "    sudo bash kiosk.sh"
+        echo
         pause
         return
     fi
+
+    read -r -p "Continue with upgrade? (yes/no): " confirm
+    [[ "$confirm" != "yes" ]] && return
+
+    # Use the pre-resolved path (set at startup)
+    local script_path="$SCRIPT_FILE"
 
     echo
     echo "[1/6] Stopping kiosk (LightDM)..."
