@@ -7373,7 +7373,7 @@ LAUNCHER
     sudo tee /etc/X11/xorg.conf.d/99-wacom-touch.conf > /dev/null <<'WACFG'
 Section "InputClass"
   Identifier "Wacom Touch Settings"
-  MatchProduct "Wacom.*Finger"
+  MatchProduct "Wacom*Finger*"
   Driver "wacom"
   Option "Gesture" "on"
   Option "Touch" "on"
@@ -11305,7 +11305,7 @@ upgrade_kiosk() {
     sudo tee /etc/X11/xorg.conf.d/99-wacom-touch.conf > /dev/null <<'WACFG'
 Section "InputClass"
   Identifier "Wacom Touch Settings"
-  MatchProduct "Wacom.*Finger"
+  MatchProduct "Wacom*Finger*"
   Driver "wacom"
   Option "Gesture" "on"
   Option "Touch" "on"
