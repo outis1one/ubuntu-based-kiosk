@@ -7172,7 +7172,7 @@ window.addEventListener('DOMContentLoaded',()=>{
       touchStartTime=Date.now();
       fingerCount=e.touches.length;
     }
-  },{passive:true,capture:true});
+  },{passive:true});
 
   document.addEventListener('touchend',e=>{
     if(e.changedTouches.length>=1){
@@ -7208,7 +7208,7 @@ window.addEventListener('DOMContentLoaded',()=>{
         });
       }
     }
-  },{passive:true,capture:true});
+  },{passive:true});
 
   // Show pause button on user interaction (for rotation sites only)
   let lastUserInteraction=0;
@@ -7303,7 +7303,6 @@ done
 exec node_modules/electron/dist/electron . \
   --no-sandbox --disable-gpu-sandbox --disable-dev-shm-usage \
   --enable-features=UseOzonePlatform --ozone-platform=x11 \
-  --touch-events=enabled \
   --enable-audio-service-sandbox=false --autoplay-policy=no-user-gesture-required \
   2>&1 | tee -a /home/kiosk/electron.log
 LAUNCHER
@@ -9190,7 +9189,7 @@ window.addEventListener('DOMContentLoaded',()=>{
       touchStartTime=Date.now();
       fingerCount=e.touches.length;
     }
-  },{passive:true,capture:true});
+  },{passive:true});
 
   document.addEventListener('touchend',e=>{
     if(e.changedTouches.length>=1){
@@ -9233,7 +9232,7 @@ window.addEventListener('DOMContentLoaded',()=>{
         });
       }
     }
-  },{passive:true,capture:true});
+  },{passive:true});
   
   // Optional: Auto-show on text field focus (can be disabled)
   let autoShowEnabled = true; // Set to false to disable auto-show
