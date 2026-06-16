@@ -11181,7 +11181,7 @@ upgrade_kiosk() {
     if [[ -f "$config_backup" ]]; then
         sudo cp "$config_backup" "$CONFIG_PATH"
         sudo chown "$KIOSK_USER:$KIOSK_USER" "$CONFIG_PATH"
-        rm -f "$config_backup"
+        sudo rm -f "$config_backup"
     fi
 
     # Install simplified power button handler
