@@ -1088,7 +1088,7 @@ See the LICENSE file in the repository for full terms.
 
 **Recent Updates (v1.0.3):**
 - **Touch input fix (keyring):** added `--password-store=basic` to the Electron launch. Under LightDM autologin the GNOME keyring stays locked; when Chromium accessed it, the keyring unlock dialog grabbed all keyboard/touch input — the kiosk rendered fine but ignored every tap and keypress. This flag stops Electron from using the keyring, so the dialog never appears.
-- **Touch gesture fix (libinput):** finger touch screens are now forced to the `libinput` driver via `/etc/X11/xorg.conf.d/99-finger-libinput.conf`. The `wacom` driver only does single-touch pointer emulation and never passes real multitouch to Chromium, so 1-finger and 2-finger swipe gestures could not fire. libinput delivers proper multitouch; the pen/stylus stays on the wacom driver.
+- **Touch gesture fix (libinput):** any touch screen is now forced to the `libinput` driver via `/etc/X11/xorg.conf.d/99-finger-libinput.conf` (matched by hardware capability, so it works on any brand and never affects keyboards, mice, or the pen/stylus). Some drivers — notably `wacom` — only do single-touch pointer emulation and never pass real multitouch to Chromium, so 1-finger and 2-finger swipe gestures could not fire. libinput delivers proper multitouch.
 - **Upgrade reliability:** `start.sh` is now refreshed on every upgrade alongside `main.js` and `preload.js`
 - **Upgrade fix:** node_modules no longer wiped during upgrade — preserves the ~120MB Electron binary so upgrades don't fail on slow/unreliable connections
 - **Authelia fix:** 10-second timeout on Authelia login fetch prevents white screen when Authelia is slow to respond
