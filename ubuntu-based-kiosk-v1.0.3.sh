@@ -7332,6 +7332,7 @@ for i in {1..30}; do
 done
 
 export DISPLAY=:0
+export XAUTHORITY=/home/kiosk/.Xauthority
 export ELECTRON_ENABLE_LOGGING=1
 
 # Ensure PipeWire is running
