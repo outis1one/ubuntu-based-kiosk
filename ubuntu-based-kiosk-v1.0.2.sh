@@ -5309,11 +5309,14 @@ async function autheliaAuthenticate(){
     const decipher=crypto.createDecipheriv('aes-256-cbc',key,iv);
     const password=Buffer.concat([decipher.update(enc),decipher.final()]).toString('utf8');
 
+    const ctrl=new AbortController();
+    const timer=setTimeout(()=>ctrl.abort(),10000);
     const res=await session.defaultSession.fetch(`${autheliaURL}/api/firstfactor`,{
       method:'POST',
       headers:{'Content-Type':'application/json','User-Agent':'kiosk/1.0'},
-      body:JSON.stringify({username:autheliaUsername,password,keepMeLoggedIn:true,requestMethod:'GET',targetURL:''})
-    });
+      body:JSON.stringify({username:autheliaUsername,password,keepMeLoggedIn:true,requestMethod:'GET',targetURL:''}),
+      signal:ctrl.signal
+    }).finally(()=>clearTimeout(timer));
     const body=await res.json().catch(()=>({}));
     if(res.ok&&body.status==='OK'){
       console.log('[AUTHELIA] Authenticated as',autheliaUsername);
