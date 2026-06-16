@@ -7558,8 +7558,12 @@ EOF
 
     echo "[19/27] Configuring autologin..."
     sudo mkdir -p /etc/lightdm/lightdm.conf.d
+    # [Seat:*] is required on Ubuntu 22.04+ ([SeatDefaults] is ignored on newer LightDM)
+    # Also add kiosk user to the autologin group required by newer Ubuntu
+    sudo groupadd -f autologin
+    sudo usermod -aG autologin "$KIOSK_USER"
     sudo tee /etc/lightdm/lightdm.conf.d/10-kiosk.conf > /dev/null <<EOF
-[SeatDefaults]
+[Seat:*]
 autologin-user=$KIOSK_USER
 autologin-user-timeout=0
 user-session=openbox
