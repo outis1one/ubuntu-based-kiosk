@@ -1,9 +1,9 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk v1.0.2                ###
+###   Ubuntu Based Kiosk v1.0.3                ###
 ################################################################################
 #
-# RELEASE v1.0.2 - Authelia Auto-Login & Bug Fixes
+# RELEASE v1.0.3 - Touch Screen Detection & Upgrade Reliability
 # - Authelia auto-login addon (Addons menu → 5)
 #   Password encrypted with AES-256-CBC keyed from /etc/machine-id
 #   Authenticates via Authelia API on every startup before sites load
@@ -68,7 +68,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="1.0.2"
+SCRIPT_VERSION="1.0.3"
 KIOSK_USER="kiosk"
 BUILD_USER="${SUDO_USER:-$(whoami)}"
 KIOSK_HOME="/home/${KIOSK_USER}"
@@ -4058,7 +4058,7 @@ process.on('uncaughtException',(e)=>{
 });
 
 const CONFIG_FILE=path.join(__dirname,'config.json');
-const VERSION='1.0.2';
+const VERSION='1.0.3';
 
 let mainWindow,views=[],hiddenViews=[],tabs=[],currentIndex=0,showingHidden=false;
 let pinWindow=null,promptWindow=null,pauseWindow=null,htmlKeyboardWindow=null;
