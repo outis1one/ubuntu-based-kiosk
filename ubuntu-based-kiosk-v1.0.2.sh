@@ -7165,6 +7165,15 @@ window.addEventListener('DOMContentLoaded',()=>{
     }
   },true);
   
+  // Shared debounce prevents double-firing when both touch and pointer events fire
+  let lastSwipeSent=0;
+  function sendSwipeIPC(direction){
+    const now=Date.now();
+    if(now-lastSwipeSent<500)return;
+    lastSwipeSent=now;
+    ipcRenderer.send(direction);
+  }
+
   document.addEventListener('touchstart',e=>{
     if(e.touches.length>=1){
       touchStartX=e.touches[0].clientX;
@@ -7187,18 +7196,13 @@ window.addEventListener('DOMContentLoaded',()=>{
       const absX=Math.abs(deltaX);
       const absY=Math.abs(deltaY);
 
-      // 3-finger DOWN = toggle hidden tabs (show/hide)
       if(fingerCount===3&&absY>SWIPE_THRESHOLD&&absX<SWIPE_TOLERANCE&&deltaY>0){
         console.log('[TOUCH] 3-finger DOWN - toggle hidden tabs');
         ipcRenderer.send('toggle-hidden');
-      }
-      // 2-finger HORIZONTAL = change tabs
-      else if(fingerCount===2&&absX>SWIPE_THRESHOLD&&absY<SWIPE_TOLERANCE){
+      }else if(fingerCount===2&&absX>SWIPE_THRESHOLD&&absY<SWIPE_TOLERANCE){
         console.log('[TOUCH] 2-finger HORIZONTAL - change tab');
-        ipcRenderer.send(deltaX>0?'swipe-right':'swipe-left');
-      }
-      // 1-finger HORIZONTAL = arrow keys
-      else if(fingerCount===1&&absX>SWIPE_THRESHOLD&&absY<SWIPE_TOLERANCE){
+        sendSwipeIPC(deltaX>0?'swipe-right':'swipe-left');
+      }else if(fingerCount===1&&absX>SWIPE_THRESHOLD&&absY<SWIPE_TOLERANCE){
         const key=deltaX>0?'ArrowRight':'ArrowLeft';
         const keyCode=deltaX>0?39:37;
         ['keydown','keyup'].forEach(eventType=>{
@@ -7208,6 +7212,47 @@ window.addEventListener('DOMContentLoaded',()=>{
         });
       }
     }
+  },{passive:true});
+
+  // Pointer event fallback — handles devices/drivers where touchstart/touchend don't fire
+  // (e.g. Electron 42 on some Linux touchscreen drivers that only generate PointerEvents)
+  let ptrIds=new Set();
+  let ptrPeak=0;
+  let ptrStartX=0,ptrStartY=0,ptrStartTime=0;
+
+  document.addEventListener('pointerdown',e=>{
+    if(e.pointerType!=='touch')return;
+    ptrIds.add(e.pointerId);
+    if(ptrIds.size===1){ptrStartX=e.clientX;ptrStartY=e.clientY;ptrStartTime=Date.now();ptrPeak=1;}
+    else{ptrPeak=Math.max(ptrPeak,ptrIds.size);}
+  },{passive:true});
+
+  document.addEventListener('pointerup',e=>{
+    if(e.pointerType!=='touch')return;
+    ptrIds.delete(e.pointerId);
+    if(ptrIds.size!==0)return;
+    const deltaTime=Date.now()-ptrStartTime;
+    if(deltaTime>SWIPE_MAX_TIME){ptrPeak=0;return;}
+    const deltaX=e.clientX-ptrStartX;
+    const deltaY=e.clientY-ptrStartY;
+    const absX=Math.abs(deltaX);
+    const absY=Math.abs(deltaY);
+    if(ptrPeak===3&&absY>SWIPE_THRESHOLD&&absX<SWIPE_TOLERANCE&&deltaY>0){
+      console.log('[TOUCH] 3-finger DOWN (ptr) - toggle hidden tabs');
+      ipcRenderer.send('toggle-hidden');
+    }else if(ptrPeak===2&&absX>SWIPE_THRESHOLD&&absY<SWIPE_TOLERANCE){
+      console.log('[TOUCH] 2-finger HORIZONTAL (ptr) - change tab');
+      sendSwipeIPC(deltaX>0?'swipe-right':'swipe-left');
+    }else if(ptrPeak===1&&absX>SWIPE_THRESHOLD&&absY<SWIPE_TOLERANCE){
+      const key=deltaX>0?'ArrowRight':'ArrowLeft';
+      const keyCode=deltaX>0?39:37;
+      ['keydown','keyup'].forEach(eventType=>{
+        document.dispatchEvent(new KeyboardEvent(eventType,{
+          key:key,code:key,keyCode:keyCode,which:keyCode,bubbles:true,cancelable:true
+        }));
+      });
+    }
+    ptrPeak=0;
   },{passive:true});
 
   // Show pause button on user interaction (for rotation sites only)
@@ -9182,6 +9227,15 @@ window.addEventListener('DOMContentLoaded',()=>{
     console.log(`[KEYBOARD] State: ${visible ? 'visible' : 'hidden'}`);
   });
   
+  // Shared debounce prevents double-firing when both touch and pointer events fire
+  let lastSwipeSent=0;
+  function sendSwipeIPC(direction){
+    const now=Date.now();
+    if(now-lastSwipeSent<500)return;
+    lastSwipeSent=now;
+    ipcRenderer.send(direction);
+  }
+
   document.addEventListener('touchstart',e=>{
     if(e.touches.length>=1){
       touchStartX=e.touches[0].clientX;
@@ -9204,25 +9258,17 @@ window.addEventListener('DOMContentLoaded',()=>{
       const absX=Math.abs(deltaX);
       const absY=Math.abs(deltaY);
 
-      // 3-finger DOWN = toggle hidden tabs (show/hide)
       if(fingerCount===3 && absY>SWIPE_THRESHOLD && absX<SWIPE_TOLERANCE && deltaY>0){
         console.log('[TOUCH] 3-finger DOWN - toggle hidden tabs');
         ipcRenderer.send('toggle-hidden');
-      }
-      // 2-finger vertical DOWN = keyboard (ALWAYS works, no throttling)
-      else if(fingerCount===2 && absY>SWIPE_THRESHOLD && absX<SWIPE_TOLERANCE && deltaY>0){
-        const now = Date.now();
+      }else if(fingerCount===2 && absY>SWIPE_THRESHOLD && absX<SWIPE_TOLERANCE && deltaY>0){
         console.log('[TOUCH] 2-finger DOWN - toggle keyboard');
         ipcRenderer.send('show-keyboard');
-        lastKeyboardRequest = now;
-      }
-      // 2-finger HORIZONTAL = change tabs
-      else if(fingerCount===2 && absX>SWIPE_THRESHOLD && absY<SWIPE_TOLERANCE){
+        lastKeyboardRequest=Date.now();
+      }else if(fingerCount===2 && absX>SWIPE_THRESHOLD && absY<SWIPE_TOLERANCE){
         console.log('[TOUCH] 2-finger HORIZONTAL - change tab');
-        ipcRenderer.send(deltaX>0?'swipe-right':'swipe-left');
-      }
-      // 1-finger HORIZONTAL = arrow keys
-      else if(fingerCount===1 && absX>SWIPE_THRESHOLD && absY<SWIPE_TOLERANCE){
+        sendSwipeIPC(deltaX>0?'swipe-right':'swipe-left');
+      }else if(fingerCount===1 && absX>SWIPE_THRESHOLD && absY<SWIPE_TOLERANCE){
         const key=deltaX>0?'ArrowRight':'ArrowLeft';
         const keyCode=deltaX>0?39:37;
         ['keydown','keyup'].forEach(eventType=>{
@@ -9232,6 +9278,50 @@ window.addEventListener('DOMContentLoaded',()=>{
         });
       }
     }
+  },{passive:true});
+
+  // Pointer event fallback — handles devices/drivers where touchstart/touchend don't fire
+  let ptrIds=new Set();
+  let ptrPeak=0;
+  let ptrStartX=0,ptrStartY=0,ptrStartTime=0;
+
+  document.addEventListener('pointerdown',e=>{
+    if(e.pointerType!=='touch')return;
+    ptrIds.add(e.pointerId);
+    if(ptrIds.size===1){ptrStartX=e.clientX;ptrStartY=e.clientY;ptrStartTime=Date.now();ptrPeak=1;}
+    else{ptrPeak=Math.max(ptrPeak,ptrIds.size);}
+  },{passive:true});
+
+  document.addEventListener('pointerup',e=>{
+    if(e.pointerType!=='touch')return;
+    ptrIds.delete(e.pointerId);
+    if(ptrIds.size!==0)return;
+    const deltaTime=Date.now()-ptrStartTime;
+    if(deltaTime>SWIPE_MAX_TIME){ptrPeak=0;return;}
+    const deltaX=e.clientX-ptrStartX;
+    const deltaY=e.clientY-ptrStartY;
+    const absX=Math.abs(deltaX);
+    const absY=Math.abs(deltaY);
+    if(ptrPeak===3&&absY>SWIPE_THRESHOLD&&absX<SWIPE_TOLERANCE&&deltaY>0){
+      console.log('[TOUCH] 3-finger DOWN (ptr) - toggle hidden tabs');
+      ipcRenderer.send('toggle-hidden');
+    }else if(ptrPeak===2&&absY>SWIPE_THRESHOLD&&absX<SWIPE_TOLERANCE&&deltaY>0){
+      console.log('[TOUCH] 2-finger DOWN (ptr) - toggle keyboard');
+      ipcRenderer.send('show-keyboard');
+      lastKeyboardRequest=Date.now();
+    }else if(ptrPeak===2&&absX>SWIPE_THRESHOLD&&absY<SWIPE_TOLERANCE){
+      console.log('[TOUCH] 2-finger HORIZONTAL (ptr) - change tab');
+      sendSwipeIPC(deltaX>0?'swipe-right':'swipe-left');
+    }else if(ptrPeak===1&&absX>SWIPE_THRESHOLD&&absY<SWIPE_TOLERANCE){
+      const key=deltaX>0?'ArrowRight':'ArrowLeft';
+      const keyCode=deltaX>0?39:37;
+      ['keydown','keyup'].forEach(eventType=>{
+        document.dispatchEvent(new KeyboardEvent(eventType,{
+          key:key,code:key,keyCode:keyCode,which:keyCode,bubbles:true,cancelable:true
+        }));
+      });
+    }
+    ptrPeak=0;
   },{passive:true});
   
   // Optional: Auto-show on text field focus (can be disabled)
