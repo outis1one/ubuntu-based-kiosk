@@ -7346,21 +7346,11 @@ for i in {1..10}; do
     sleep 1
 done
 
-# Fix touch device coordinate mapping and enable multi-touch gestures.
-# Loop over all touch/finger input devices (excludes touchpads).
-while IFS= read -r dev; do
-  # Reset Coordinate Transformation Matrix to identity — without this,
-  # the Wacom driver can initialise the CTM to all-zeros, which maps
-  # every touch to (0,0) on screen and makes the touchscreen appear dead.
-  xinput set-prop "$dev" "Coordinate Transformation Matrix" 1 0 0 0 1 0 0 0 1 2>/dev/null || true
-  # Enable multi-touch gesture mode (Wacom-specific; ignored by other drivers).
-  xinput set-prop "$dev" "Wacom Enable Touch Gesture" 1 2>/dev/null || true
-done < <(xinput list --name-only 2>/dev/null | grep -i "touch\|finger" | grep -iv "touchpad\|trackpad")
-
 exec node_modules/electron/dist/electron . \
   --no-sandbox --disable-gpu-sandbox --disable-dev-shm-usage \
   --enable-features=UseOzonePlatform --ozone-platform=x11 \
   --enable-audio-service-sandbox=false --autoplay-policy=no-user-gesture-required \
+  --password-store=basic \
   2>&1 | tee -a /home/kiosk/electron.log
 LAUNCHER
     sudo chmod +x "$KIOSK_DIR/start.sh"
@@ -7368,20 +7358,21 @@ LAUNCHER
     echo "[18/27] Configuring Openbox with AGGRESSIVE screen keep-alive..."
     sudo -u "$KIOSK_USER" mkdir -p "$KIOSK_HOME/.config/openbox" "$KIOSK_HOME/.config/pulse"
 
-    # Configure Wacom touch devices to start in touch event mode (not pointer emulation).
-    # Without this, the driver initialises in pointer mode and generates mouse events
-    # instead of XI2 TouchBegin/TouchEnd events — which means Electron never sees touch.
-    # The MatchProduct is Wacom-specific; non-Wacom touch screens work natively.
+    # Force finger touch screens to use the libinput driver instead of wacom.
+    # The wacom driver does single-touch pointer emulation and does NOT pass
+    # real multitouch through to Chromium, so app gestures (2-finger swipe,
+    # 1-finger swipe) never fire. libinput delivers proper XI2 multitouch
+    # which Chromium turns into real JS touch events. The pen/stylus is left
+    # on the wacom driver (this rule only matches "Finger" touch screens).
     sudo mkdir -p /etc/X11/xorg.conf.d
-    sudo tee /etc/X11/xorg.conf.d/99-wacom-touch.conf > /dev/null <<'WACFG'
+    sudo tee /etc/X11/xorg.conf.d/99-finger-libinput.conf > /dev/null <<'TOUCHCFG'
 Section "InputClass"
-  Identifier "Wacom Touch Settings"
-  MatchProduct "Wacom*Finger*"
-  Driver "wacom"
-  Option "Gesture" "on"
-  Option "Touch" "on"
+  Identifier "Finger touch use libinput"
+  MatchProduct "Finger"
+  MatchIsTouchscreen "on"
+  Driver "libinput"
 EndSection
-WACFG
+TOUCHCFG
 
     # Create empty xbindkeysrc to prevent errors
     sudo -u "$KIOSK_USER" touch "$KIOSK_HOME/.xbindkeysrc"
@@ -11303,17 +11294,19 @@ upgrade_kiosk() {
         sudo rm -f "$config_backup"
     fi
 
-    # Ensure Wacom touch devices start in touch event mode (not pointer emulation)
+    # Force finger touch screens to use libinput (proper multitouch for Chromium).
+    # Remove the old wacom-touch override from earlier versions — it sorts after
+    # this file and would otherwise win and re-bind the device to the wacom driver.
     sudo mkdir -p /etc/X11/xorg.conf.d
-    sudo tee /etc/X11/xorg.conf.d/99-wacom-touch.conf > /dev/null <<'WACFG'
+    sudo rm -f /etc/X11/xorg.conf.d/99-wacom-touch.conf
+    sudo tee /etc/X11/xorg.conf.d/99-finger-libinput.conf > /dev/null <<'TOUCHCFG'
 Section "InputClass"
-  Identifier "Wacom Touch Settings"
-  MatchProduct "Wacom*Finger*"
-  Driver "wacom"
-  Option "Gesture" "on"
-  Option "Touch" "on"
+  Identifier "Finger touch use libinput"
+  MatchProduct "Finger"
+  MatchIsTouchscreen "on"
+  Driver "libinput"
 EndSection
-WACFG
+TOUCHCFG
 
     # Install simplified power button handler
     echo "  Updating power button handler..."
