@@ -11099,12 +11099,12 @@ install_electron_binary() {
             tmp_zip=$(mktemp --suffix=.zip)
             if wget --timeout=300 --tries=3 --show-progress -O "$tmp_zip" "$electron_url" 2>&1; then
                 command -v unzip >/dev/null 2>&1 || sudo apt install -y unzip
-                # Run as root so we can write regardless of who owns node_modules/electron/dist/
-                # (npm postinstall may create it as root when --unsafe-perm is used)
-                mkdir -p "$KIOSK_DIR/node_modules/electron/dist"
-                unzip -o "$tmp_zip" -d "$KIOSK_DIR/node_modules/electron/dist/"
-                chown -R "$KIOSK_USER:$KIOSK_USER" "$KIOSK_DIR/node_modules/electron/dist/"
-                chmod +x "$electron_bin"
+                # Fix ownership first so the kiosk user can write into the directory
+                # (npm postinstall with --unsafe-perm can leave dist/ owned by root)
+                sudo chown -R "$KIOSK_USER:$KIOSK_USER" "$KIOSK_DIR/node_modules/electron/" 2>/dev/null || true
+                sudo -u "$KIOSK_USER" mkdir -p "$KIOSK_DIR/node_modules/electron/dist"
+                sudo -u "$KIOSK_USER" unzip -o "$tmp_zip" -d "$KIOSK_DIR/node_modules/electron/dist/" || true
+                sudo -u "$KIOSK_USER" chmod +x "$electron_bin" || true
             fi
             rm -f "$tmp_zip"
         fi
