@@ -3943,7 +3943,7 @@ first_time_install() {
       libegl-mesa0 libegl1-mesa-dev libgles2-mesa-dev \
       pipewire pipewire-pulse pipewire-alsa wireplumber pipewire-audio-client-libraries alsa-utils libnotify-bin \
       gstreamer1.0-pipewire libspa-0.2-bluetooth \
-      systemd-timesyncd acpid xbindkeys xdotool python3-evdev
+      systemd-timesyncd acpid xbindkeys xdotool python3-evdev unzip
     
     if lspci | grep -i "VGA.*Intel" >/dev/null 2>&1; then
         sudo apt install -y intel-gpu-tools xserver-xorg-video-intel \
@@ -11088,6 +11088,7 @@ install_electron_binary() {
             local tmp_zip
             tmp_zip=$(mktemp --suffix=.zip)
             if wget --timeout=300 --tries=3 --show-progress -O "$tmp_zip" "$electron_url" 2>&1; then
+                command -v unzip >/dev/null 2>&1 || sudo apt install -y unzip
                 sudo -u "$KIOSK_USER" mkdir -p "$KIOSK_DIR/node_modules/electron/dist"
                 sudo -u "$KIOSK_USER" unzip -o "$tmp_zip" -d "$KIOSK_DIR/node_modules/electron/dist/"
                 sudo -u "$KIOSK_USER" chmod +x "$electron_bin"
