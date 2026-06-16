@@ -7345,6 +7345,9 @@ for i in {1..10}; do
     sleep 1
 done
 
+# Enable Wacom touch gesture support so two-finger swipe works after reboot
+xinput set-prop "Wacom HID 48E3 Finger touch" "Wacom Enable Touch Gesture" 1 2>/dev/null || true
+
 exec node_modules/electron/dist/electron . \
   --no-sandbox --disable-gpu-sandbox --disable-dev-shm-usage \
   --enable-features=UseOzonePlatform --ozone-platform=x11 \
@@ -11247,9 +11250,11 @@ upgrade_kiosk() {
     extract_file 'tee.*inactivity-prompt-extended\.html.*INACTHTML' 'INACTHTML' "$KIOSK_DIR/inactivity-prompt-extended.html"
     extract_file 'tee.*keyboard-button\.html.*BTNHTML' 'BTNHTML' "$KIOSK_DIR/keyboard-button.html"
     extract_file 'tee.*package\.json.*PKGJSON' 'PKGJSON' "$KIOSK_DIR/package.json"
+    extract_file 'tee.*start\.sh.*LAUNCHER' 'LAUNCHER' "$KIOSK_DIR/start.sh"
 
-    # Set ownership
+    # Set ownership and permissions
     sudo chown -R "$KIOSK_USER:$KIOSK_USER" "$KIOSK_DIR"
+    sudo chmod +x "$KIOSK_DIR/start.sh"
 
     echo "[5/6] Installing npm dependencies..."
     sudo -u "$KIOSK_USER" bash -lc "
