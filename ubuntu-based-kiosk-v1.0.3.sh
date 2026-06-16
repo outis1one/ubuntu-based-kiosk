@@ -7358,17 +7358,18 @@ LAUNCHER
     echo "[18/27] Configuring Openbox with AGGRESSIVE screen keep-alive..."
     sudo -u "$KIOSK_USER" mkdir -p "$KIOSK_HOME/.config/openbox" "$KIOSK_HOME/.config/pulse"
 
-    # Force finger touch screens to use the libinput driver instead of wacom.
-    # The wacom driver does single-touch pointer emulation and does NOT pass
-    # real multitouch through to Chromium, so app gestures (2-finger swipe,
-    # 1-finger swipe) never fire. libinput delivers proper XI2 multitouch
-    # which Chromium turns into real JS touch events. The pen/stylus is left
-    # on the wacom driver (this rule only matches "Finger" touch screens).
+    # Force any touch screen to use the libinput driver.
+    # Some drivers (notably wacom) only do single-touch pointer emulation and
+    # never pass real multitouch through to Chromium, so app gestures (2-finger
+    # swipe, 1-finger swipe) never fire. libinput delivers proper XI2 multitouch
+    # which Chromium turns into real JS touch events, and is the correct driver
+    # for any touch screen. MatchIsTouchscreen is set by udev from hardware
+    # capabilities, so this matches finger touch screens only — never keyboards,
+    # mice, or the pen/stylus (those stay on their existing driver).
     sudo mkdir -p /etc/X11/xorg.conf.d
     sudo tee /etc/X11/xorg.conf.d/99-finger-libinput.conf > /dev/null <<'TOUCHCFG'
 Section "InputClass"
-  Identifier "Finger touch use libinput"
-  MatchProduct "Finger"
+  Identifier "Touch screen use libinput"
   MatchIsTouchscreen "on"
   Driver "libinput"
 EndSection
@@ -11294,15 +11295,14 @@ upgrade_kiosk() {
         sudo rm -f "$config_backup"
     fi
 
-    # Force finger touch screens to use libinput (proper multitouch for Chromium).
+    # Force any touch screen to use libinput (proper multitouch for Chromium).
     # Remove the old wacom-touch override from earlier versions — it sorts after
     # this file and would otherwise win and re-bind the device to the wacom driver.
     sudo mkdir -p /etc/X11/xorg.conf.d
     sudo rm -f /etc/X11/xorg.conf.d/99-wacom-touch.conf
     sudo tee /etc/X11/xorg.conf.d/99-finger-libinput.conf > /dev/null <<'TOUCHCFG'
 Section "InputClass"
-  Identifier "Finger touch use libinput"
-  MatchProduct "Finger"
+  Identifier "Touch screen use libinput"
   MatchIsTouchscreen "on"
   Driver "libinput"
 EndSection
