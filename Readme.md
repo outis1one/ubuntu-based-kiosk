@@ -158,19 +158,33 @@ kiosk:
 
 **Step 3 — MERGE into `~/docker/authelia/config/configuration.yml`** (do not replace your existing config):
 
-**access_control** — Add the kiosk rule **ABOVE** any existing `two_factor` rule. Authelia applies rules top-down — first match wins:
+**access_control** — Find your **existing** `access_control:` block and add the kiosk rule as the **first** rule inside it.
 
+> **Do NOT create a second `access_control:` block.** YAML silently ignores duplicate keys — Authelia will never see the kiosk rule and the kiosk will get a white screen.
+
+Authelia reads rules top-down — first match wins. The kiosk rule **must** sit above any `two_factor` wildcard rule, otherwise the wildcard matches first.
+
+**Why `one_factor`?** The kiosk authenticates via the API (`/api/firstfactor` — password only). TOTP and WebAuthn require an interactive second step that is impossible from a script, so the kiosk group must use `one_factor`.
+
+*Before (your existing config):*
 ```yaml
 access_control:
   default_policy: deny
   rules:
-    # ADD THIS — kiosk can only do one_factor (no TOTP/WebAuthn via API)
     - domain: '*.yourdomain.com'
+      policy: two_factor
+```
+
+*After (add kiosk rule above the two_factor rule — same block, not a new one):*
+```yaml
+access_control:
+  default_policy: deny
+  rules:
+    - domain: '*.yourdomain.com'   # kiosk first — one_factor only
       subject: 'group:kiosk'
       policy: one_factor
-    # Keep your existing rules below — e.g.:
-    # - domain: '*.yourdomain.com'
-    #   policy: two_factor
+    - domain: '*.yourdomain.com'   # existing rule stays below
+      policy: two_factor
 ```
 
 **session** — Keep your existing session block as-is; no changes needed. The kiosk re-authenticates via API on every startup so session expiry barely matters for it.
