@@ -7365,6 +7365,21 @@ LAUNCHER
     echo "[18/27] Configuring Openbox with AGGRESSIVE screen keep-alive..."
     sudo -u "$KIOSK_USER" mkdir -p "$KIOSK_HOME/.config/openbox" "$KIOSK_HOME/.config/pulse"
 
+    # Configure Wacom touch devices to start in touch event mode (not pointer emulation).
+    # Without this, the driver initialises in pointer mode and generates mouse events
+    # instead of XI2 TouchBegin/TouchEnd events — which means Electron never sees touch.
+    # The MatchProduct is Wacom-specific; non-Wacom touch screens work natively.
+    sudo mkdir -p /etc/X11/xorg.conf.d
+    sudo tee /etc/X11/xorg.conf.d/99-wacom-touch.conf > /dev/null <<'WACFG'
+Section "InputClass"
+  Identifier "Wacom Touch Settings"
+  MatchProduct "Wacom.*Finger"
+  Driver "wacom"
+  Option "Gesture" "on"
+  Option "Touch" "on"
+EndSection
+WACFG
+
     # Create empty xbindkeysrc to prevent errors
     sudo -u "$KIOSK_USER" touch "$KIOSK_HOME/.xbindkeysrc"
 
@@ -11284,6 +11299,18 @@ upgrade_kiosk() {
         sudo chown "$KIOSK_USER:$KIOSK_USER" "$CONFIG_PATH"
         sudo rm -f "$config_backup"
     fi
+
+    # Ensure Wacom touch devices start in touch event mode (not pointer emulation)
+    sudo mkdir -p /etc/X11/xorg.conf.d
+    sudo tee /etc/X11/xorg.conf.d/99-wacom-touch.conf > /dev/null <<'WACFG'
+Section "InputClass"
+  Identifier "Wacom Touch Settings"
+  MatchProduct "Wacom.*Finger"
+  Driver "wacom"
+  Option "Gesture" "on"
+  Option "Touch" "on"
+EndSection
+WACFG
 
     # Install simplified power button handler
     echo "  Updating power button handler..."
