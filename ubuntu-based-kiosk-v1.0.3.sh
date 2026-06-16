@@ -11099,6 +11099,7 @@ install_electron_binary() {
             tmp_zip=$(mktemp --suffix=.zip)
             if wget --timeout=300 --tries=3 --show-progress -O "$tmp_zip" "$electron_url" 2>&1; then
                 command -v unzip >/dev/null 2>&1 || sudo apt install -y unzip
+                chmod 644 "$tmp_zip"   # mktemp creates root:root 600; kiosk user needs read access
                 # Fix ownership first so the kiosk user can write into the directory
                 # (npm postinstall with --unsafe-perm can leave dist/ owned by root)
                 sudo chown -R "$KIOSK_USER:$KIOSK_USER" "$KIOSK_DIR/node_modules/electron/" 2>/dev/null || true
