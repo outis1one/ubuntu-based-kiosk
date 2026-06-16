@@ -5309,11 +5309,14 @@ async function autheliaAuthenticate(){
     const decipher=crypto.createDecipheriv('aes-256-cbc',key,iv);
     const password=Buffer.concat([decipher.update(enc),decipher.final()]).toString('utf8');
 
+    const ctrl=new AbortController();
+    const timer=setTimeout(()=>ctrl.abort(),10000);
     const res=await session.defaultSession.fetch(`${autheliaURL}/api/firstfactor`,{
       method:'POST',
       headers:{'Content-Type':'application/json','User-Agent':'kiosk/1.0'},
-      body:JSON.stringify({username:autheliaUsername,password,keepMeLoggedIn:true,requestMethod:'GET',targetURL:''})
-    });
+      body:JSON.stringify({username:autheliaUsername,password,keepMeLoggedIn:true,requestMethod:'GET',targetURL:''}),
+      signal:ctrl.signal
+    }).finally(()=>clearTimeout(timer));
     const body=await res.json().catch(()=>({}));
     if(res.ok&&body.status==='OK'){
       console.log('[AUTHELIA] Authenticated as',autheliaUsername);
@@ -7169,8 +7172,8 @@ window.addEventListener('DOMContentLoaded',()=>{
       touchStartTime=Date.now();
       fingerCount=e.touches.length;
     }
-  },{passive:true});
-  
+  },{passive:true,capture:true});
+
   document.addEventListener('touchend',e=>{
     if(e.changedTouches.length>=1){
       const touchEndX=e.changedTouches[0].clientX;
@@ -7178,9 +7181,9 @@ window.addEventListener('DOMContentLoaded',()=>{
       const deltaX=touchEndX-touchStartX;
       const deltaY=touchEndY-touchStartY;
       const deltaTime=Date.now()-touchStartTime;
-      
+
       if(deltaTime>SWIPE_MAX_TIME)return;
-      
+
       const absX=Math.abs(deltaX);
       const absY=Math.abs(deltaY);
 
@@ -7191,6 +7194,7 @@ window.addEventListener('DOMContentLoaded',()=>{
       }
       // 2-finger HORIZONTAL = change tabs
       else if(fingerCount===2&&absX>SWIPE_THRESHOLD&&absY<SWIPE_TOLERANCE){
+        console.log('[TOUCH] 2-finger HORIZONTAL - change tab');
         ipcRenderer.send(deltaX>0?'swipe-right':'swipe-left');
       }
       // 1-finger HORIZONTAL = arrow keys
@@ -7204,7 +7208,7 @@ window.addEventListener('DOMContentLoaded',()=>{
         });
       }
     }
-  },{passive:true});
+  },{passive:true,capture:true});
 
   // Show pause button on user interaction (for rotation sites only)
   let lastUserInteraction=0;
@@ -9185,8 +9189,8 @@ window.addEventListener('DOMContentLoaded',()=>{
       touchStartTime=Date.now();
       fingerCount=e.touches.length;
     }
-  },{passive:true});
-  
+  },{passive:true,capture:true});
+
   document.addEventListener('touchend',e=>{
     if(e.changedTouches.length>=1){
       const touchEndX=e.changedTouches[0].clientX;
@@ -9194,9 +9198,9 @@ window.addEventListener('DOMContentLoaded',()=>{
       const deltaX=touchEndX-touchStartX;
       const deltaY=touchEndY-touchStartY;
       const deltaTime=Date.now()-touchStartTime;
-      
+
       if(deltaTime>SWIPE_MAX_TIME)return;
-      
+
       const absX=Math.abs(deltaX);
       const absY=Math.abs(deltaY);
 
@@ -9228,7 +9232,7 @@ window.addEventListener('DOMContentLoaded',()=>{
         });
       }
     }
-  },{passive:true});
+  },{passive:true,capture:true});
   
   // Optional: Auto-show on text field focus (can be disabled)
   let autoShowEnabled = true; // Set to false to disable auto-show
@@ -10039,7 +10043,8 @@ process.stdout.write(Buffer.concat([iv,enc]).toString('base64'));
     echo
     echo "   Copy the \$argon2id\$... output — that is your hash."
     echo
-    echo "2. Add a kiosk user to ~/docker/authelia/config/users.yml:"
+    echo "2. ADD a kiosk user to ~/docker/authelia/config/users.yml"
+    echo "   (append — do not replace existing users):"
     echo
     echo "   kiosk:"
     echo "     displayname: \"Kiosk Display\""
@@ -10048,19 +10053,57 @@ process.stdout.write(Buffer.concat([iv,enc]).toString('base64'));
     echo "     groups:"
     echo "       - kiosk"
     echo
-    echo "3. Add to ~/docker/authelia/config/configuration.yml:"
+    echo "3. MERGE into ~/docker/authelia/config/configuration.yml:"
     echo
-    echo "   session:"
-    echo "     expiration: 1y"
-    echo "     inactivity: 90d"
-    echo "     remember_me: 1y"
+    echo "   ── access_control ─────────────────────────────────────"
+    echo "   Find your EXISTING access_control block and add the"
+    echo "   kiosk rule as the FIRST rule inside it."
     echo
+    echo "   !! DO NOT create a second access_control: block !!"
+    echo "   YAML silently ignores duplicate keys — the kiosk rule"
+    echo "   will be invisible to Authelia and you will get a white"
+    echo "   screen on the kiosk."
+    echo
+    echo "   Authelia reads rules top-down, first match wins."
+    echo "   The kiosk rule MUST be above any two_factor rule or"
+    echo "   the two_factor wildcard will match first."
+    echo
+    echo "   ── EXAMPLE — before (your existing config): ──────────"
     echo "   access_control:"
     echo "     default_policy: deny"
     echo "     rules:"
     echo "       - domain: '*.yourdomain.com'"
+    echo "         policy: two_factor"
+    echo
+    echo "   ── EXAMPLE — after (add kiosk rule above two_factor): ─"
+    echo "   access_control:"
+    echo "     default_policy: deny"
+    echo "     rules:"
+    echo "       - domain: '*.yourdomain.com'       # <-- kiosk first"
     echo "         subject: 'group:kiosk'"
     echo "         policy: one_factor"
+    echo "       - domain: '*.yourdomain.com'       # <-- existing"
+    echo "         policy: two_factor"
+    echo
+    echo "   Why one_factor? The kiosk authenticates via the API"
+    echo "   (/api/firstfactor — password only). TOTP and WebAuthn"
+    echo "   require a second interactive step that is impossible"
+    echo "   from a script, so the kiosk group must use one_factor."
+    echo
+    echo "   ── session ─────────────────────────────────────────────"
+    echo "   Keep your existing session block — no changes needed."
+    echo "   The kiosk re-authenticates via API on every startup so"
+    echo "   session expiry barely matters for it."
+    echo
+    echo "   If you do NOT yet have a session block, add:"
+    echo
+    echo "   session:"
+    echo "     expiration: 8h"
+    echo "     inactivity: 1h"
+    echo "     remember_me: 7d"
+    echo "     cookies:"
+    echo "       - domain: yourdomain.com"
+    echo "         authelia_url: https://auth.yourdomain.com"
     echo
     echo "4. Restart Authelia on your Docker host:"
     echo "   docker compose restart authelia"

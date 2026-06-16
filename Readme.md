@@ -156,25 +156,49 @@ kiosk:
     - kiosk
 ```
 
-**Step 3 — Configure session duration and access control** in `~/docker/authelia/config/configuration.yml`:
+**Step 3 — MERGE into `~/docker/authelia/config/configuration.yml`** (do not replace your existing config):
 
+**access_control** — Find your **existing** `access_control:` block and add the kiosk rule as the **first** rule inside it.
+
+> **Do NOT create a second `access_control:` block.** YAML silently ignores duplicate keys — Authelia will never see the kiosk rule and the kiosk will get a white screen.
+
+Authelia reads rules top-down — first match wins. The kiosk rule **must** sit above any `two_factor` wildcard rule, otherwise the wildcard matches first.
+
+**Why `one_factor`?** The kiosk authenticates via the API (`/api/firstfactor` — password only). TOTP and WebAuthn require an interactive second step that is impossible from a script, so the kiosk group must use `one_factor`.
+
+*Before (your existing config):*
 ```yaml
-session:
-  expiration: 1y       # absolute session lifetime
-  inactivity: 90d      # idle timeout before logout
-  remember_me: 1y      # duration granted by keepMeLoggedIn
-
 access_control:
   default_policy: deny
   rules:
-    # Allow kiosk group to reach any subdomain with one-factor auth
     - domain: '*.yourdomain.com'
+      policy: two_factor
+```
+
+*After (add kiosk rule above the two_factor rule — same block, not a new one):*
+```yaml
+access_control:
+  default_policy: deny
+  rules:
+    - domain: '*.yourdomain.com'   # kiosk first — one_factor only
       subject: 'group:kiosk'
       policy: one_factor
-    # Optional: bypass Authelia entirely for the kiosk's static IP
-    # - domain: '*.yourdomain.com'
-    #   networks: ['192.168.1.50/32']
-    #   policy: bypass
+    - domain: '*.yourdomain.com'   # existing rule stays below
+      policy: two_factor
+```
+
+**session** — Keep your existing session block as-is; no changes needed. The kiosk re-authenticates via API on every startup so session expiry barely matters for it.
+
+If you do **not** yet have a session block, add:
+
+```yaml
+session:
+  expiration: 8h
+  inactivity: 1h
+  remember_me: 7d
+  cookies:
+    - domain: yourdomain.com
+      authelia_url: https://auth.yourdomain.com
 ```
 
 **Step 4 — Restart Authelia:**
