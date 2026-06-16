@@ -7345,8 +7345,13 @@ for i in {1..10}; do
     sleep 1
 done
 
-# Enable Wacom touch gesture support so two-finger swipe works after reboot
-xinput set-prop "Wacom HID 48E3 Finger touch" "Wacom Enable Touch Gesture" 1 2>/dev/null || true
+# Enable multi-touch gesture support for any detected touch screen
+# Wacom devices require "Wacom Enable Touch Gesture" to be set (defaults to 0).
+# The set-prop call is silently ignored for non-Wacom devices that don't have this property.
+# Excludes touchpads — only targets touch screens and finger-touch digitizers.
+while IFS= read -r dev; do
+  xinput set-prop "$dev" "Wacom Enable Touch Gesture" 1 2>/dev/null || true
+done < <(xinput list --name-only 2>/dev/null | grep -i "touch\|finger" | grep -iv "touchpad\|trackpad")
 
 exec node_modules/electron/dist/electron . \
   --no-sandbox --disable-gpu-sandbox --disable-dev-shm-usage \
