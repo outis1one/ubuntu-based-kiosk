@@ -7303,6 +7303,7 @@ done
 exec node_modules/electron/dist/electron . \
   --no-sandbox --disable-gpu-sandbox --disable-dev-shm-usage \
   --enable-features=UseOzonePlatform --ozone-platform=x11 \
+  --touch-events=enabled \
   --enable-audio-service-sandbox=false --autoplay-policy=no-user-gesture-required \
   2>&1 | tee -a /home/kiosk/electron.log
 LAUNCHER
