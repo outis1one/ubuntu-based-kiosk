@@ -7172,8 +7172,8 @@ window.addEventListener('DOMContentLoaded',()=>{
       touchStartTime=Date.now();
       fingerCount=e.touches.length;
     }
-  },{passive:true});
-  
+  },{passive:true,capture:true});
+
   document.addEventListener('touchend',e=>{
     if(e.changedTouches.length>=1){
       const touchEndX=e.changedTouches[0].clientX;
@@ -7181,9 +7181,9 @@ window.addEventListener('DOMContentLoaded',()=>{
       const deltaX=touchEndX-touchStartX;
       const deltaY=touchEndY-touchStartY;
       const deltaTime=Date.now()-touchStartTime;
-      
+
       if(deltaTime>SWIPE_MAX_TIME)return;
-      
+
       const absX=Math.abs(deltaX);
       const absY=Math.abs(deltaY);
 
@@ -7194,6 +7194,7 @@ window.addEventListener('DOMContentLoaded',()=>{
       }
       // 2-finger HORIZONTAL = change tabs
       else if(fingerCount===2&&absX>SWIPE_THRESHOLD&&absY<SWIPE_TOLERANCE){
+        console.log('[TOUCH] 2-finger HORIZONTAL - change tab');
         ipcRenderer.send(deltaX>0?'swipe-right':'swipe-left');
       }
       // 1-finger HORIZONTAL = arrow keys
@@ -7207,7 +7208,7 @@ window.addEventListener('DOMContentLoaded',()=>{
         });
       }
     }
-  },{passive:true});
+  },{passive:true,capture:true});
 
   // Show pause button on user interaction (for rotation sites only)
   let lastUserInteraction=0;
@@ -9188,8 +9189,8 @@ window.addEventListener('DOMContentLoaded',()=>{
       touchStartTime=Date.now();
       fingerCount=e.touches.length;
     }
-  },{passive:true});
-  
+  },{passive:true,capture:true});
+
   document.addEventListener('touchend',e=>{
     if(e.changedTouches.length>=1){
       const touchEndX=e.changedTouches[0].clientX;
@@ -9197,9 +9198,9 @@ window.addEventListener('DOMContentLoaded',()=>{
       const deltaX=touchEndX-touchStartX;
       const deltaY=touchEndY-touchStartY;
       const deltaTime=Date.now()-touchStartTime;
-      
+
       if(deltaTime>SWIPE_MAX_TIME)return;
-      
+
       const absX=Math.abs(deltaX);
       const absY=Math.abs(deltaY);
 
@@ -9231,7 +9232,7 @@ window.addEventListener('DOMContentLoaded',()=>{
         });
       }
     }
-  },{passive:true});
+  },{passive:true,capture:true});
   
   // Optional: Auto-show on text field focus (can be disabled)
   let autoShowEnabled = true; // Set to false to disable auto-show
