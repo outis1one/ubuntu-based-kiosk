@@ -11082,12 +11082,12 @@ import_settings() {
 install_electron_binary() {
     local electron_bin="$KIOSK_DIR/node_modules/electron/dist/electron"
 
-    if [[ ! -f "$electron_bin" ]]; then
+    if ! sudo -u "$KIOSK_USER" test -f "$electron_bin"; then
         log_warning "Electron binary missing — retrying via install.js..."
         sudo -u "$KIOSK_USER" bash -lc "cd '$KIOSK_DIR' && ELECTRON_FORCE_DOWNLOAD=true node node_modules/electron/install.js" || true
     fi
 
-    if [[ ! -f "$electron_bin" ]]; then
+    if ! sudo -u "$KIOSK_USER" test -f "$electron_bin"; then
         log_warning "Attempting direct wget download of Electron binary (~120MB)..."
         local electron_ver
         electron_ver=$(sudo -u "$KIOSK_USER" node -e \
@@ -11111,7 +11111,7 @@ install_electron_binary() {
         fi
     fi
 
-    if [[ ! -f "$electron_bin" ]]; then
+    if ! sudo -u "$KIOSK_USER" test -f "$electron_bin"; then
         log_error "Electron binary download failed after all attempts."
         log_error "Check your internet connection and re-run the installer."
         return 1
@@ -11120,7 +11120,7 @@ install_electron_binary() {
 
     # chrome-sandbox MUST be owned by root and setuid — without this Electron shows a blank screen
     local sandbox="$KIOSK_DIR/node_modules/electron/dist/chrome-sandbox"
-    if [[ -f "$sandbox" ]]; then
+    if sudo -u "$KIOSK_USER" test -f "$sandbox"; then
         sudo chown root:root "$sandbox"
         sudo chmod 4755 "$sandbox"
         log_success "Chrome sandbox permissions set (required for display)"
