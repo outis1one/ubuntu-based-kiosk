@@ -11093,8 +11093,8 @@ upgrade_kiosk() {
     sudo rm -f "$KIOSK_DIR/pause-dialog.html"
     sudo rm -f "$KIOSK_DIR/pin-entry.html"
     sudo rm -f "$KIOSK_DIR/inactivity-prompt-extended.html"
-    sudo rm -rf "$KIOSK_DIR/node_modules"
-    sudo rm -f "$KIOSK_DIR/package-lock.json"
+    # node_modules is NOT removed — preserves the Electron binary (~120MB download)
+    # npm install below is a no-op if dependencies haven't changed
     log_success "Old files removed"
 
     echo "[4/6] Extracting new app files from script..."
