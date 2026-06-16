@@ -7347,12 +7347,17 @@ for i in {1..10}; do
 done
 
 # Fix touch device coordinate mapping and enable multi-touch gestures.
+# Find the primary connected display (e.g. eDP1, HDMI1, DP1).
+_primary_output=$(xrandr 2>/dev/null | grep " connected primary" | head -1 | cut -d' ' -f1)
+
 # Loop over all touch/finger input devices (excludes touchpads).
 while IFS= read -r dev; do
-  # Reset Coordinate Transformation Matrix to identity — without this,
-  # the Wacom driver can initialise the CTM to all-zeros, which maps
-  # every touch to (0,0) on screen and makes the touchscreen appear dead.
-  xinput set-prop "$dev" "Coordinate Transformation Matrix" 1 0 0 0 1 0 0 0 1 2>/dev/null || true
+  # Use xsetwacom MapToOutput to fix the Coordinate Transformation Matrix.
+  # The Wacom driver initialises the CTM to all-zeros when it cannot auto-detect
+  # the active output, making every touch map to (0,0) and appear dead.
+  # xsetwacom MapToOutput recalculates the CTM correctly for the given output.
+  # xinput set-prop on the CTM is overridden by the driver, so xsetwacom is needed.
+  [ -n "$_primary_output" ] && xsetwacom set "$dev" MapToOutput "$_primary_output" 2>/dev/null || true
   # Enable multi-touch gesture mode (Wacom-specific; ignored by other drivers).
   xinput set-prop "$dev" "Wacom Enable Touch Gesture" 1 2>/dev/null || true
 done < <(xinput list --name-only 2>/dev/null | grep -i "touch\|finger" | grep -iv "touchpad\|trackpad")
