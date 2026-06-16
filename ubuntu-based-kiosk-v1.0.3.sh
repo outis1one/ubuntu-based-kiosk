@@ -1,9 +1,9 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk v1.0.2                ###
+###   Ubuntu Based Kiosk v1.0.3                ###
 ################################################################################
 #
-# RELEASE v1.0.2 - Authelia Auto-Login & Bug Fixes
+# RELEASE v1.0.3 - Touch Screen Detection & Upgrade Reliability
 # - Authelia auto-login addon (Addons menu → 5)
 #   Password encrypted with AES-256-CBC keyed from /etc/machine-id
 #   Authenticates via Authelia API on every startup before sites load
@@ -68,7 +68,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="1.0.2"
+SCRIPT_VERSION="1.0.3"
 KIOSK_USER="kiosk"
 BUILD_USER="${SUDO_USER:-$(whoami)}"
 KIOSK_HOME="/home/${KIOSK_USER}"
@@ -4058,7 +4058,7 @@ process.on('uncaughtException',(e)=>{
 });
 
 const CONFIG_FILE=path.join(__dirname,'config.json');
-const VERSION='1.0.2';
+const VERSION='1.0.3';
 
 let mainWindow,views=[],hiddenViews=[],tabs=[],currentIndex=0,showingHidden=false;
 let pinWindow=null,promptWindow=null,pauseWindow=null,htmlKeyboardWindow=null;
@@ -7345,8 +7345,13 @@ for i in {1..10}; do
     sleep 1
 done
 
-# Enable Wacom touch gesture support so two-finger swipe works after reboot
-xinput set-prop "Wacom HID 48E3 Finger touch" "Wacom Enable Touch Gesture" 1 2>/dev/null || true
+# Enable multi-touch gesture support for any detected touch screen
+# Wacom devices require "Wacom Enable Touch Gesture" to be set (defaults to 0).
+# The set-prop call is silently ignored for non-Wacom devices that don't have this property.
+# Excludes touchpads — only targets touch screens and finger-touch digitizers.
+while IFS= read -r dev; do
+  xinput set-prop "$dev" "Wacom Enable Touch Gesture" 1 2>/dev/null || true
+done < <(xinput list --name-only 2>/dev/null | grep -i "touch\|finger" | grep -iv "touchpad\|trackpad")
 
 exec node_modules/electron/dist/electron . \
   --no-sandbox --disable-gpu-sandbox --disable-dev-shm-usage \

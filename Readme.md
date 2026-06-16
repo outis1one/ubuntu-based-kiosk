@@ -1,6 +1,6 @@
 # Ubuntu Based Kiosk
 
-**Current Version:** 1.0.2 (check script header for latest version)
+**Current Version:** 1.0.3 (check script header for latest version)
 **Built with Claude Sonnet 4.6 AI assistance**
 **License:** GPL v3 - Keep derivatives open source
 **Repository:** https://github.com/outis1one/ubuntu-based-kiosk/
@@ -1084,9 +1084,17 @@ See the LICENSE file in the repository for full terms.
 
 ## Project Status & Future Plans
 
-**Current Version:** 1.0.2
+**Current Version:** 1.0.3
 
-**Recent Updates (v1.0.2):**
+**Recent Updates (v1.0.3):**
+- **Touch screen detection:** startup now auto-detects any touch screen (Wacom, ELAN, eGalax, Goodix, etc.) instead of requiring a hardcoded device name
+- **Upgrade reliability:** `start.sh` is now refreshed on every upgrade alongside `main.js` and `preload.js`
+- **Upgrade fix:** node_modules no longer wiped during upgrade — preserves the ~120MB Electron binary so upgrades don't fail on slow/unreliable connections
+- **Authelia fix:** 10-second timeout on Authelia login fetch prevents white screen when Authelia is slow to respond
+- **Authelia config:** clearer YAML merge instructions with before/after examples to prevent duplicate `access_control:` block mistake
+- **Upgrade fix:** config backup cleanup now uses `sudo rm` to avoid "Operation not permitted" error
+
+**Previous (v1.0.2):**
 - **Authelia Auto-Login addon** (`Addons → 5`) — authenticates with Authelia SSO on every startup; password stored encrypted (AES-256 keyed from machine ID, not plain text); prints full Dockerized Authelia server-side setup after configuration
 - **Bug fix:** PipeWire config dirs were created as root at step [5.5/27], causing "Permission denied" on fresh installs
 - **README:** install commands no longer hardcode version numbers — always fetch latest from GitHub
@@ -1151,4 +1159,4 @@ Special thanks to the maintainers of all upstream projects that make Ubuntu Base
 ---
 
 *Last Updated: June 15, 2026*
-*Version: 1.0.2*
+*Version: 1.0.3*
