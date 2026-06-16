@@ -7557,23 +7557,7 @@ EndSection
 EOF
 
     echo "[19/27] Configuring autologin..."
-    sudo mkdir -p /etc/lightdm/lightdm.conf.d
-    # [Seat:*] is required on Ubuntu 22.04+ ([SeatDefaults] is ignored on newer LightDM)
-    # Also add kiosk user to the autologin group required by newer Ubuntu
-    sudo groupadd -f autologin
-    sudo usermod -aG autologin "$KIOSK_USER"
-    sudo tee /etc/lightdm/lightdm.conf.d/10-kiosk.conf > /dev/null <<EOF
-[Seat:*]
-autologin-user=$KIOSK_USER
-autologin-user-timeout=0
-user-session=openbox
-autologin-session=openbox
-
-# SECURITY: Greeter security settings
-greeter-hide-users=true
-greeter-show-manual-login=false
-allow-guest=false
-EOF
+    configure_lightdm_autologin
     
     echo "[20/27] Configuring firewall..."
     sudo ufw --force enable
@@ -11081,6 +11065,27 @@ import_settings() {
     pause
 }
 
+# Shared helper: write LightDM autologin config and add kiosk user to required groups.
+# Called from both fresh install (step 19/27) and upgrade (step 5/6).
+configure_lightdm_autologin() {
+    sudo mkdir -p /etc/lightdm/lightdm.conf.d
+    # nopasswdlogin is checked by PAM on Ubuntu 24.04; autologin group for older versions
+    sudo groupadd -f nopasswdlogin
+    sudo groupadd -f autologin
+    sudo usermod -aG nopasswdlogin,autologin "$KIOSK_USER"
+    # [Seat:*] works on all LightDM versions; [SeatDefaults] is ignored on newer Ubuntu
+    sudo tee /etc/lightdm/lightdm.conf.d/10-kiosk.conf > /dev/null <<EOF
+[Seat:*]
+autologin-user=$KIOSK_USER
+autologin-user-timeout=0
+user-session=openbox
+autologin-session=openbox
+greeter-hide-users=true
+greeter-show-manual-login=false
+allow-guest=false
+EOF
+}
+
 # Shared helper: verify Electron binary exists, download if missing, fix sandbox perms.
 # Called from both fresh install (step 17/27) and upgrade (step 5/6).
 install_electron_binary() {
@@ -11321,6 +11326,11 @@ upgrade_kiosk() {
         sudo chown "$KIOSK_USER:$KIOSK_USER" "$CONFIG_PATH"
         sudo rm -f "$config_backup"
     fi
+
+    # Ensure LightDM autologin config exists and groups are correct.
+    # The upgrade preserves node_modules but does not re-run the full install,
+    # so this may be the first time the config is written on new hardware.
+    configure_lightdm_autologin
 
     # Force any touch screen to use libinput (proper multitouch for Chromium).
     # Remove the old wacom-touch override from earlier versions — it sorts after
