@@ -3844,6 +3844,8 @@ complete_uninstall() {
     echo "[5/13] Removing scripts..."
     sudo rm -f /usr/local/bin/kiosk-*
     sudo rm -f /usr/local/bin/rtc-wake.sh
+    sudo rm -f /etc/udev/rules.d/99-kiosk-hotplug.rules
+    sudo udevadm control --reload-rules 2>/dev/null || true
 
     # Remove CUPS
     echo "[6/13] Removing CUPS..."
@@ -3953,7 +3955,8 @@ first_time_install() {
       libegl-mesa0 libegl1-mesa-dev libgles2-mesa-dev \
       pipewire pipewire-pulse pipewire-alsa wireplumber pipewire-audio-client-libraries alsa-utils libnotify-bin \
       gstreamer1.0-pipewire libspa-0.2-bluetooth \
-      systemd-timesyncd acpid xbindkeys xdotool python3-evdev unzip
+      systemd-timesyncd acpid xbindkeys xdotool python3-evdev unzip \
+      net-tools ncdu
     
     if lspci | grep -i "VGA.*Intel" >/dev/null 2>&1; then
         sudo apt install -y intel-gpu-tools xserver-xorg-video-intel \
@@ -7388,8 +7391,117 @@ TOUCHCFG
     # Create empty xbindkeysrc to prevent errors
     sudo -u "$KIOSK_USER" touch "$KIOSK_HOME/.xbindkeysrc"
 
+    # Shared logic for mirroring any connected display beyond the primary at
+    # the primary's exact resolution (forcing a custom CVT mode if the
+    # external output doesn't natively list it). Called from both the
+    # Openbox autostart below (already running as kiosk user in the X
+    # session) and kiosk-hotplug.sh (root, via systemd/udev — wraps the call
+    # with sudo -u kiosk DISPLAY=:0 XAUTHORITY=...).
+    sudo tee /usr/local/bin/kiosk-mirror-display.sh > /dev/null <<'MIRRORSCRIPT'
+#!/bin/bash
+# Assumes it's run with DISPLAY/XAUTHORITY already set for the kiosk user's
+# X session (either inherited, as from Openbox autostart, or exported by the
+# caller). Mirrors every connected non-primary output at the primary's exact
+# current resolution so kiosk content isn't cropped/letterboxed/blank on a
+# TV/monitor with a different native resolution than the kiosk panel.
+
+QUERY=$(xrandr --query 2>/dev/null)
+[ -z "$QUERY" ] && exit 0
+
+PRIMARY_OUTPUT=$(echo "$QUERY" | awk '/ primary/{print $1; exit}')
+[ -z "$PRIMARY_OUTPUT" ] && exit 0
+
+PRIMARY_RES=$(echo "$QUERY" | awk -v p="$PRIMARY_OUTPUT" '$1==p{for(i=1;i<=NF;i++) if ($i ~ /^[0-9]+x[0-9]+\+/){split($i,a,"+"); print a[1]; exit}}')
+[ -z "$PRIMARY_RES" ] && exit 0
+
+for OUT in $(echo "$QUERY" | awk '/ connected/{print $1}'); do
+  [ "$OUT" = "$PRIMARY_OUTPUT" ] && continue
+
+  HAS_NATIVE=$(echo "$QUERY" | awk -v out="$OUT" -v res="$PRIMARY_RES" '
+    $0 ~ "^"out" " {infound=1; next}
+    /^[^ \t]/ {infound=0}
+    infound && $1==res {print "yes"; exit}
+  ')
+
+  if [ "$HAS_NATIVE" = "yes" ]; then
+    xrandr --output "$OUT" --mode "$PRIMARY_RES" --same-as "$PRIMARY_OUTPUT" 2>/dev/null \
+      && logger "KIOSK: mirrored $OUT at native $PRIMARY_RES" \
+      || logger "KIOSK: mirror of $OUT at $PRIMARY_RES failed"
+    continue
+  fi
+
+  # $OUT doesn't natively list the primary's resolution - force a matching mode
+  CVT_LINE=$(cvt "${PRIMARY_RES%x*}" "${PRIMARY_RES#*x}" 2>/dev/null | grep Modeline)
+  MODENAME=$(echo "$CVT_LINE" | sed -n 's/^Modeline "\([^"]*\)".*/\1/p')
+  TIMINGS=$(echo "$CVT_LINE" | sed -n 's/^Modeline "[^"]*" *//p')
+
+  if [ -z "$MODENAME" ] || [ -z "$TIMINGS" ]; then
+    logger "KIOSK: could not generate a $PRIMARY_RES mode for $OUT (cvt failed or missing)"
+    continue
+  fi
+
+  xrandr --newmode "$MODENAME" $TIMINGS 2>/dev/null
+  xrandr --addmode "$OUT" "$MODENAME" 2>/dev/null
+  xrandr --output "$OUT" --mode "$MODENAME" --same-as "$PRIMARY_OUTPUT" 2>/dev/null \
+    && logger "KIOSK: mirrored $OUT at forced $PRIMARY_RES ($MODENAME)" \
+    || logger "KIOSK: mirror of $OUT at forced $PRIMARY_RES failed"
+done
+MIRRORSCRIPT
+    sudo chmod +x /usr/local/bin/kiosk-mirror-display.sh
+
+    # Shared logic for routing audio to an HDMI audio sink whenever an
+    # external (non-primary) display is connected/mirrored, and back to the
+    # built-in sink when it isn't. Requires PipeWire/pipewire-pulse to
+    # already be running (pactl needs a live socket), so unlike
+    # kiosk-mirror-display.sh this is called later in autostart, after the
+    # "wait for PipeWire/ALSA" steps below — and from kiosk-hotplug.sh, where
+    # the system is already fully booted by the time it fires.
+    sudo tee /usr/local/bin/kiosk-audio-route.sh > /dev/null <<'AUDIOSCRIPT'
+#!/bin/bash
+# Assumes DISPLAY/XAUTHORITY are set (for xrandr) and pactl already has a
+# working PipeWire/pulse socket for the invoking context.
+
+QUERY=$(xrandr --query 2>/dev/null)
+[ -z "$QUERY" ] && exit 0
+
+PRIMARY_OUTPUT=$(echo "$QUERY" | awk '/ primary/{print $1; exit}')
+[ -z "$PRIMARY_OUTPUT" ] && exit 0
+
+EXTERNAL_CONNECTED=$(echo "$QUERY" | awk -v p="$PRIMARY_OUTPUT" '/ connected/ && $1!=p{f=1} END{print (f==1)?"yes":"no"}')
+
+HDMI_SINK=$(pactl list sinks short 2>/dev/null | awk 'tolower($2) ~ /hdmi/{print $2; exit}')
+NON_HDMI_SINK=$(pactl list sinks short 2>/dev/null | awk 'tolower($2) !~ /hdmi/{print $2; exit}')
+
+route_to() {
+  local sink="$1" label="$2"
+  if [ -z "$sink" ]; then
+    logger "KIOSK: no $label audio sink found, leaving routing unchanged"
+    return
+  fi
+  pactl set-default-sink "$sink" 2>/dev/null \
+    && logger "KIOSK: audio routed to $label sink ($sink)" \
+    || logger "KIOSK: failed to route audio to $label sink ($sink)"
+  pactl list sink-inputs short 2>/dev/null | awk '{print $1}' | while read -r sid; do
+    pactl move-sink-input "$sid" "$sink" 2>/dev/null
+  done
+  pactl set-sink-volume "$sink" 100% 2>/dev/null
+  pactl set-sink-mute "$sink" 0 2>/dev/null
+}
+
+if [ "$EXTERNAL_CONNECTED" = "yes" ]; then
+  route_to "$HDMI_SINK" "HDMI"
+else
+  route_to "$NON_HDMI_SINK" "built-in"
+fi
+AUDIOSCRIPT
+    sudo chmod +x /usr/local/bin/kiosk-audio-route.sh
+
 sudo -u "$KIOSK_USER" tee "$KIOSK_HOME/.config/openbox/autostart" > /dev/null <<'AUTOSTART'
 #!/bin/bash
+
+# Mirror any connected external display (e.g. HDMI-out to a monitor/TV) onto
+# the primary display, forcing it to the primary's exact resolution.
+/usr/local/bin/kiosk-mirror-display.sh
 
 # AGGRESSIVE DPMS disable - multiple methods
 xset s off
@@ -7460,6 +7572,9 @@ for i in {1..10}; do
     sleep 1
 done
 
+# Route audio to HDMI if an external display is connected/mirrored, else built-in
+/usr/local/bin/kiosk-audio-route.sh
+
 # Set audio levels (speakers 100%, mic 100%, mic unmuted)
 pactl set-sink-volume @DEFAULT_SINK@ 100%
 pactl set-source-volume @DEFAULT_SOURCE@ 100%
@@ -7527,7 +7642,41 @@ sleep 2
 /home/kiosk/kiosk-app/start.sh &
 AUTOSTART
     sudo chmod 750 "$KIOSK_HOME/.config/openbox/autostart"
-    
+
+    # HDMI/display hotplug: re-mirror any newly connected external display
+    # without waiting for the next login. Triggered by udev on DRM "change"
+    # events (monitor plugged/unplugged), which starts a oneshot systemd
+    # service that re-runs the same kiosk-mirror-display.sh logic used at
+    # Openbox autostart, as root, so it wraps the call with sudo -u kiosk.
+    sudo tee /usr/local/bin/kiosk-hotplug.sh > /dev/null <<'EOF'
+#!/bin/bash
+# Give X a moment to finish enumerating the output after the hotplug event
+sleep 2
+sudo -u kiosk DISPLAY=:0 XAUTHORITY=/home/kiosk/.Xauthority /usr/local/bin/kiosk-mirror-display.sh
+
+kiosk_uid=$(id -u kiosk)
+sudo -u kiosk DISPLAY=:0 XAUTHORITY=/home/kiosk/.Xauthority XDG_RUNTIME_DIR="/run/user/${kiosk_uid}" /usr/local/bin/kiosk-audio-route.sh
+EOF
+    sudo chmod +x /usr/local/bin/kiosk-hotplug.sh
+
+    sudo tee /etc/systemd/system/kiosk-hotplug.service > /dev/null <<'EOF'
+[Unit]
+Description=Kiosk Display Hotplug Handler
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/kiosk-hotplug.sh
+StandardOutput=journal
+StandardError=journal
+EOF
+
+    sudo tee /etc/udev/rules.d/99-kiosk-hotplug.rules > /dev/null <<'EOF'
+SUBSYSTEM=="drm", ACTION=="change", TAG+="systemd", ENV{SYSTEMD_WANTS}="kiosk-hotplug.service"
+EOF
+
+    sudo systemctl daemon-reload
+    sudo udevadm control --reload-rules
+
     if lspci | grep -i "VGA.*Intel" >/dev/null 2>&1; then
         sudo mkdir -p /etc/X11/xorg.conf.d/
         sudo tee /etc/X11/xorg.conf.d/20-intel.conf > /dev/null <<'EOF'
