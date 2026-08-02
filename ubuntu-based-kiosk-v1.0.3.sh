@@ -7449,6 +7449,53 @@ done
 MIRRORSCRIPT
     sudo chmod +x /usr/local/bin/kiosk-mirror-display.sh
 
+    # Shared logic for routing audio to an HDMI audio sink whenever an
+    # external (non-primary) display is connected/mirrored, and back to the
+    # built-in sink when it isn't. Requires PipeWire/pipewire-pulse to
+    # already be running (pactl needs a live socket), so unlike
+    # kiosk-mirror-display.sh this is called later in autostart, after the
+    # "wait for PipeWire/ALSA" steps below — and from kiosk-hotplug.sh, where
+    # the system is already fully booted by the time it fires.
+    sudo tee /usr/local/bin/kiosk-audio-route.sh > /dev/null <<'AUDIOSCRIPT'
+#!/bin/bash
+# Assumes DISPLAY/XAUTHORITY are set (for xrandr) and pactl already has a
+# working PipeWire/pulse socket for the invoking context.
+
+QUERY=$(xrandr --query 2>/dev/null)
+[ -z "$QUERY" ] && exit 0
+
+PRIMARY_OUTPUT=$(echo "$QUERY" | awk '/ primary/{print $1; exit}')
+[ -z "$PRIMARY_OUTPUT" ] && exit 0
+
+EXTERNAL_CONNECTED=$(echo "$QUERY" | awk -v p="$PRIMARY_OUTPUT" '/ connected/ && $1!=p{f=1} END{print (f==1)?"yes":"no"}')
+
+HDMI_SINK=$(pactl list sinks short 2>/dev/null | awk 'tolower($2) ~ /hdmi/{print $2; exit}')
+NON_HDMI_SINK=$(pactl list sinks short 2>/dev/null | awk 'tolower($2) !~ /hdmi/{print $2; exit}')
+
+route_to() {
+  local sink="$1" label="$2"
+  if [ -z "$sink" ]; then
+    logger "KIOSK: no $label audio sink found, leaving routing unchanged"
+    return
+  fi
+  pactl set-default-sink "$sink" 2>/dev/null \
+    && logger "KIOSK: audio routed to $label sink ($sink)" \
+    || logger "KIOSK: failed to route audio to $label sink ($sink)"
+  pactl list sink-inputs short 2>/dev/null | awk '{print $1}' | while read -r sid; do
+    pactl move-sink-input "$sid" "$sink" 2>/dev/null
+  done
+  pactl set-sink-volume "$sink" 100% 2>/dev/null
+  pactl set-sink-mute "$sink" 0 2>/dev/null
+}
+
+if [ "$EXTERNAL_CONNECTED" = "yes" ]; then
+  route_to "$HDMI_SINK" "HDMI"
+else
+  route_to "$NON_HDMI_SINK" "built-in"
+fi
+AUDIOSCRIPT
+    sudo chmod +x /usr/local/bin/kiosk-audio-route.sh
+
 sudo -u "$KIOSK_USER" tee "$KIOSK_HOME/.config/openbox/autostart" > /dev/null <<'AUTOSTART'
 #!/bin/bash
 
@@ -7524,6 +7571,9 @@ for i in {1..10}; do
     pactl list sinks short | grep -q alsa && break
     sleep 1
 done
+
+# Route audio to HDMI if an external display is connected/mirrored, else built-in
+/usr/local/bin/kiosk-audio-route.sh
 
 # Set audio levels (speakers 100%, mic 100%, mic unmuted)
 pactl set-sink-volume @DEFAULT_SINK@ 100%
@@ -7603,6 +7653,9 @@ AUTOSTART
 # Give X a moment to finish enumerating the output after the hotplug event
 sleep 2
 sudo -u kiosk DISPLAY=:0 XAUTHORITY=/home/kiosk/.Xauthority /usr/local/bin/kiosk-mirror-display.sh
+
+kiosk_uid=$(id -u kiosk)
+sudo -u kiosk DISPLAY=:0 XAUTHORITY=/home/kiosk/.Xauthority XDG_RUNTIME_DIR="/run/user/${kiosk_uid}" /usr/local/bin/kiosk-audio-route.sh
 EOF
     sudo chmod +x /usr/local/bin/kiosk-hotplug.sh
 

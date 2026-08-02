@@ -407,6 +407,28 @@ If a forced CVT mode is rejected by the display (blank screen only after mirrori
 sudo -u kiosk DISPLAY=:0 XAUTHORITY=/home/kiosk/.Xauthority xrandr --output HDMI2 --mode 1360x768 --same-as eDP1
 ```
 
+**No sound over HDMI (audio only from laptop/built-in speakers):**
+
+Whenever an external display is connected/mirrored, `kiosk-audio-route.sh` switches PipeWire's default sink to whichever sink's name contains `hdmi`, and moves any already-playing audio stream onto it. It's called at kiosk login (after PipeWire is confirmed ready) and by `kiosk-hotplug.service` on every plug/unplug — see `/usr/local/bin/kiosk-mirror-display.sh` above for the display side of the same hotplug event.
+
+```bash
+# List sinks and confirm an HDMI one exists (name will contain "hdmi")
+sudo -u kiosk pactl list sinks short
+
+# Check what the routing logic actually did
+journalctl | grep "KIOSK: audio routed\|KIOSK: failed to route" | tail -10
+
+# Check current default sink
+sudo -u kiosk pactl get-default-sink
+
+# Manually re-trigger routing
+sudo systemctl start kiosk-hotplug.service
+
+# Force it by hand if needed (replace with your sink name from the list above)
+sudo -u kiosk pactl set-default-sink alsa_output.pci-0000_00_1f.3.hdmi-stereo
+```
+If no sink name contains `hdmi`, the audio codec on that HDMI port either isn't exposed by ALSA/PipeWire on this hardware, or the monitor/TV doesn't report HDMI audio support in its EDID (common on monitors that only do video) — in that case there's no PipeWire-side fix, audio has to come from the laptop speakers or a separate cable.
+
 **Audio not working:**
 ```bash
 # Check PipeWire (use menu: Advanced → Audio Diagnostics)
@@ -1152,6 +1174,7 @@ See the LICENSE file in the repository for full terms.
 
 **Recent Updates (v1.0.3):**
 - **HDMI/external display mirroring:** any connected display beyond the primary (e.g. HDMI-out to a monitor/TV) is now mirrored automatically at the primary's exact resolution — generating a custom `cvt` mode if the external display doesn't natively list it — both at kiosk login/boot and live on plug/unplug via a new udev-triggered `kiosk-hotplug.service`. Previously the external output was left inactive even when detected by X, and would otherwise mirror at its own native resolution instead of matching the kiosk panel
+- **HDMI audio routing:** audio now follows the same hotplug event — the default PipeWire sink automatically switches to the HDMI audio output when an external display is connected/mirrored, and back to the built-in sink when it's disconnected (`kiosk-audio-route.sh`)
 - **Package install:** installer now also installs `net-tools` and `ncdu` (alongside the already-installed `curl` and `git`)
 - **Touch input fix (keyring):** added `--password-store=basic` to the Electron launch. Under LightDM autologin the GNOME keyring stays locked; when Chromium accessed it, the keyring unlock dialog grabbed all keyboard/touch input — the kiosk rendered fine but ignored every tap and keypress. This flag stops Electron from using the keyring, so the dialog never appears.
 - **Touch gesture fix (libinput):** any touch screen is now forced to the `libinput` driver via `/etc/X11/xorg.conf.d/99-finger-libinput.conf` (matched by hardware capability, so it works on any brand and never affects keyboards, mice, or the pen/stylus). Some drivers — notably `wacom` — only do single-touch pointer emulation and never pass real multitouch to Chromium, so 1-finger and 2-finger swipe gestures could not fire. libinput delivers proper multitouch.
