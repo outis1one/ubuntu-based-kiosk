@@ -7391,19 +7391,70 @@ TOUCHCFG
     # Create empty xbindkeysrc to prevent errors
     sudo -u "$KIOSK_USER" touch "$KIOSK_HOME/.xbindkeysrc"
 
+    # Shared logic for mirroring any connected display beyond the primary at
+    # the primary's exact resolution (forcing a custom CVT mode if the
+    # external output doesn't natively list it). Called from both the
+    # Openbox autostart below (already running as kiosk user in the X
+    # session) and kiosk-hotplug.sh (root, via systemd/udev — wraps the call
+    # with sudo -u kiosk DISPLAY=:0 XAUTHORITY=...).
+    sudo tee /usr/local/bin/kiosk-mirror-display.sh > /dev/null <<'MIRRORSCRIPT'
+#!/bin/bash
+# Assumes it's run with DISPLAY/XAUTHORITY already set for the kiosk user's
+# X session (either inherited, as from Openbox autostart, or exported by the
+# caller). Mirrors every connected non-primary output at the primary's exact
+# current resolution so kiosk content isn't cropped/letterboxed/blank on a
+# TV/monitor with a different native resolution than the kiosk panel.
+
+QUERY=$(xrandr --query 2>/dev/null)
+[ -z "$QUERY" ] && exit 0
+
+PRIMARY_OUTPUT=$(echo "$QUERY" | awk '/ primary/{print $1; exit}')
+[ -z "$PRIMARY_OUTPUT" ] && exit 0
+
+PRIMARY_RES=$(echo "$QUERY" | awk -v p="$PRIMARY_OUTPUT" '$1==p{for(i=1;i<=NF;i++) if ($i ~ /^[0-9]+x[0-9]+\+/){split($i,a,"+"); print a[1]; exit}}')
+[ -z "$PRIMARY_RES" ] && exit 0
+
+for OUT in $(echo "$QUERY" | awk '/ connected/{print $1}'); do
+  [ "$OUT" = "$PRIMARY_OUTPUT" ] && continue
+
+  HAS_NATIVE=$(echo "$QUERY" | awk -v out="$OUT" -v res="$PRIMARY_RES" '
+    $0 ~ "^"out" " {infound=1; next}
+    /^[^ \t]/ {infound=0}
+    infound && $1==res {print "yes"; exit}
+  ')
+
+  if [ "$HAS_NATIVE" = "yes" ]; then
+    xrandr --output "$OUT" --mode "$PRIMARY_RES" --same-as "$PRIMARY_OUTPUT" 2>/dev/null \
+      && logger "KIOSK: mirrored $OUT at native $PRIMARY_RES" \
+      || logger "KIOSK: mirror of $OUT at $PRIMARY_RES failed"
+    continue
+  fi
+
+  # $OUT doesn't natively list the primary's resolution - force a matching mode
+  CVT_LINE=$(cvt "${PRIMARY_RES%x*}" "${PRIMARY_RES#*x}" 2>/dev/null | grep Modeline)
+  MODENAME=$(echo "$CVT_LINE" | sed -n 's/^Modeline "\([^"]*\)".*/\1/p')
+  TIMINGS=$(echo "$CVT_LINE" | sed -n 's/^Modeline "[^"]*" *//p')
+
+  if [ -z "$MODENAME" ] || [ -z "$TIMINGS" ]; then
+    logger "KIOSK: could not generate a $PRIMARY_RES mode for $OUT (cvt failed or missing)"
+    continue
+  fi
+
+  xrandr --newmode "$MODENAME" $TIMINGS 2>/dev/null
+  xrandr --addmode "$OUT" "$MODENAME" 2>/dev/null
+  xrandr --output "$OUT" --mode "$MODENAME" --same-as "$PRIMARY_OUTPUT" 2>/dev/null \
+    && logger "KIOSK: mirrored $OUT at forced $PRIMARY_RES ($MODENAME)" \
+    || logger "KIOSK: mirror of $OUT at forced $PRIMARY_RES failed"
+done
+MIRRORSCRIPT
+    sudo chmod +x /usr/local/bin/kiosk-mirror-display.sh
+
 sudo -u "$KIOSK_USER" tee "$KIOSK_HOME/.config/openbox/autostart" > /dev/null <<'AUTOSTART'
 #!/bin/bash
 
 # Mirror any connected external display (e.g. HDMI-out to a monitor/TV) onto
-# the primary display so the kiosk content shows on both.
-PRIMARY_OUTPUT=$(xrandr --query | awk '/ primary/{print $1; exit}')
-if [ -n "$PRIMARY_OUTPUT" ]; then
-  for OUT in $(xrandr --query | awk '/ connected/{print $1}'); do
-    if [ "$OUT" != "$PRIMARY_OUTPUT" ]; then
-      xrandr --output "$OUT" --auto --same-as "$PRIMARY_OUTPUT" 2>/dev/null
-    fi
-  done
-fi
+# the primary display, forcing it to the primary's exact resolution.
+/usr/local/bin/kiosk-mirror-display.sh
 
 # AGGRESSIVE DPMS disable - multiple methods
 xset s off
@@ -7545,22 +7596,13 @@ AUTOSTART
     # HDMI/display hotplug: re-mirror any newly connected external display
     # without waiting for the next login. Triggered by udev on DRM "change"
     # events (monitor plugged/unplugged), which starts a oneshot systemd
-    # service that reapplies the same xrandr mirroring as the autostart script.
+    # service that re-runs the same kiosk-mirror-display.sh logic used at
+    # Openbox autostart, as root, so it wraps the call with sudo -u kiosk.
     sudo tee /usr/local/bin/kiosk-hotplug.sh > /dev/null <<'EOF'
 #!/bin/bash
 # Give X a moment to finish enumerating the output after the hotplug event
 sleep 2
-
-PRIMARY_OUTPUT=$(sudo -u kiosk DISPLAY=:0 XAUTHORITY=/home/kiosk/.Xauthority xrandr --query 2>/dev/null | awk '/ primary/{print $1; exit}')
-if [ -n "$PRIMARY_OUTPUT" ]; then
-  for OUT in $(sudo -u kiosk DISPLAY=:0 XAUTHORITY=/home/kiosk/.Xauthority xrandr --query 2>/dev/null | awk '/ connected/{print $1}'); do
-    if [ "$OUT" != "$PRIMARY_OUTPUT" ]; then
-      sudo -u kiosk DISPLAY=:0 XAUTHORITY=/home/kiosk/.Xauthority xrandr --output "$OUT" --auto --same-as "$PRIMARY_OUTPUT" 2>/dev/null \
-        && logger "KIOSK: hotplug mirrored $OUT onto $PRIMARY_OUTPUT" \
-        || logger "KIOSK: hotplug mirror of $OUT failed"
-    fi
-  done
-fi
+sudo -u kiosk DISPLAY=:0 XAUTHORITY=/home/kiosk/.Xauthority /usr/local/bin/kiosk-mirror-display.sh
 EOF
     sudo chmod +x /usr/local/bin/kiosk-hotplug.sh
 

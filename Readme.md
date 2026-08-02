@@ -378,9 +378,9 @@ id kiosk
 sudo -u kiosk DISPLAY=:0 xdpyinfo
 ```
 
-**External monitor/TV (HDMI) shows nothing:**
+**External monitor/TV (HDMI) shows nothing, or shows a cropped/scaled picture:**
 
-Any connected display beyond the primary is mirrored automatically — both at kiosk login/boot (via Openbox autostart) and live when plugged/unplugged afterward (via a udev rule that triggers `kiosk-hotplug.service`).
+Any connected display beyond the primary is mirrored automatically at the **primary's exact resolution** (not the external display's own native resolution) — both at kiosk login/boot (via Openbox autostart) and live when plugged/unplugged afterward (via a udev rule that triggers `kiosk-hotplug.service`). Both paths call the same `/usr/local/bin/kiosk-mirror-display.sh`. If the external display doesn't natively list the primary's resolution (e.g. a 1366x768 laptop panel mirrored to a 1920x1080-native TV), a matching mode is generated on the fly with `cvt` and forced onto the output — most monitors/TVs accept a close, non-native CVT timing without issue, but a few strict ones may reject it (see below).
 
 ```bash
 # List outputs and check if the external display is detected
@@ -388,17 +388,24 @@ sudo -u kiosk DISPLAY=:0 XAUTHORITY=/home/kiosk/.Xauthority xrandr
 
 # Look for your output (e.g. HDMI1/HDMI2/HDMI-1) as "connected" with a mode list.
 
-# Check whether the hotplug handler fired and what it did
+# Check what the mirroring logic actually did (native mode vs. forced CVT mode, or failures)
+journalctl | grep "KIOSK:" | tail -20
+
+# Check whether the hotplug handler fired
 sudo journalctl -u kiosk-hotplug.service -n 20
-journalctl | grep "KIOSK: hotplug" | tail -10
 
 # Manually re-trigger it
 sudo systemctl start kiosk-hotplug.service
 
-# To test mirroring by hand (replace names with what xrandr showed):
-sudo -u kiosk DISPLAY=:0 XAUTHORITY=/home/kiosk/.Xauthority xrandr --output HDMI2 --auto --same-as eDP1
+# Run the mirroring logic by hand for more verbose output
+sudo -u kiosk DISPLAY=:0 XAUTHORITY=/home/kiosk/.Xauthority bash -x /usr/local/bin/kiosk-mirror-display.sh
 ```
 If the output shows `disconnected`, it's a cabling/port/EDID issue, not software — try a different cable/port or a monitor known to work.
+
+If a forced CVT mode is rejected by the display (blank screen only after mirroring runs, works fine before), that display's EDID doesn't accept out-of-spec timings — you'll need to manually pick one of its natively listed modes instead:
+```bash
+sudo -u kiosk DISPLAY=:0 XAUTHORITY=/home/kiosk/.Xauthority xrandr --output HDMI2 --mode 1360x768 --same-as eDP1
+```
 
 **Audio not working:**
 ```bash
@@ -1144,7 +1151,7 @@ See the LICENSE file in the repository for full terms.
 **Current Version:** 1.0.3
 
 **Recent Updates (v1.0.3):**
-- **HDMI/external display mirroring:** any connected display beyond the primary (e.g. HDMI-out to a monitor/TV) is now mirrored automatically, both at kiosk login/boot and live on plug/unplug via a new udev-triggered `kiosk-hotplug.service` — previously the external output was left inactive even when detected by X
+- **HDMI/external display mirroring:** any connected display beyond the primary (e.g. HDMI-out to a monitor/TV) is now mirrored automatically at the primary's exact resolution — generating a custom `cvt` mode if the external display doesn't natively list it — both at kiosk login/boot and live on plug/unplug via a new udev-triggered `kiosk-hotplug.service`. Previously the external output was left inactive even when detected by X, and would otherwise mirror at its own native resolution instead of matching the kiosk panel
 - **Package install:** installer now also installs `net-tools` and `ncdu` (alongside the already-installed `curl` and `git`)
 - **Touch input fix (keyring):** added `--password-store=basic` to the Electron launch. Under LightDM autologin the GNOME keyring stays locked; when Chromium accessed it, the keyring unlock dialog grabbed all keyboard/touch input — the kiosk rendered fine but ignored every tap and keypress. This flag stops Electron from using the keyring, so the dialog never appears.
 - **Touch gesture fix (libinput):** any touch screen is now forced to the `libinput` driver via `/etc/X11/xorg.conf.d/99-finger-libinput.conf` (matched by hardware capability, so it works on any brand and never affects keyboards, mice, or the pen/stylus). Some drivers — notably `wacom` — only do single-touch pointer emulation and never pass real multitouch to Chromium, so 1-finger and 2-finger swipe gestures could not fire. libinput delivers proper multitouch.
