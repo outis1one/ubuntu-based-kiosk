@@ -379,16 +379,23 @@ sudo -u kiosk DISPLAY=:0 xdpyinfo
 ```
 
 **External monitor/TV (HDMI) shows nothing:**
+
+Any connected display beyond the primary is mirrored automatically — both at kiosk login/boot (via Openbox autostart) and live when plugged/unplugged afterward (via a udev rule that triggers `kiosk-hotplug.service`).
+
 ```bash
 # List outputs and check if the external display is detected
 sudo -u kiosk DISPLAY=:0 XAUTHORITY=/home/kiosk/.Xauthority xrandr
 
 # Look for your output (e.g. HDMI1/HDMI2/HDMI-1) as "connected" with a mode list.
-# If it's "connected" but not active, autostart should mirror it automatically on
-# next login/boot. To apply immediately without rebooting:
-sudo systemctl restart lightdm
 
-# To test mirroring manually right now (replace names with what xrandr showed):
+# Check whether the hotplug handler fired and what it did
+sudo journalctl -u kiosk-hotplug.service -n 20
+journalctl | grep "KIOSK: hotplug" | tail -10
+
+# Manually re-trigger it
+sudo systemctl start kiosk-hotplug.service
+
+# To test mirroring by hand (replace names with what xrandr showed):
 sudo -u kiosk DISPLAY=:0 XAUTHORITY=/home/kiosk/.Xauthority xrandr --output HDMI2 --auto --same-as eDP1
 ```
 If the output shows `disconnected`, it's a cabling/port/EDID issue, not software — try a different cable/port or a monitor known to work.
@@ -1137,7 +1144,7 @@ See the LICENSE file in the repository for full terms.
 **Current Version:** 1.0.3
 
 **Recent Updates (v1.0.3):**
-- **HDMI/external display mirroring:** autostart now detects any connected display beyond the primary (e.g. HDMI-out to a monitor/TV) and mirrors the kiosk output onto it automatically — previously the external output was left inactive even when detected by X
+- **HDMI/external display mirroring:** any connected display beyond the primary (e.g. HDMI-out to a monitor/TV) is now mirrored automatically, both at kiosk login/boot and live on plug/unplug via a new udev-triggered `kiosk-hotplug.service` — previously the external output was left inactive even when detected by X
 - **Package install:** installer now also installs `net-tools` and `ncdu` (alongside the already-installed `curl` and `git`)
 - **Touch input fix (keyring):** added `--password-store=basic` to the Electron launch. Under LightDM autologin the GNOME keyring stays locked; when Chromium accessed it, the keyring unlock dialog grabbed all keyboard/touch input — the kiosk rendered fine but ignored every tap and keypress. This flag stops Electron from using the keyring, so the dialog never appears.
 - **Touch gesture fix (libinput):** any touch screen is now forced to the `libinput` driver via `/etc/X11/xorg.conf.d/99-finger-libinput.conf` (matched by hardware capability, so it works on any brand and never affects keyboards, mice, or the pen/stylus). Some drivers — notably `wacom` — only do single-touch pointer emulation and never pass real multitouch to Chromium, so 1-finger and 2-finger swipe gestures could not fire. libinput delivers proper multitouch.
@@ -1181,7 +1188,6 @@ See the LICENSE file in the repository for full terms.
 - Raspberry Pi support untested in production
 - No web-based configuration (CLI menu only)
 - Extended desktop not supported — additional connected displays (e.g. HDMI-out to a monitor/TV) are automatically **mirrored**, not extended
-- Display mirroring is applied at kiosk session start only — plugging in a display after boot requires restarting the display (`sudo systemctl restart lightdm`) or logging back in for it to pick up the new output
 
 ---
 

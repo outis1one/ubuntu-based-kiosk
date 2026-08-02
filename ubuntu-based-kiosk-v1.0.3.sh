@@ -3844,6 +3844,8 @@ complete_uninstall() {
     echo "[5/13] Removing scripts..."
     sudo rm -f /usr/local/bin/kiosk-*
     sudo rm -f /usr/local/bin/rtc-wake.sh
+    sudo rm -f /etc/udev/rules.d/99-kiosk-hotplug.rules
+    sudo udevadm control --reload-rules 2>/dev/null || true
 
     # Remove CUPS
     echo "[6/13] Removing CUPS..."
@@ -7539,7 +7541,47 @@ sleep 2
 /home/kiosk/kiosk-app/start.sh &
 AUTOSTART
     sudo chmod 750 "$KIOSK_HOME/.config/openbox/autostart"
-    
+
+    # HDMI/display hotplug: re-mirror any newly connected external display
+    # without waiting for the next login. Triggered by udev on DRM "change"
+    # events (monitor plugged/unplugged), which starts a oneshot systemd
+    # service that reapplies the same xrandr mirroring as the autostart script.
+    sudo tee /usr/local/bin/kiosk-hotplug.sh > /dev/null <<'EOF'
+#!/bin/bash
+# Give X a moment to finish enumerating the output after the hotplug event
+sleep 2
+
+PRIMARY_OUTPUT=$(sudo -u kiosk DISPLAY=:0 XAUTHORITY=/home/kiosk/.Xauthority xrandr --query 2>/dev/null | awk '/ primary/{print $1; exit}')
+if [ -n "$PRIMARY_OUTPUT" ]; then
+  for OUT in $(sudo -u kiosk DISPLAY=:0 XAUTHORITY=/home/kiosk/.Xauthority xrandr --query 2>/dev/null | awk '/ connected/{print $1}'); do
+    if [ "$OUT" != "$PRIMARY_OUTPUT" ]; then
+      sudo -u kiosk DISPLAY=:0 XAUTHORITY=/home/kiosk/.Xauthority xrandr --output "$OUT" --auto --same-as "$PRIMARY_OUTPUT" 2>/dev/null \
+        && logger "KIOSK: hotplug mirrored $OUT onto $PRIMARY_OUTPUT" \
+        || logger "KIOSK: hotplug mirror of $OUT failed"
+    fi
+  done
+fi
+EOF
+    sudo chmod +x /usr/local/bin/kiosk-hotplug.sh
+
+    sudo tee /etc/systemd/system/kiosk-hotplug.service > /dev/null <<'EOF'
+[Unit]
+Description=Kiosk Display Hotplug Handler
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/bin/kiosk-hotplug.sh
+StandardOutput=journal
+StandardError=journal
+EOF
+
+    sudo tee /etc/udev/rules.d/99-kiosk-hotplug.rules > /dev/null <<'EOF'
+SUBSYSTEM=="drm", ACTION=="change", TAG+="systemd", ENV{SYSTEMD_WANTS}="kiosk-hotplug.service"
+EOF
+
+    sudo systemctl daemon-reload
+    sudo udevadm control --reload-rules
+
     if lspci | grep -i "VGA.*Intel" >/dev/null 2>&1; then
         sudo mkdir -p /etc/X11/xorg.conf.d/
         sudo tee /etc/X11/xorg.conf.d/20-intel.conf > /dev/null <<'EOF'
