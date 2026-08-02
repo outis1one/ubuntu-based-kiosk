@@ -3953,7 +3953,8 @@ first_time_install() {
       libegl-mesa0 libegl1-mesa-dev libgles2-mesa-dev \
       pipewire pipewire-pulse pipewire-alsa wireplumber pipewire-audio-client-libraries alsa-utils libnotify-bin \
       gstreamer1.0-pipewire libspa-0.2-bluetooth \
-      systemd-timesyncd acpid xbindkeys xdotool python3-evdev unzip
+      systemd-timesyncd acpid xbindkeys xdotool python3-evdev unzip \
+      net-tools ncdu
     
     if lspci | grep -i "VGA.*Intel" >/dev/null 2>&1; then
         sudo apt install -y intel-gpu-tools xserver-xorg-video-intel \

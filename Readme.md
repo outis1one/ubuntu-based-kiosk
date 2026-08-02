@@ -317,6 +317,9 @@ Both can be used at the same time — they serve different purposes:
 - **build-essential** - GCC, make, etc.
 - **Python 3** with evdev for PTT
 - **jq** - JSON processing
+- **curl / git** - Downloading and version control
+- **net-tools** - Legacy networking utilities (ifconfig, netstat, etc.)
+- **ncdu** - Disk usage analyzer for troubleshooting
 
 ---
 
@@ -1119,6 +1122,7 @@ See the LICENSE file in the repository for full terms.
 **Current Version:** 1.0.3
 
 **Recent Updates (v1.0.3):**
+- **Package install:** installer now also installs `net-tools` and `ncdu` (alongside the already-installed `curl` and `git`)
 - **Touch input fix (keyring):** added `--password-store=basic` to the Electron launch. Under LightDM autologin the GNOME keyring stays locked; when Chromium accessed it, the keyring unlock dialog grabbed all keyboard/touch input — the kiosk rendered fine but ignored every tap and keypress. This flag stops Electron from using the keyring, so the dialog never appears.
 - **Touch gesture fix (libinput):** any touch screen is now forced to the `libinput` driver via `/etc/X11/xorg.conf.d/99-finger-libinput.conf` (matched by hardware capability, so it works on any brand and never affects keyboards, mice, or the pen/stylus). Some drivers — notably `wacom` — only do single-touch pointer emulation and never pass real multitouch to Chromium, so 1-finger and 2-finger swipe gestures could not fire. libinput delivers proper multitouch.
 - **Upgrade reliability:** `start.sh` is now refreshed on every upgrade alongside `main.js` and `preload.js`
