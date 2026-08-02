@@ -7392,6 +7392,17 @@ TOUCHCFG
 sudo -u "$KIOSK_USER" tee "$KIOSK_HOME/.config/openbox/autostart" > /dev/null <<'AUTOSTART'
 #!/bin/bash
 
+# Mirror any connected external display (e.g. HDMI-out to a monitor/TV) onto
+# the primary display so the kiosk content shows on both.
+PRIMARY_OUTPUT=$(xrandr --query | awk '/ primary/{print $1; exit}')
+if [ -n "$PRIMARY_OUTPUT" ]; then
+  for OUT in $(xrandr --query | awk '/ connected/{print $1}'); do
+    if [ "$OUT" != "$PRIMARY_OUTPUT" ]; then
+      xrandr --output "$OUT" --auto --same-as "$PRIMARY_OUTPUT" 2>/dev/null
+    fi
+  done
+fi
+
 # AGGRESSIVE DPMS disable - multiple methods
 xset s off
 xset s noblank
