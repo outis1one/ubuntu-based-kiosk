@@ -1,7 +1,42 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk v2.5.0                ###
+###   Ubuntu Based Kiosk v2.6.0                ###
 ################################################################################
+#
+# RELEASE v2.6.0 - Authelia Migrated; Real Config-Clobbering Bug Fixed
+# - New in ./install.sh: Authelia Auto-Login (menus/addon_authelia.sh) -
+#   encrypted SSO credentials (AES-256-CBC, key derived from this
+#   machine's /etc/machine-id via scrypt - same algorithm main.js
+#   decrypts with, verified by test with a real round-trip encrypt/
+#   decrypt, not just "some string came out"), plus the full Dockerized
+#   server-side setup instructions, viewable again later without
+#   reconfiguring.
+# - IMPORTANT bug found and fixed in lib/config.sh, NOT specific to
+#   Authelia or to this migration: save_config() did a full `jq -n`
+#   rebuild of config.json from known fields, exactly like the legacy
+#   script's save_config still does. Authelia's own write is a careful
+#   `. + {...}` merge that preserves everything - but the legacy
+#   configure_authelia() writes autheliaURL/autheliaUsername/
+#   autheliaEncryptedPassword into config.json via that merge, and
+#   *neither* the legacy save_config nor this project's own (before this
+#   fix) had any idea those three fields existed. The next time a user
+#   visited Sites, Touch Controls, Navigation, or Password Protection -
+#   all of which call save_config - their Authelia credentials were
+#   silently deleted. This is a real bug in the currently-shipping
+#   single-file installer, not introduced by this migration; ported
+#   faithfully into lib/config.sh's first version because no test
+#   happened to set an untracked field before calling save_config.
+#   Fixed here by changing save_config to merge its known fields onto
+#   whatever's already in config.json (jq `. + {...}`) instead of
+#   rebuilding the file from nothing, so any field this tool doesn't
+#   track - Authelia's three today, anything else tomorrow - survives
+#   automatically. autheliaURL/autheliaUsername/autheliaEncryptedPassword
+#   are also now tracked fields in their own right, same as every other
+#   config.json field this tool manages. NOTE: the equivalent bug still
+#   exists in this script's own save_config below, unfixed - see
+#   Readme.md ("Modular Management") for the open question of whether to
+#   backport this specific fix here independent of the wider migration,
+#   given it's a real, currently-shipping credential-loss bug.
 #
 # RELEASE v2.5.0 - First Addon Migrated (CUPS), Menu Restructured
 # - New in ./install.sh: CUPS Printing (menus/addon_cups.sh) - the first
@@ -226,7 +261,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="2.5.0"
+SCRIPT_VERSION="2.6.0"
 
 # Resolve the real path to this script file.
 # When piped (curl|bash or wget|bash), BASH_SOURCE[0] is a pipe descriptor,

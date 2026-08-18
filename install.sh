@@ -16,7 +16,8 @@
 #   Core Settings: Sites & Page Timing, Display & Interaction, Timezone,
 #     Hidden Site PIN, Password Protection & Lockout, WiFi,
 #     Power/Display/Quiet Hours.
-#   Addons: CUPS Printing (menus/addon_cups.sh).
+#   Addons: CUPS Printing (menus/addon_cups.sh), Authelia Auto-Login
+#     (menus/addon_authelia.sh).
 #   Advanced: Diagnostics (menus/diagnostics.sh - system status/logs/
 #     audio/network).
 #
@@ -52,6 +53,8 @@ source "$SCRIPT_DIR/menus/power_schedule.sh"
 source "$SCRIPT_DIR/menus/diagnostics.sh"
 # shellcheck source=menus/addon_cups.sh
 source "$SCRIPT_DIR/menus/addon_cups.sh"
+# shellcheck source=menus/addon_authelia.sh
+source "$SCRIPT_DIR/menus/addon_authelia.sh"
 
 ################################################################################
 # Preflight
@@ -115,8 +118,8 @@ core_settings_menu() {
 }
 
 addons_menu_builder() {
-    MENU_LABELS=("CUPS Printing")
-    MENU_HANDLERS=(addon_cups_menu)
+    MENU_LABELS=("CUPS Printing" "Authelia Auto-Login")
+    MENU_HANDLERS=(addon_cups_menu addon_authelia_menu)
 }
 
 addons_menu() {

@@ -1,6 +1,6 @@
 # Ubuntu Based Kiosk
 
-**Current Version:** 2.5.0 (check script header for latest version)
+**Current Version:** 2.6.0 (check script header for latest version)
 **Built with Claude Sonnet 4.6 AI assistance**
 **License:** GPL v3 - Keep derivatives open source
 **Repository:** https://github.com/outis1one/ubuntu-based-kiosk/
@@ -1209,6 +1209,9 @@ terminal menu and the web UI, so they can't drift apart).
   reconfigure for network access, complete uninstall (purge). The first
   Addon migrated — genuinely mutates real system state (apt packages,
   `/etc/cups`, ufw) rather than this project's own files.
+- `menus/addon_authelia.sh` — **Authelia Auto-Login** (Addons):
+  encrypted SSO credentials plus the server-side setup instructions.
+  Prompted the `save_config` merge fix above.
 - `install.sh` — entry point for the modular tool, now grouped **Core
   Settings / Addons / Advanced** like the legacy menu. Run it against an
   *already-installed* kiosk:
@@ -1221,7 +1224,7 @@ terminal menu and the web UI, so they can't drift apart).
 **Honest status:** this does not yet replace first-time installation, or
 most of the old installer. `ubuntu-based-kiosk.sh` is still ~12,000
 lines and still contains its own unremoved, unmodified copies of every
-menu above (plus Upgrade, Reinstall, Uninstall, 4 more Addons, and the
+menu above (plus Upgrade, Reinstall, Uninstall, 3 more Addons, and the
 other 8 Advanced items — none of that has moved yet). Both copies
 coexist deliberately: the old ones stay until enough
 of Core Settings/Addons/Advanced is migrated to
@@ -1230,13 +1233,26 @@ Migration continues one `menus/*.sh` file at a time; first-time
 installation itself is the last and largest piece to move, if it moves
 at all.
 
+**Open question:** the config-clobbering bug fixed in `lib/config.sh`
+(v2.6.0 — `save_config` silently deleting fields it doesn't know about,
+like Authelia's credentials, on the next unrelated save) has the exact
+same shape in `ubuntu-based-kiosk.sh`'s own `save_config`, unfixed. It's
+a real bug in the currently-shipping single-file installer, independent
+of whether the rest of that menu ever gets migrated. Worth deciding
+separately whether to backport just that fix into the legacy script now
+rather than waiting for a full migration pass.
+
 ---
 
 ## Project Status & Future Plans
 
-**Current Version:** 2.5.0
+**Current Version:** 2.6.0
 
-**Recent Updates (v2.5.0):**
+**Recent Updates (v2.6.0):**
+- **Authelia Auto-Login migrated** — encrypted SSO credentials (same AES-256-CBC/scrypt algorithm `main.js` decrypts with, verified by a real encrypt→decrypt round trip in testing) plus the full server-side Docker setup instructions, viewable again later without reconfiguring.
+- **Important bug found and fixed, not specific to Authelia:** `save_config()` did a full rebuild of `config.json` from known fields — exactly like the legacy script's `save_config` still does. Authelia's own write is a careful merge that preserves everything else, but the *next* save from Sites, Touch Controls, Navigation, or Password Protection would silently delete the Authelia credentials, since none of those knew the three Authelia fields existed. **This is a real bug in the currently-shipping single-file installer**, not introduced by this migration. Fixed in `lib/config.sh` by changing `save_config` to merge its known fields onto whatever's already on disk instead of rebuilding from nothing, so any untracked field — Authelia's three today, anything else tomorrow — survives automatically. The equivalent bug still exists, unfixed, in `ubuntu-based-kiosk.sh`'s own `save_config` — see "Modular Management" below.
+
+**Previous (v2.5.0):**
 - **First Addon migrated:** CUPS Printing — install/reconfigure/complete uninstall, in `./install.sh`. Genuinely mutates real system state (`apt install`/`remove --purge`, `/etc/cups`, `ufw`) at fixed paths CUPS itself doesn't let us relocate, so every test uses full command-level `sudo` stubbing rather than the scratch-directory approach used for this project's own files.
 - **Menu restructured:** `install.sh`'s top level is now grouped Core Settings / Addons / Advanced, matching the legacy tool, instead of one flat list — done now while it's cheap, ahead of the list getting unwieldy.
 - **Bug fix:** a "wait for service to start" retry loop used a bare `cmd1 && cmd2 && break` as its body — that's not made safe by being inside a loop; a bare `&&`/`||` list used as a standalone statement is fully subject to `set -e`, and the first command failing on an early iteration (near-certain right after a fresh install) would have killed the whole session. Restored the `if cmd1 && cmd2; then break; fi` form.

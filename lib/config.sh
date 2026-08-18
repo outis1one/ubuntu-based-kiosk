@@ -60,6 +60,9 @@ LOCKOUT_AT_TIME=""
 LOCKOUT_ACTIVE_START=""
 LOCKOUT_ACTIVE_END=""
 REQUIRE_PASSWORD_ON_BOOT="false"
+AUTHELIA_URL=""
+AUTHELIA_USERNAME=""
+AUTHELIA_ENCRYPTED_PASSWORD=""
 
 kiosk_user_exists() {
     id "$KIOSK_USER" &>/dev/null
@@ -125,6 +128,10 @@ load_existing_config() {
 
     boot_password=$(sudo -u "$KIOSK_USER" jq -r '.requirePasswordOnBoot // false' "$CONFIG_PATH" 2>/dev/null)
     [[ "$boot_password" == "true" ]] && REQUIRE_PASSWORD_ON_BOOT="true" || REQUIRE_PASSWORD_ON_BOOT="false"
+
+    AUTHELIA_URL=$(sudo -u "$KIOSK_USER" jq -r '.autheliaURL // ""' "$CONFIG_PATH" 2>/dev/null || echo "")
+    AUTHELIA_USERNAME=$(sudo -u "$KIOSK_USER" jq -r '.autheliaUsername // ""' "$CONFIG_PATH" 2>/dev/null || echo "")
+    AUTHELIA_ENCRYPTED_PASSWORD=$(sudo -u "$KIOSK_USER" jq -r '.autheliaEncryptedPassword // ""' "$CONFIG_PATH" 2>/dev/null || echo "")
 }
 
 # Write every bash global back out to config.json, then offer to reload the
@@ -159,7 +166,28 @@ save_config() {
     local boot_password_json="false"
     [[ "$REQUIRE_PASSWORD_ON_BOOT" == "true" ]] && boot_password_json="true"
 
-    jq -n \
+    # Merge onto whatever's already in config.json rather than rebuilding
+    # the file from nothing. The legacy save_config did a full `jq -n`
+    # rebuild listing every known field - any field it doesn't know about
+    # (e.g. Authelia's autheliaURL/autheliaUsername/
+    # autheliaEncryptedPassword, written by its own careful `. + {...}`
+    # merge) gets silently DELETED the next time any other menu that
+    # calls save_config runs. Real, currently-shipping bug in the legacy
+    # script, not unique to this migration - ported faithfully into this
+    # file's first version because no test happened to set an untracked
+    # field first. `. + {known fields...}` below preserves anything this
+    # tool doesn't track while still fully replacing every field it does
+    # (including tabs, via the same array-rebuild loop as before) - jq's
+    # `+` on objects takes the right-hand value for any key present on
+    # both sides, so a fully-specified `tabs` here still discards a
+    # deleted tab rather than merging old and new.
+    local existing="{}"
+    if sudo -u "$KIOSK_USER" test -f "$CONFIG_PATH" 2>/dev/null; then
+        existing=$(sudo -u "$KIOSK_USER" cat "$CONFIG_PATH" 2>/dev/null)
+        echo "$existing" | jq empty 2>/dev/null || existing="{}"
+    fi
+
+    echo "$existing" | jq \
         --argjson autoswitch true \
         --argjson enableTouch true \
         --argjson dualSwipe "$dual_json" \
@@ -177,7 +205,10 @@ save_config() {
         --arg lockoutActiveStart "${LOCKOUT_ACTIVE_START:-}" \
         --arg lockoutActiveEnd "${LOCKOUT_ACTIVE_END:-}" \
         --argjson requirePasswordOnBoot "$boot_password_json" \
-        '{autoswitch:$autoswitch,enableTouch:$enableTouch,dualSwipe:$dualSwipe,swipeMode:$swipeMode,allowNavigation:$allowNavigation,homeTabIndex:$homeTabIndex,inactivityTimeout:$inactivityTimeout,enablePauseButton:$enablePauseButton,enableKeyboardButton:$enableKeyboardButton,enableNavButton:$enableNavButton,enablePasswordProtection:$enablePasswordProtection,lockoutPassword:$lockoutPassword,lockoutTimeout:$lockoutTimeout,lockoutAtTime:$lockoutAtTime,lockoutActiveStart:$lockoutActiveStart,lockoutActiveEnd:$lockoutActiveEnd,requirePasswordOnBoot:$requirePasswordOnBoot,tabs:[]}' > "$tmp"
+        --arg autheliaURL "${AUTHELIA_URL:-}" \
+        --arg autheliaUsername "${AUTHELIA_USERNAME:-}" \
+        --arg autheliaEncryptedPassword "${AUTHELIA_ENCRYPTED_PASSWORD:-}" \
+        '. + {autoswitch:$autoswitch,enableTouch:$enableTouch,dualSwipe:$dualSwipe,swipeMode:$swipeMode,allowNavigation:$allowNavigation,homeTabIndex:$homeTabIndex,inactivityTimeout:$inactivityTimeout,enablePauseButton:$enablePauseButton,enableKeyboardButton:$enableKeyboardButton,enableNavButton:$enableNavButton,enablePasswordProtection:$enablePasswordProtection,lockoutPassword:$lockoutPassword,lockoutTimeout:$lockoutTimeout,lockoutAtTime:$lockoutAtTime,lockoutActiveStart:$lockoutActiveStart,lockoutActiveEnd:$lockoutActiveEnd,requirePasswordOnBoot:$requirePasswordOnBoot,autheliaURL:$autheliaURL,autheliaUsername:$autheliaUsername,autheliaEncryptedPassword:$autheliaEncryptedPassword,tabs:[]}' > "$tmp"
 
     if [[ ${#URLS[@]} -gt 0 ]]; then
         for idx in "${!URLS[@]}"; do
