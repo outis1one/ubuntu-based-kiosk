@@ -1168,6 +1168,40 @@ See the LICENSE file in the repository for full terms.
 
 ---
 
+## Modular Management (new, in progress)
+
+The 12,000+ line single-file installer works, but every menu lives in the
+same file as everything else, which makes small changes risky. We're
+pulling the *menu system* out into small, independently editable files as
+groundwork for the planned web-based GUI (same modules will back both the
+terminal menu and the web UI, so they can't drift apart).
+
+**What's here so far:**
+- `lib/menu.sh` — a generic numbered-menu framework (auto-numbers entries,
+  always offers `0` to exit/return, validated input helpers). Menu files
+  just declare their labels and handler functions; they don't hand-roll
+  `echo`/`case` loops.
+- `lib/config.sh` — the single place that reads/writes `config.json`.
+- `menus/sites.sh` — **Sites & Page Timing**, fully migrated: add, edit,
+  delete, and reorder pages, and set the duration/timing mode
+  (auto-rotate / manual / hidden) and home page — as a working proof of
+  concept for this approach.
+- `install.sh` — entry point for the modular tool. Run it against an
+  *already-installed* kiosk:
+  ```bash
+  git clone https://github.com/outis1one/ubuntu-based-kiosk/
+  cd ubuntu-based-kiosk
+  ./install.sh
+  ```
+
+This does **not** yet replace first-time installation — that's still the
+single-file script above (`Quick Install`). The rest of Core
+Settings/Addons/Advanced will move into `menus/*.sh` the same way, one
+menu at a time, and `install.sh` will eventually take over the whole
+`show_main_menu` from the legacy script.
+
+---
+
 ## Project Status & Future Plans
 
 **Current Version:** 1.0.3
