@@ -1,7 +1,24 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk v1.0.3                ###
+###   Ubuntu Based Kiosk v2.0.0                ###
 ################################################################################
+#
+# RELEASE v2.0.0 - Modular Management & Unversioned Filename
+# - New git-clone-based management path: lib/menu.sh (reusable numbered-menu
+#   framework) + lib/config.sh (single config.json load/save) + menus/*.sh,
+#   run via ./install.sh against an already-installed kiosk. Sites & Page
+#   Timing and Display & Interaction are migrated; the rest of Core
+#   Settings/Addons/Advanced still live here and will move over the same
+#   way, one menu at a time. See Readme.md ("Modular Management").
+# - Fixed: the old Sites menu could save config.json without first loading
+#   swipe/navigation/lockout settings, silently resetting them to defaults.
+# - Fixed: reordering sites had an off-by-one that left the moved site one
+#   slot short of the requested position.
+# - This script is now distributed as ubuntu-based-kiosk.sh (no version
+#   number in the filename) so it can be updated in place; released
+#   versions are tracked via git history and this changelog instead.
+#   Older ubuntu-based-kiosk-v*.sh / install_kiosk_*.sh files remain in the
+#   repo as archived releases.
 #
 # RELEASE v1.0.3 - Touch Screen Detection & Upgrade Reliability
 # - Authelia auto-login addon (Addons menu → 5)
@@ -68,7 +85,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="1.0.3"
+SCRIPT_VERSION="2.0.0"
 
 # Resolve the real path to this script file.
 # When piped (curl|bash or wget|bash), BASH_SOURCE[0] is a pipe descriptor,

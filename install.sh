@@ -10,8 +10,8 @@
 # lib/ and menus/, so a change to (say) the Sites menu can't accidentally
 # break WiFi setup or the uninstaller three thousand lines away.
 #
-# Today this only wires up the Sites & Page Timing menu (menus/sites.sh)
-# as a working proof of concept. The rest of Core Settings/Addons/Advanced
+# Today this wires up Sites & Page Timing (menus/sites.sh) and Display &
+# Interaction (menus/display.sh). The rest of Core Settings/Addons/Advanced
 # will move over the same way, one menus/*.sh file at a time.
 #
 # Usage (once the kiosk has already been installed):
@@ -30,6 +30,8 @@ source "$SCRIPT_DIR/lib/menu.sh"
 source "$SCRIPT_DIR/lib/config.sh"
 # shellcheck source=menus/sites.sh
 source "$SCRIPT_DIR/menus/sites.sh"
+# shellcheck source=menus/display.sh
+source "$SCRIPT_DIR/menus/display.sh"
 
 ################################################################################
 # Preflight
@@ -66,8 +68,8 @@ fi
 ################################################################################
 
 main_menu_builder() {
-    MENU_LABELS=("Sites & Page Timing")
-    MENU_HANDLERS=(sites_menu)
+    MENU_LABELS=("Sites & Page Timing" "Display & Interaction")
+    MENU_HANDLERS=(sites_menu display_menu)
 }
 
 main_menu_status() {

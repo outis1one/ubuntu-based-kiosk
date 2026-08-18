@@ -1,6 +1,6 @@
 # Ubuntu Based Kiosk
 
-**Current Version:** 1.0.3 (check script header for latest version)
+**Current Version:** 2.0.0 (check script header for latest version)
 **Built with Claude Sonnet 4.6 AI assistance**
 **License:** GPL v3 - Keep derivatives open source
 **Repository:** https://github.com/outis1one/ubuntu-based-kiosk/
@@ -47,12 +47,9 @@ Home/office kiosk for reusing old hardware, displaying:
 # Configure WiFi if no ethernet available
 # Enable SSH during installation
 
-# Download and run the latest installer
-LATEST=$(curl -fsSL https://api.github.com/repos/outis1one/ubuntu-based-kiosk/contents \
-  | grep -oP 'ubuntu-based-kiosk-v[0-9.]+\.sh' \
-  | grep -v beta | sort -V | tail -1)
-wget "https://github.com/outis1one/ubuntu-based-kiosk/raw/main/$LATEST"
-chmod +x "$LATEST" && ./"$LATEST"
+# Download and run the installer
+wget https://github.com/outis1one/ubuntu-based-kiosk/raw/main/ubuntu-based-kiosk.sh
+chmod +x ubuntu-based-kiosk.sh && ./ubuntu-based-kiosk.sh
 ```
 
 The installer will guide you through configuration during setup.
@@ -68,13 +65,10 @@ If the kiosk machine can't reach GitHub directly (no browser, restrictive proxy,
 **On a machine with internet access:**
 
 ```bash
-# Option A: download just the latest installer script
-LATEST=$(curl -fsSL https://api.github.com/repos/outis1one/ubuntu-based-kiosk/contents \
-  | grep -oP 'ubuntu-based-kiosk-v[0-9.]+\.sh' \
-  | grep -v beta | sort -V | tail -1)
-wget "https://github.com/outis1one/ubuntu-based-kiosk/raw/main/$LATEST"
+# Option A: download just the installer script
+wget https://github.com/outis1one/ubuntu-based-kiosk/raw/main/ubuntu-based-kiosk.sh
 
-# Option B: download the whole repo as a ZIP (includes all installer versions and addon scripts)
+# Option B: download the whole repo as a ZIP (includes install.sh, addon scripts, and older archived installer versions)
 wget https://github.com/outis1one/ubuntu-based-kiosk/archive/refs/heads/main.zip
 unzip main.zip
 ```
@@ -83,8 +77,8 @@ Copy the downloaded `.sh` file (or the extracted ZIP contents) to a USB drive, t
 
 ```bash
 # Mount the USB drive and copy the script over, then:
-chmod +x ubuntu-based-kiosk-v*.sh
-./ubuntu-based-kiosk-v*.sh
+chmod +x ubuntu-based-kiosk.sh
+./ubuntu-based-kiosk.sh
 ```
 
 The kiosk machine still needs a working internet connection (ethernet, or WiFi configured during Ubuntu install) for the script to complete.
@@ -160,7 +154,7 @@ After running the addon it prints the full server-side setup, but the summary is
 
 ```bash
 ssh user@kiosk-machine
-./$(ls ubuntu-based-kiosk-v*.sh | sort -V | tail -1)
+./ubuntu-based-kiosk.sh
 # Addons → 5. Authelia Auto-Login
 # Enter your Authelia URL, username, and password when prompted
 ```
@@ -591,7 +585,7 @@ smb://WORKGROUP/COMPUTER/PrinterName
 
 ```bash
 # Run installer script again to access menu
-./$(ls ubuntu-based-kiosk-v*.sh | sort -V | tail -1)
+./ubuntu-based-kiosk.sh
 
 # Menu structure:
 # 1. Core Settings - Sites, WiFi, schedules, passwords, full reinstall, complete uninstall
@@ -606,7 +600,7 @@ The Easy Asterisk Intercom addon provides voice communication capabilities to yo
 
 **Access the addon menu:**
 ```bash
-./$(ls ubuntu-based-kiosk-v*.sh | sort -V | tail -1)
+./ubuntu-based-kiosk.sh
 # Select: 2) Addons
 # Then: 4) Easy Asterisk Intercom
 ```
@@ -636,7 +630,7 @@ asterisk -rvvv
 systemctl restart asterisk
 
 # Configure intercom (rerun installation to update)
-./$(ls ubuntu-based-kiosk-v*.sh | sort -V | tail -1)
+./ubuntu-based-kiosk.sh
 # Select: 2) Addons → 4) Easy Asterisk Intercom
 ```
 
@@ -1020,7 +1014,7 @@ Full system cleanup that removes all kiosk components and restores the system to
 **Access:**
 ```bash
 # Core Settings menu → option 11
-./$(ls ubuntu-based-kiosk-v*.sh | sort -V | tail -1)
+./ubuntu-based-kiosk.sh
 # Choose: Core Settings → Complete Uninstall
 ```
 
@@ -1186,6 +1180,10 @@ terminal menu and the web UI, so they can't drift apart).
   delete, and reorder pages, and set the duration/timing mode
   (auto-rotate / manual / hidden) and home page — as a working proof of
   concept for this approach.
+- `menus/display.sh` — **Display & Interaction**: touch gesture mode,
+  link navigation security, and the on-screen pause/keyboard/navigation
+  button toggles. A second proof of concept covering a different menu
+  shape (settings toggles vs. the list CRUD in Sites).
 - `install.sh` — entry point for the modular tool. Run it against an
   *already-installed* kiosk:
   ```bash
@@ -1204,9 +1202,15 @@ menu at a time, and `install.sh` will eventually take over the whole
 
 ## Project Status & Future Plans
 
-**Current Version:** 1.0.3
+**Current Version:** 2.0.0
 
-**Recent Updates (v1.0.3):**
+**Recent Updates (v2.0.0):**
+- **Modular management path:** new `lib/menu.sh` (reusable numbered-menu framework: auto-numbered entries, `0` always exits/returns) and `lib/config.sh` (single load/save for `config.json`), with menus migrating into `menus/*.sh` one at a time — **Sites & Page Timing** and **Display & Interaction** are migrated so far. Run via `./install.sh` after cloning the repo, against an already-installed kiosk (see "Modular Management" below). Groundwork for the planned web-based GUI, which will share this same `lib/config.sh` layer.
+- **Bug fix:** the old Sites menu could save `config.json` without first loading swipe/navigation/lockout settings, silently resetting them to script defaults.
+- **Bug fix:** reordering sites had an off-by-one that left the moved site one slot short of the requested position.
+- **Renamed installer:** the main script is now `ubuntu-based-kiosk.sh` (no version number in the filename), updated in place going forward. Released versions are tracked via git history and this changelog instead of the filename; older `ubuntu-based-kiosk-v*.sh` / `install_kiosk_*.sh` files remain in the repo as archived releases.
+
+**Previous (v1.0.3):**
 - **HDMI/external display mirroring:** any connected display beyond the primary (e.g. HDMI-out to a monitor/TV) is now mirrored automatically at the primary's exact resolution — generating a custom `cvt` mode if the external display doesn't natively list it — both at kiosk login/boot and live on plug/unplug via a new udev-triggered `kiosk-hotplug.service`. Previously the external output was left inactive even when detected by X, and would otherwise mirror at its own native resolution instead of matching the kiosk panel
 - **HDMI audio routing:** audio now follows the same hotplug event — the default PipeWire sink automatically switches to the HDMI audio output when an external display is connected/mirrored, and back to the built-in sink when it's disconnected (`kiosk-audio-route.sh`)
 - **Package install:** installer now also installs `net-tools` and `ncdu` (alongside the already-installed `curl` and `git`)
