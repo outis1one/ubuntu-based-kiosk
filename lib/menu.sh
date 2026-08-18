@@ -57,6 +57,33 @@ get_ip_address() {
     fi
 }
 
+# "WireGuard: 10.x.x.x | Tailscale: 100.x.x.x" for whichever VPN clients
+# are installed and connected, or "None" if none are.
+get_vpn_ips() {
+    local vpn_info=""
+
+    if command -v wg &>/dev/null && sudo wg show 2>/dev/null | grep -q interface; then
+        local wg_ip
+        wg_ip=$(sudo wg show all | grep "allowed ips" | head -1 | awk '{print $3}' | cut -d'/' -f1)
+        [[ -n "$wg_ip" ]] && vpn_info="${vpn_info}WireGuard: $wg_ip | "
+    fi
+
+    if command -v tailscale &>/dev/null; then
+        local ts_ip
+        ts_ip=$(tailscale ip -4 2>/dev/null)
+        [[ -n "$ts_ip" ]] && vpn_info="${vpn_info}Tailscale: $ts_ip | "
+    fi
+
+    if command -v netbird &>/dev/null; then
+        local nb_ip
+        nb_ip=$(netbird status 2>/dev/null | grep "NetBird IP:" | awk '{print $3}')
+        [[ -n "$nb_ip" ]] && vpn_info="${vpn_info}Netbird: $nb_ip | "
+    fi
+
+    vpn_info="${vpn_info% | }"
+    [[ -n "$vpn_info" ]] && echo "$vpn_info" || echo "None"
+}
+
 pause() {
     read -r -p "Press Enter to continue..."
 }

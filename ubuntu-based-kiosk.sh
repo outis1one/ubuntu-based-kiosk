@@ -1,7 +1,38 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk v2.3.0                ###
+###   Ubuntu Based Kiosk v2.4.0                ###
 ################################################################################
+#
+# RELEASE v2.4.0 - Diagnostics Migrated
+# - New in ./install.sh: Diagnostics (menus/diagnostics.sh) - system
+#   status, log viewing (Electron/LightDM/journal), an 8-step audio
+#   diagnostic, and a ping+DNS network test, pulled from the legacy
+#   Advanced menu. Everything here is read-only except one optional
+#   "play a test sound?" prompt - a deliberate change of pace after
+#   Sites/WiFi/Power, with no destructive-action risk to design around.
+#   Manual Electron Update, Factory Reset, Export/Import Settings,
+#   Emergency Hotspot, and Fix Blank Screen are staying in the legacy
+#   script for now - they're mutating/destructive, and some share
+#   Upgrade's coupling to the legacy script's own self-extraction
+#   mechanism (see v2.3.0 below for why Upgrade/Reinstall/Uninstall
+#   aren't migrated either).
+# - Fixed (set -e safety, same class as v2.1.0/v2.3.0): every diagnostic
+#   command whose failure is actually the expected, common case - no
+#   lightdm running, no audio hardware, no network, missing log files,
+#   `ping`/`nslookup` not even installed - was a bare unguarded
+#   statement that would have crashed the whole session instead of
+#   reporting "not found" and moving on. A diagnostics tool has to be
+#   the most crash-proof code in the project, since it exists to run
+#   *when something is already broken*; every one of these now reports
+#   and continues instead. Also worth noting for future menus: writing
+#   `local var;` and `var=$(cmd)` as separate statements (good practice,
+#   and how earlier real bugs in this migration were caught) removes an
+#   accidental safety net bash's `local x=$(cmd)` has on one line - that
+#   form masks the substitution's exit code with `local`'s own
+#   always-success status. Splitting them is correct, but each split
+#   assignment needs its own explicit `|| true` (or real fallback) where
+#   a failure is expected and non-fatal, rather than relying on that
+#   quirk by accident.
 #
 # RELEASE v2.3.0 - WiFi and Power/Display/Quiet Hours Migrated
 # - New in ./install.sh: WiFi (menus/wifi.sh) and Power/Display/Quiet
@@ -157,7 +188,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="2.3.0"
+SCRIPT_VERSION="2.4.0"
 
 # Resolve the real path to this script file.
 # When piped (curl|bash or wget|bash), BASH_SOURCE[0] is a pipe descriptor,

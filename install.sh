@@ -16,7 +16,8 @@
 # Interaction (menus/display.sh), Timezone (menus/timezone.sh), Hidden
 # Site PIN (menus/hidden_pin.sh), Password Protection & Lockout
 # (menus/lockout.sh), WiFi (menus/wifi.sh), Power/Display/Quiet Hours
-# (menus/power_schedule.sh).
+# (menus/power_schedule.sh), Diagnostics (menus/diagnostics.sh - system
+# status/logs/audio/network from the legacy Advanced menu).
 #
 # Usage (once the kiosk has already been installed):
 #   git clone <repo>
@@ -46,6 +47,8 @@ source "$SCRIPT_DIR/menus/lockout.sh"
 source "$SCRIPT_DIR/menus/wifi.sh"
 # shellcheck source=menus/power_schedule.sh
 source "$SCRIPT_DIR/menus/power_schedule.sh"
+# shellcheck source=menus/diagnostics.sh
+source "$SCRIPT_DIR/menus/diagnostics.sh"
 
 ################################################################################
 # Preflight
@@ -90,6 +93,7 @@ main_menu_builder() {
         "Password Protection & Lockout"
         "WiFi"
         "Power/Display/Quiet Hours"
+        "Diagnostics"
     )
     MENU_HANDLERS=(
         sites_menu
@@ -99,6 +103,7 @@ main_menu_builder() {
         lockout_menu
         wifi_menu
         power_schedule_menu
+        diagnostics_menu
     )
 }
 

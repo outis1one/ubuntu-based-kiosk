@@ -1,6 +1,6 @@
 # Ubuntu Based Kiosk
 
-**Current Version:** 2.3.0 (check script header for latest version)
+**Current Version:** 2.4.0 (check script header for latest version)
 **Built with Claude Sonnet 4.6 AI assistance**
 **License:** GPL v3 - Keep derivatives open source
 **Repository:** https://github.com/outis1one/ubuntu-based-kiosk/
@@ -1202,6 +1202,9 @@ terminal menu and the web UI, so they can't drift apart).
   shutdown (+ RTC wake where available), display on/off, quiet-hours
   audio muting, and an Electron reload timer, each as systemd timers.
   Can power the physical machine off and on a schedule.
+- `menus/diagnostics.sh` — **Diagnostics**: system status, log viewing,
+  audio diagnostics, network test — 4 of the legacy Advanced menu's 12
+  items, all read-only.
 - `install.sh` — entry point for the modular tool. Run it against an
   *already-installed* kiosk:
   ```bash
@@ -1213,8 +1216,9 @@ terminal menu and the web UI, so they can't drift apart).
 **Honest status:** this does not yet replace first-time installation, or
 most of the old installer. `ubuntu-based-kiosk.sh` is still ~12,000
 lines and still contains its own unremoved, unmodified copies of every
-menu above (plus Upgrade, Reinstall, Uninstall, all Addons, and all of
-Advanced — none of that has moved yet). Both copies coexist deliberately: the old ones stay until enough
+menu above (plus Upgrade, Reinstall, Uninstall, all Addons, and the
+other 8 Advanced items — none of that has moved yet). Both copies
+coexist deliberately: the old ones stay until enough
 of Core Settings/Addons/Advanced is migrated to
 retire them in one pass, rather than leaving the legacy menu half-wired.
 Migration continues one `menus/*.sh` file at a time; first-time
@@ -1225,9 +1229,14 @@ at all.
 
 ## Project Status & Future Plans
 
-**Current Version:** 2.3.0
+**Current Version:** 2.4.0
 
-**Recent Updates (v2.3.0):**
+**Recent Updates (v2.4.0):**
+- **Diagnostics migrated** — system status, log viewing (Electron/LightDM/journal), an 8-step audio diagnostic, and a ping+DNS network test, from the legacy Advanced menu. A change of pace: everything here is read-only, no destructive-action risk to manage.
+- **Bug fix (set -e safety):** every diagnostic whose failure is the expected case — no lightdm running, no audio hardware, no network, missing logs, `ping`/`nslookup` not even installed — was a bare unguarded statement that would have crashed the whole session instead of reporting "not found" and moving on. Fixed throughout; a diagnostics tool has to survive exactly the broken states it exists to diagnose.
+- Manual Electron Update, Factory Reset, Export/Import Settings, Emergency Hotspot, and Fix Blank Screen are staying in the legacy script for now — destructive/mutating, and some share Upgrade's coupling to the legacy script's self-extraction mechanism (see v2.3.0 notes).
+
+**Previous (v2.3.0):**
 - **WiFi and Power/Display/Quiet Hours migrated** — by far the riskiest menus tackled so far. WiFi rewrites live netplan config and, over SSH, can disconnect the session configuring it; power scheduling can shut the physical machine down and wake it via RTC. Every legacy safety mechanism is preserved exactly: netplan backup, 60-second SSH watchdog, restore-on-failure for WiFi; RTC availability detection for power scheduling.
 - **Bug fix:** the legacy menu refused to open "Configure power schedule" at all without RTC hardware, even though shutdown-only scheduling never needed it.
 - **Bug fix:** none of the six HH:MM time prompts across these menus were format-validated before — a typo silently produced a broken schedule. All now go through the same `ask_time` validator as everywhere else.
