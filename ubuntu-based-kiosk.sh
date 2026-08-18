@@ -1,7 +1,45 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk v2.4.0                ###
+###   Ubuntu Based Kiosk v2.5.0                ###
 ################################################################################
+#
+# RELEASE v2.5.0 - First Addon Migrated (CUPS), Menu Restructured
+# - New in ./install.sh: CUPS Printing (menus/addon_cups.sh) - the first
+#   Addon migrated. Install/reconfigure/complete uninstall (purge),
+#   genuinely mutating real system state (apt install/remove --purge,
+#   /etc/cups, ufw) at fixed paths CUPS itself doesn't let us relocate -
+#   unlike the systemd/cron/bin paths this project controls, there is no
+#   scratch equivalent for a real apt-managed subsystem's own file
+#   layout, so every test uses full command-level `sudo` stubbing
+#   instead. Only the polkit rule's directory is parameterized
+#   ($POLKIT_DIR, since that one is ours to place).
+# - install.sh's top-level menu is now grouped the same way the legacy
+#   menu groups things - Core Settings / Addons / Advanced - instead of
+#   one flat list, ahead of that list getting unwieldy as more Addons
+#   and Advanced items migrate in.
+# - Two bugs caught and fixed before they ever shipped, both instructive
+#   beyond this one file:
+#   - A "wait for service to start" retry loop used a bare `cmd1 &&
+#     cmd2 && break` as its body. That's not safe merely because it's
+#     inside a loop - a bare &&/|| list used as a standalone statement
+#     (not the condition of if/while/until) is fully subject to set -e,
+#     and cmd1 failing on an early iteration (near-certain right after
+#     a fresh install) would have killed the whole session. Restored
+#     the `if cmd1 && cmd2; then break; fi` form the legacy script
+#     already used correctly, rather than "simplifying" it away.
+#   - Resolved real uncertainty about how far run_menu's `handler ||
+#     true` guard (added in v2.1.0) actually reaches: verified with a
+#     minimal isolated test that it protects against a bare failing
+#     command no matter how many function calls deep it occurs - bash's
+#     errexit exemption for the left side of `||` covers the entire
+#     evaluation, not just the immediately-called function. So the
+#     session-crash risk this project has been chasing since v2.1.0 is
+#     already covered end-to-end by that one fix. Per-statement guards
+#     (`|| true`, explicit `if`) still matter for a different reason:
+#     without them a deep failure silently bubbles up past the menu
+#     that's actually responsible for it to wherever the nearest `||
+#     true` happens to catch it, which may be several menu levels
+#     higher than where the user actually was.
 #
 # RELEASE v2.4.0 - Diagnostics Migrated
 # - New in ./install.sh: Diagnostics (menus/diagnostics.sh) - system
@@ -188,7 +226,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="2.4.0"
+SCRIPT_VERSION="2.5.0"
 
 # Resolve the real path to this script file.
 # When piped (curl|bash or wget|bash), BASH_SOURCE[0] is a pipe descriptor,

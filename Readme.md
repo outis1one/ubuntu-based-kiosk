@@ -1,6 +1,6 @@
 # Ubuntu Based Kiosk
 
-**Current Version:** 2.4.0 (check script header for latest version)
+**Current Version:** 2.5.0 (check script header for latest version)
 **Built with Claude Sonnet 4.6 AI assistance**
 **License:** GPL v3 - Keep derivatives open source
 **Repository:** https://github.com/outis1one/ubuntu-based-kiosk/
@@ -1205,7 +1205,12 @@ terminal menu and the web UI, so they can't drift apart).
 - `menus/diagnostics.sh` — **Diagnostics**: system status, log viewing,
   audio diagnostics, network test — 4 of the legacy Advanced menu's 12
   items, all read-only.
-- `install.sh` — entry point for the modular tool. Run it against an
+- `menus/addon_cups.sh` — **CUPS Printing** (Addons): install,
+  reconfigure for network access, complete uninstall (purge). The first
+  Addon migrated — genuinely mutates real system state (apt packages,
+  `/etc/cups`, ufw) rather than this project's own files.
+- `install.sh` — entry point for the modular tool, now grouped **Core
+  Settings / Addons / Advanced** like the legacy menu. Run it against an
   *already-installed* kiosk:
   ```bash
   git clone https://github.com/outis1one/ubuntu-based-kiosk/
@@ -1216,7 +1221,7 @@ terminal menu and the web UI, so they can't drift apart).
 **Honest status:** this does not yet replace first-time installation, or
 most of the old installer. `ubuntu-based-kiosk.sh` is still ~12,000
 lines and still contains its own unremoved, unmodified copies of every
-menu above (plus Upgrade, Reinstall, Uninstall, all Addons, and the
+menu above (plus Upgrade, Reinstall, Uninstall, 4 more Addons, and the
 other 8 Advanced items — none of that has moved yet). Both copies
 coexist deliberately: the old ones stay until enough
 of Core Settings/Addons/Advanced is migrated to
@@ -1229,9 +1234,15 @@ at all.
 
 ## Project Status & Future Plans
 
-**Current Version:** 2.4.0
+**Current Version:** 2.5.0
 
-**Recent Updates (v2.4.0):**
+**Recent Updates (v2.5.0):**
+- **First Addon migrated:** CUPS Printing — install/reconfigure/complete uninstall, in `./install.sh`. Genuinely mutates real system state (`apt install`/`remove --purge`, `/etc/cups`, `ufw`) at fixed paths CUPS itself doesn't let us relocate, so every test uses full command-level `sudo` stubbing rather than the scratch-directory approach used for this project's own files.
+- **Menu restructured:** `install.sh`'s top level is now grouped Core Settings / Addons / Advanced, matching the legacy tool, instead of one flat list — done now while it's cheap, ahead of the list getting unwieldy.
+- **Bug fix:** a "wait for service to start" retry loop used a bare `cmd1 && cmd2 && break` as its body — that's not made safe by being inside a loop; a bare `&&`/`||` list used as a standalone statement is fully subject to `set -e`, and the first command failing on an early iteration (near-certain right after a fresh install) would have killed the whole session. Restored the `if cmd1 && cmd2; then break; fi` form.
+- **Resolved:** real uncertainty about how far `run_menu`'s `handler || true` guard (added in v2.1.0) actually reaches — confirmed with an isolated test that it protects against a failing command no matter how many function calls deep, so the session-crash risk chased since v2.1.0 is already covered end-to-end by that one fix. Per-statement guards still matter for a different reason: without them, a deep failure bubbles past the menu actually responsible for it to wherever the nearest `|| true` happens to catch it.
+
+**Previous (v2.4.0):**
 - **Diagnostics migrated** — system status, log viewing (Electron/LightDM/journal), an 8-step audio diagnostic, and a ping+DNS network test, from the legacy Advanced menu. A change of pace: everything here is read-only, no destructive-action risk to manage.
 - **Bug fix (set -e safety):** every diagnostic whose failure is the expected case — no lightdm running, no audio hardware, no network, missing logs, `ping`/`nslookup` not even installed — was a bare unguarded statement that would have crashed the whole session instead of reporting "not found" and moving on. Fixed throughout; a diagnostics tool has to survive exactly the broken states it exists to diagnose.
 - Manual Electron Update, Factory Reset, Export/Import Settings, Emergency Hotspot, and Fix Blank Screen are staying in the legacy script for now — destructive/mutating, and some share Upgrade's coupling to the legacy script's self-extraction mechanism (see v2.3.0 notes).

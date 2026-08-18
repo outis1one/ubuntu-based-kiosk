@@ -12,12 +12,13 @@
 # at a time, so a change to (say) the Sites menu can't accidentally break
 # WiFi setup or the uninstaller three thousand lines away.
 #
-# Migrated so far: Sites & Page Timing (menus/sites.sh), Display &
-# Interaction (menus/display.sh), Timezone (menus/timezone.sh), Hidden
-# Site PIN (menus/hidden_pin.sh), Password Protection & Lockout
-# (menus/lockout.sh), WiFi (menus/wifi.sh), Power/Display/Quiet Hours
-# (menus/power_schedule.sh), Diagnostics (menus/diagnostics.sh - system
-# status/logs/audio/network from the legacy Advanced menu).
+# Migrated so far, grouped the same way the legacy menu groups them:
+#   Core Settings: Sites & Page Timing, Display & Interaction, Timezone,
+#     Hidden Site PIN, Password Protection & Lockout, WiFi,
+#     Power/Display/Quiet Hours.
+#   Addons: CUPS Printing (menus/addon_cups.sh).
+#   Advanced: Diagnostics (menus/diagnostics.sh - system status/logs/
+#     audio/network).
 #
 # Usage (once the kiosk has already been installed):
 #   git clone <repo>
@@ -49,6 +50,8 @@ source "$SCRIPT_DIR/menus/wifi.sh"
 source "$SCRIPT_DIR/menus/power_schedule.sh"
 # shellcheck source=menus/diagnostics.sh
 source "$SCRIPT_DIR/menus/diagnostics.sh"
+# shellcheck source=menus/addon_cups.sh
+source "$SCRIPT_DIR/menus/addon_cups.sh"
 
 ################################################################################
 # Preflight
@@ -81,10 +84,12 @@ if ! is_kiosk_installed; then
 fi
 
 ################################################################################
-# Top-level menu
+# Top-level menu - grouped the same way the legacy menu groups them
+# (Core Settings / Addons / Advanced), so the structure stays familiar
+# and the flat list doesn't grow unwieldy as more menus migrate in.
 ################################################################################
 
-main_menu_builder() {
+core_settings_menu_builder() {
     MENU_LABELS=(
         "Sites & Page Timing"
         "Display & Interaction"
@@ -93,7 +98,6 @@ main_menu_builder() {
         "Password Protection & Lockout"
         "WiFi"
         "Power/Display/Quiet Hours"
-        "Diagnostics"
     )
     MENU_HANDLERS=(
         sites_menu
@@ -103,8 +107,34 @@ main_menu_builder() {
         lockout_menu
         wifi_menu
         power_schedule_menu
-        diagnostics_menu
     )
+}
+
+core_settings_menu() {
+    run_menu "CORE SETTINGS" core_settings_menu_builder
+}
+
+addons_menu_builder() {
+    MENU_LABELS=("CUPS Printing")
+    MENU_HANDLERS=(addon_cups_menu)
+}
+
+addons_menu() {
+    run_menu "ADDONS" addons_menu_builder
+}
+
+advanced_menu_builder() {
+    MENU_LABELS=("Diagnostics")
+    MENU_HANDLERS=(diagnostics_menu)
+}
+
+advanced_menu() {
+    run_menu "ADVANCED" advanced_menu_builder
+}
+
+main_menu_builder() {
+    MENU_LABELS=("Core Settings" "Addons" "Advanced")
+    MENU_HANDLERS=(core_settings_menu addons_menu advanced_menu)
 }
 
 main_menu_status() {

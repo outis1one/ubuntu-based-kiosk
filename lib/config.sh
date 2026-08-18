@@ -29,6 +29,12 @@
 : "${CRON_D_DIR:=/etc/cron.d}"
 : "${BIN_DIR:=/usr/local/bin}"
 : "${NETPLAN_DIR:=/etc/netplan}"
+: "${POLKIT_DIR:=/etc/polkit-1/localauthority/50-local.d}"
+
+# The admin account actually running this tool (as opposed to $KIOSK_USER,
+# the kiosk's own restricted account) - used where an addon needs to grant
+# *this* user a group membership (e.g. lpadmin for CUPS).
+: "${BUILD_USER:=${SUDO_USER:-$(whoami)}}"
 
 # Site/tab arrays
 declare -a URLS=()
