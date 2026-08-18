@@ -3,16 +3,18 @@
 # install.sh - Modular management entry point for Ubuntu Based Kiosk.
 #
 # This is NOT yet the full system installer - that is still the big
-# single-file script (ubuntu-based-kiosk-v1.0.3.sh etc) documented in
-# Readme.md, and first-time provisioning of a new kiosk still goes through
-# it. This entry point is the start of pulling the *menu system* out of
-# that 12k-line file into small, independently editable modules under
-# lib/ and menus/, so a change to (say) the Sites menu can't accidentally
-# break WiFi setup or the uninstaller three thousand lines away.
+# single-file script (ubuntu-based-kiosk.sh) documented in Readme.md, and
+# first-time provisioning of a new kiosk still goes through it. That file
+# still also contains its own (unmigrated, unmodified) copies of every
+# menu below - both copies coexist deliberately until enough of Core
+# Settings/Addons/Advanced has moved over to retire the old ones in one
+# pass. This entry point is the modular replacement, one menus/*.sh file
+# at a time, so a change to (say) the Sites menu can't accidentally break
+# WiFi setup or the uninstaller three thousand lines away.
 #
-# Today this wires up Sites & Page Timing (menus/sites.sh) and Display &
-# Interaction (menus/display.sh). The rest of Core Settings/Addons/Advanced
-# will move over the same way, one menus/*.sh file at a time.
+# Migrated so far: Sites & Page Timing (menus/sites.sh), Display &
+# Interaction (menus/display.sh), Timezone (menus/timezone.sh), Hidden
+# Site PIN (menus/hidden_pin.sh).
 #
 # Usage (once the kiosk has already been installed):
 #   git clone <repo>
@@ -32,6 +34,10 @@ source "$SCRIPT_DIR/lib/config.sh"
 source "$SCRIPT_DIR/menus/sites.sh"
 # shellcheck source=menus/display.sh
 source "$SCRIPT_DIR/menus/display.sh"
+# shellcheck source=menus/timezone.sh
+source "$SCRIPT_DIR/menus/timezone.sh"
+# shellcheck source=menus/hidden_pin.sh
+source "$SCRIPT_DIR/menus/hidden_pin.sh"
 
 ################################################################################
 # Preflight
@@ -68,8 +74,8 @@ fi
 ################################################################################
 
 main_menu_builder() {
-    MENU_LABELS=("Sites & Page Timing" "Display & Interaction")
-    MENU_HANDLERS=(sites_menu display_menu)
+    MENU_LABELS=("Sites & Page Timing" "Display & Interaction" "Timezone" "Hidden Site PIN")
+    MENU_HANDLERS=(sites_menu display_menu timezone_menu hidden_pin_menu)
 }
 
 main_menu_status() {

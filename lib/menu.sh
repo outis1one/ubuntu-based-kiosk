@@ -193,6 +193,11 @@ print_menu_header() {
 #
 # Entries are auto-numbered 1..N. "0" always returns from run_menu - no
 # menu file needs to hand-roll its own exit case.
+#
+# The handler is called as `handler "$choice"` (the 1-based number picked),
+# so a data-driven list (e.g. a set of timezones) can share one handler
+# instead of needing a distinct wrapper function per entry. Handlers that
+# don't care can just ignore the argument.
 run_menu() {
     local title="$1"
     local builder="$2"
@@ -235,6 +240,12 @@ run_menu() {
             return 0
         fi
 
-        "${MENU_HANDLERS[$((choice - 1))]}"
+        # `|| true`: this whole tool runs under `set -e`. A handler that
+        # legitimately fails (invalid input, a guard clause, etc) and
+        # returns non-zero as its last statement must not be allowed to
+        # take the entire session down - it should just redraw the menu.
+        # Absorbing that here means no menus/*.sh file has to think about
+        # set -e at all.
+        "${MENU_HANDLERS[$((choice - 1))]}" "$choice" || true
     done
 }

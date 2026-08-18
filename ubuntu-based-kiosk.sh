@@ -1,7 +1,31 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk v2.0.0                ###
+###   Ubuntu Based Kiosk v2.1.0                ###
 ################################################################################
+#
+# RELEASE v2.1.0 - Two More Menus Migrated, Menu Framework Hardened
+# - New in ./install.sh: Timezone (menus/timezone.sh) and Hidden Site PIN
+#   (menus/hidden_pin.sh) menus, alongside Sites & Page Timing and Display
+#   & Interaction from v2.0.0. Timezone doubles as a demonstration of the
+#   framework: the old hand-numbered 18-entry case statement is now just
+#   a data list plus one handler.
+# - Hardened lib/menu.sh: since this whole tool runs under `set -e`, a menu
+#   action that legitimately fails (e.g. rejecting an invalid timezone) and
+#   returns non-zero as its last statement could take down the *entire*
+#   session, not just that one action - one typo would silently drop the
+#   user back to their shell. Caught by testing menus/timezone.sh (its
+#   set_timezone() does `return 1` on an invalid zone) before this ever
+#   shipped; run_menu() now absorbs a failed handler's exit code so it
+#   only redraws the menu, protecting every menu, present and future.
+# - The old (unmigrated) configure_sites/configure_touch_controls/
+#   configure_navigation_security/configure_optional_features functions
+#   still live in this script, unchanged, and still have both v2.0.0 bugs
+#   above - left in place deliberately until enough of Core Settings/
+#   Addons/Advanced is migrated to retire them in one pass. configure_
+#   timezone/configure_hidden_site_pin don't share the set -e hazard
+#   (they never use a bare `return 1`), but are otherwise also still
+#   here unchanged pending the same cleanup. See Readme.md ("Modular
+#   Management") for current migration status.
 #
 # RELEASE v2.0.0 - Modular Management & Unversioned Filename
 # - New git-clone-based management path: lib/menu.sh (reusable numbered-menu
@@ -85,7 +109,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="2.0.0"
+SCRIPT_VERSION="2.1.0"
 
 # Resolve the real path to this script file.
 # When piped (curl|bash or wget|bash), BASH_SOURCE[0] is a pipe descriptor,
