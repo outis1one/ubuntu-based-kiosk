@@ -1,7 +1,42 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk v2.2.0                ###
+###   Ubuntu Based Kiosk v2.3.0                ###
 ################################################################################
+#
+# RELEASE v2.3.0 - WiFi and Power/Display/Quiet Hours Migrated
+# - New in ./install.sh: WiFi (menus/wifi.sh) and Power/Display/Quiet
+#   Hours (menus/power_schedule.sh) - by far the biggest and riskiest
+#   menus migrated so far. WiFi can rewrite live netplan config and, if
+#   run over SSH, disconnect the very session configuring it; Power
+#   schedule can shut the physical machine down and wake it via RTC.
+#   Every safety mechanism from the legacy menus is preserved exactly:
+#   netplan backup + 60s SSH watchdog + restore-on-apply-failure for
+#   WiFi; RTC availability detection for power scheduling. New
+#   $SYSTEMD_DIR/$CRON_D_DIR/$BIN_DIR/$NETPLAN_DIR variables (lib/config.sh)
+#   mean nothing under menus/ hardcodes /etc/systemd/system, /etc/cron.d,
+#   /usr/local/bin, or /etc/netplan - tests point them at scratch space.
+# - Fixed: the legacy dispatcher refused to open "Configure power
+#   schedule" at all when no RTC wake was detected, even though
+#   shutdown-only scheduling never needed RTC in the first place.
+# - Fixed: none of shutdown/wake/display-off/display-on/quiet-start/
+#   quiet-end/custom-Electron-reload times were validated as HH:MM in
+#   the legacy menus (plain `read`, no format check) - now all go
+#   through ask_time.
+# - Fixed (set -e safety, same class as v2.1.0's run_menu fix): several
+#   bare, unguarded statements whose failure would have taken down the
+#   entire session instead of just that action - `ls *.yaml` when no
+#   netplan file exists (masked in practice by cloud-init usually
+#   leaving one behind), the restore-and-reapply `netplan apply` after
+#   an initial apply failure, and `systemctl enable`/`start` after
+#   writing each of the four timer pairs. The last of these was caught
+#   only by testing in an environment without a live systemd - a real
+#   `enable`/`start` failure on actual hardware (bad unit, daemon-reload
+#   skipped, ...) would have hit the same bug. All now report a clear
+#   warning and return to the menu instead.
+# - Deliberately NOT migrated: the legacy dispatcher's "Test schedules &
+#   system" led into a shared diagnostics submenu (audio/network/
+#   keyboard tests) that isn't specific to scheduling and belongs with a
+#   future Advanced/Diagnostics migration instead.
 #
 # RELEASE v2.2.0 - Password Protection & Lockout Migrated
 # - New in ./install.sh: Password Protection & Lockout (menus/lockout.sh) -
@@ -122,7 +157,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="2.2.0"
+SCRIPT_VERSION="2.3.0"
 
 # Resolve the real path to this script file.
 # When piped (curl|bash or wget|bash), BASH_SOURCE[0] is a pipe descriptor,

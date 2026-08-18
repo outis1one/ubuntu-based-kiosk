@@ -15,7 +15,8 @@
 # Migrated so far: Sites & Page Timing (menus/sites.sh), Display &
 # Interaction (menus/display.sh), Timezone (menus/timezone.sh), Hidden
 # Site PIN (menus/hidden_pin.sh), Password Protection & Lockout
-# (menus/lockout.sh).
+# (menus/lockout.sh), WiFi (menus/wifi.sh), Power/Display/Quiet Hours
+# (menus/power_schedule.sh).
 #
 # Usage (once the kiosk has already been installed):
 #   git clone <repo>
@@ -41,6 +42,10 @@ source "$SCRIPT_DIR/menus/timezone.sh"
 source "$SCRIPT_DIR/menus/hidden_pin.sh"
 # shellcheck source=menus/lockout.sh
 source "$SCRIPT_DIR/menus/lockout.sh"
+# shellcheck source=menus/wifi.sh
+source "$SCRIPT_DIR/menus/wifi.sh"
+# shellcheck source=menus/power_schedule.sh
+source "$SCRIPT_DIR/menus/power_schedule.sh"
 
 ################################################################################
 # Preflight
@@ -83,8 +88,18 @@ main_menu_builder() {
         "Timezone"
         "Hidden Site PIN"
         "Password Protection & Lockout"
+        "WiFi"
+        "Power/Display/Quiet Hours"
     )
-    MENU_HANDLERS=(sites_menu display_menu timezone_menu hidden_pin_menu lockout_menu)
+    MENU_HANDLERS=(
+        sites_menu
+        display_menu
+        timezone_menu
+        hidden_pin_menu
+        lockout_menu
+        wifi_menu
+        power_schedule_menu
+    )
 }
 
 main_menu_status() {

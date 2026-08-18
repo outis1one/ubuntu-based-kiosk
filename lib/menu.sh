@@ -44,6 +44,19 @@ onoff() {
     [[ "$1" == "true" ]] && echo "ON" || echo "OFF"
 }
 
+# Current primary IP, or the literal "No IP" if there isn't one (e.g. no
+# network yet). Callers that only care whether there's an address should
+# still check for -n on top of this, since "No IP" is itself non-empty.
+get_ip_address() {
+    local ip
+    ip=$(hostname -I 2>/dev/null | awk '{print $1}')
+    if [[ -n "$ip" ]]; then
+        echo "$ip"
+    else
+        echo "No IP"
+    fi
+}
+
 pause() {
     read -r -p "Press Enter to continue..."
 }

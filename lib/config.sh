@@ -20,6 +20,16 @@
 : "${KIOSK_DIR:=${KIOSK_HOME}/kiosk-app}"
 : "${CONFIG_PATH:=${KIOSK_DIR}/config.json}"
 
+# System paths that menus (e.g. power/display/quiet-hours scheduling)
+# write units, scripts, and cron entries into. Overridable so tests can
+# point them at a scratch directory instead of the real system - nothing
+# under menus/ should ever hardcode /etc/systemd/system, /etc/cron.d, or
+# /usr/local/bin directly.
+: "${SYSTEMD_DIR:=/etc/systemd/system}"
+: "${CRON_D_DIR:=/etc/cron.d}"
+: "${BIN_DIR:=/usr/local/bin}"
+: "${NETPLAN_DIR:=/etc/netplan}"
+
 # Site/tab arrays
 declare -a URLS=()
 declare -a DURS=()
