@@ -17,22 +17,18 @@
 display_status() {
     echo "Touch gesture mode: $SWIPE_MODE"
     echo "Link navigation:    $ALLOW_NAVIGATION"
-    echo "Pause button:       $(display_onoff "$ENABLE_PAUSE_BUTTON")"
-    echo "Keyboard button:    $(display_onoff "$ENABLE_KEYBOARD_BUTTON")"
-    echo "Navigation button:  $(display_onoff "$ENABLE_NAV_BUTTON")"
-}
-
-display_onoff() {
-    [[ "$1" == "true" ]] && echo "ON" || echo "OFF"
+    echo "Pause button:       $(onoff "$ENABLE_PAUSE_BUTTON")"
+    echo "Keyboard button:    $(onoff "$ENABLE_KEYBOARD_BUTTON")"
+    echo "Navigation button:  $(onoff "$ENABLE_NAV_BUTTON")"
 }
 
 display_menu_builder() {
     MENU_LABELS=(
         "Touch gesture mode (currently: $SWIPE_MODE)"
         "Link navigation security (currently: $ALLOW_NAVIGATION)"
-        "Toggle pause button (currently: $(display_onoff "$ENABLE_PAUSE_BUTTON"))"
-        "Toggle on-screen keyboard button (currently: $(display_onoff "$ENABLE_KEYBOARD_BUTTON"))"
-        "Toggle navigation/help button (currently: $(display_onoff "$ENABLE_NAV_BUTTON"))"
+        "Toggle pause button (currently: $(onoff "$ENABLE_PAUSE_BUTTON"))"
+        "Toggle on-screen keyboard button (currently: $(onoff "$ENABLE_KEYBOARD_BUTTON"))"
+        "Toggle navigation/help button (currently: $(onoff "$ENABLE_NAV_BUTTON"))"
     )
     MENU_HANDLERS=(
         action_set_touch_mode

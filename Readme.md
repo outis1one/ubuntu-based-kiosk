@@ -1,6 +1,6 @@
 # Ubuntu Based Kiosk
 
-**Current Version:** 2.1.0 (check script header for latest version)
+**Current Version:** 2.2.0 (check script header for latest version)
 **Built with Claude Sonnet 4.6 AI assistance**
 **License:** GPL v3 - Keep derivatives open source
 **Repository:** https://github.com/outis1one/ubuntu-based-kiosk/
@@ -1190,6 +1190,10 @@ terminal menu and the web UI, so they can't drift apart).
 - `menus/hidden_pin.sh` — **Hidden Site PIN**: the PIN gating hidden
   pages (`duration: -1` in Sites). A fourth shape again — a flat file,
   not `config.json`.
+- `menus/lockout.sh` — **Password Protection & Lockout**: enable/disable,
+  change password, inactivity timeout, daily lock time, boot password.
+  The password is SHA-256 hashed before it's ever written to disk, same
+  as the legacy menu — never stored as plaintext.
 - `install.sh` — entry point for the modular tool. Run it against an
   *already-installed* kiosk:
   ```bash
@@ -1201,10 +1205,10 @@ terminal menu and the web UI, so they can't drift apart).
 **Honest status:** this does not yet replace first-time installation, or
 most of the old installer. `ubuntu-based-kiosk.sh` is still ~12,000
 lines and still contains its own unremoved, unmodified copies of every
-menu above (plus WiFi, Power/Display/Quiet Hours, Password Protection &
-Lockout, Upgrade, Reinstall, Uninstall, all Addons, and all of Advanced —
-none of that has moved yet). Both copies coexist deliberately: the old
-ones stay until enough of Core Settings/Addons/Advanced is migrated to
+menu above (plus WiFi, Power/Display/Quiet Hours, Upgrade, Reinstall,
+Uninstall, all Addons, and all of Advanced — none of that has moved
+yet). Both copies coexist deliberately: the old ones stay until enough
+of Core Settings/Addons/Advanced is migrated to
 retire them in one pass, rather than leaving the legacy menu half-wired.
 Migration continues one `menus/*.sh` file at a time; first-time
 installation itself is the last and largest piece to move, if it moves
@@ -1214,9 +1218,14 @@ at all.
 
 ## Project Status & Future Plans
 
-**Current Version:** 2.1.0
+**Current Version:** 2.2.0
 
-**Recent Updates (v2.1.0):**
+**Recent Updates (v2.2.0):**
+- **Fifth menu migrated:** Password Protection & Lockout (`menus/lockout.sh`) — enable/disable, change password, inactivity timeout, daily lock time, boot password. The password is SHA-256 hashed before it's ever written to `config.json` (matching the Electron app's own comparison logic) — verified never stored as plaintext.
+- **Bug fix:** `lib/menu.sh` was missing `ask_time`/`validate_time` entirely — caught by testing this menu before it shipped; "set a daily lock time" would otherwise have failed for every user. Ported from the legacy script.
+- **Refactor:** promoted the ON/OFF toggle-label helper out of `menus/display.sh` into a shared `onoff()` in `lib/menu.sh`, so `menus/lockout.sh` doesn't need to depend on another menu file — menus only ever depend on `lib/`.
+
+**Previous (v2.1.0):**
 - **Two more menus migrated:** Timezone (`menus/timezone.sh`) and Hidden Site PIN (`menus/hidden_pin.sh`), joining Sites & Page Timing and Display & Interaction in `./install.sh`. Timezone also replaces the old hand-numbered 18-entry list with a data-driven one built on the generic menu framework.
 - **Bug fix (framework-level):** `install.sh` runs under `set -e`; a menu action that legitimately fails (e.g. rejecting an invalid timezone) and returns non-zero as its last statement could take down the *entire* session instead of just that action. Caught by testing before this ever shipped broadly; `run_menu()` now absorbs a failed handler's exit code, protecting every menu — present and future.
 - The old, unmigrated `configure_sites`/`configure_touch_controls`/`configure_navigation_security`/`configure_optional_features` in `ubuntu-based-kiosk.sh` are staying in place for now (still carrying the v2.0.0 bugs below) until enough of Core Settings/Addons/Advanced is migrated to retire them in one pass — see "Modular Management" below for exactly what's covered so far.

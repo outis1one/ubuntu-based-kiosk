@@ -38,6 +38,12 @@ log_warning() {
     echo "⚠ $*"
 }
 
+# Shared "true"/"false" -> "ON"/"OFF" label for status lines and menu
+# entries showing a boolean setting's current value.
+onoff() {
+    [[ "$1" == "true" ]] && echo "ON" || echo "OFF"
+}
+
 pause() {
     read -r -p "Press Enter to continue..."
 }
@@ -107,6 +113,30 @@ ask_integer() {
             return 0
         else
             echo "❌ Invalid number. Please enter an integer between $min and $max" >&2
+            echo >&2
+        fi
+    done
+}
+
+validate_time() {
+    local time="$1"
+    [[ $time =~ ^([0-1][0-9]|2[0-3]):([0-5][0-9])$ ]]
+}
+
+ask_time() {
+    local prompt="$1"
+    local default="$2"
+    local time
+
+    while true; do
+        read -r -p "$prompt [$default]: " time
+        time="${time:-$default}"
+
+        if validate_time "$time"; then
+            echo "$time"
+            return 0
+        else
+            echo "❌ Invalid time format. Please use HH:MM (00:00 to 23:59)" >&2
             echo >&2
         fi
     done

@@ -1,7 +1,20 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk v2.1.0                ###
+###   Ubuntu Based Kiosk v2.2.0                ###
 ################################################################################
+#
+# RELEASE v2.2.0 - Password Protection & Lockout Migrated
+# - New in ./install.sh: Password Protection & Lockout (menus/lockout.sh) -
+#   enable/disable, change password (SHA-256 hashed before it's ever
+#   written to disk, matching main.js's comparison logic - never
+#   plaintext), inactivity timeout, daily lock time, boot password.
+# - Fixed: lib/menu.sh was missing ask_time/validate_time entirely (only
+#   caught by testing this menu, before it shipped - "Set daily lock
+#   time" would have failed with "ask_time: command not found" for every
+#   user). Ported from the legacy script; also promoted the ON/OFF
+#   toggle-label helper (previously private to menus/display.sh) to a
+#   shared `onoff()` in lib/menu.sh so menus/lockout.sh doesn't have to
+#   depend on menus/display.sh - menus should only ever depend on lib/.
 #
 # RELEASE v2.1.0 - Two More Menus Migrated, Menu Framework Hardened
 # - New in ./install.sh: Timezone (menus/timezone.sh) and Hidden Site PIN
@@ -109,7 +122,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="2.1.0"
+SCRIPT_VERSION="2.2.0"
 
 # Resolve the real path to this script file.
 # When piped (curl|bash or wget|bash), BASH_SOURCE[0] is a pipe descriptor,
