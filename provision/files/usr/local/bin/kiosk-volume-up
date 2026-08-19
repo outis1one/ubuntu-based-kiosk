@@ -1,0 +1,5 @@
+#!/bin/bash
+CURRENT=$(pactl get-sink-volume @DEFAULT_SINK@ | grep -oE '[0-9]+%' | head -1 | tr -d '%')
+NEW=$((CURRENT + 5))
+[[ $NEW -gt 100 ]] && NEW=100
+pactl set-sink-volume @DEFAULT_SINK@ ${NEW}%

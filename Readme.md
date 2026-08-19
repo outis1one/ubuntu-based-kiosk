@@ -1,6 +1,6 @@
 # Ubuntu Based Kiosk
 
-**Current Version:** 1.0.3 (check script header for latest version)
+**Current Version:** 2.13.0 (check script header for latest version)
 **Built with Claude Sonnet 4.6 AI assistance**
 **License:** GPL v3 - Keep derivatives open source
 **Repository:** https://github.com/outis1one/ubuntu-based-kiosk/
@@ -47,15 +47,17 @@ Home/office kiosk for reusing old hardware, displaying:
 # Configure WiFi if no ethernet available
 # Enable SSH during installation
 
-# Download and run the latest installer
-LATEST=$(curl -fsSL https://api.github.com/repos/outis1one/ubuntu-based-kiosk/contents \
-  | grep -oP 'ubuntu-based-kiosk-v[0-9.]+\.sh' \
-  | grep -v beta | sort -V | tail -1)
-wget "https://github.com/outis1one/ubuntu-based-kiosk/raw/main/$LATEST"
-chmod +x "$LATEST" && ./"$LATEST"
+# Download and run the installer
+wget https://github.com/outis1one/ubuntu-based-kiosk/raw/main/ubuntu-based-kiosk.sh
+chmod +x ubuntu-based-kiosk.sh && ./ubuntu-based-kiosk.sh
 ```
 
 The installer will guide you through configuration during setup.
+
+> The modular `./install.sh` (see "Modular Management" below) can also
+> provision a kiosk from scratch now, and has its own Upgrade, as an
+> alternative to the single-file installer above. `ubuntu-based-kiosk.sh`
+> remains the more battle-tested path.
 
 ---
 
@@ -68,13 +70,10 @@ If the kiosk machine can't reach GitHub directly (no browser, restrictive proxy,
 **On a machine with internet access:**
 
 ```bash
-# Option A: download just the latest installer script
-LATEST=$(curl -fsSL https://api.github.com/repos/outis1one/ubuntu-based-kiosk/contents \
-  | grep -oP 'ubuntu-based-kiosk-v[0-9.]+\.sh' \
-  | grep -v beta | sort -V | tail -1)
-wget "https://github.com/outis1one/ubuntu-based-kiosk/raw/main/$LATEST"
+# Option A: download just the installer script
+wget https://github.com/outis1one/ubuntu-based-kiosk/raw/main/ubuntu-based-kiosk.sh
 
-# Option B: download the whole repo as a ZIP (includes all installer versions and addon scripts)
+# Option B: download the whole repo as a ZIP (includes install.sh, addon scripts, and older archived installer versions)
 wget https://github.com/outis1one/ubuntu-based-kiosk/archive/refs/heads/main.zip
 unzip main.zip
 ```
@@ -83,8 +82,8 @@ Copy the downloaded `.sh` file (or the extracted ZIP contents) to a USB drive, t
 
 ```bash
 # Mount the USB drive and copy the script over, then:
-chmod +x ubuntu-based-kiosk-v*.sh
-./ubuntu-based-kiosk-v*.sh
+chmod +x ubuntu-based-kiosk.sh
+./ubuntu-based-kiosk.sh
 ```
 
 The kiosk machine still needs a working internet connection (ethernet, or WiFi configured during Ubuntu install) for the script to complete.
@@ -160,7 +159,7 @@ After running the addon it prints the full server-side setup, but the summary is
 
 ```bash
 ssh user@kiosk-machine
-./$(ls ubuntu-based-kiosk-v*.sh | sort -V | tail -1)
+./ubuntu-based-kiosk.sh
 # Addons → 5. Authelia Auto-Login
 # Enter your Authelia URL, username, and password when prompted
 ```
@@ -257,12 +256,20 @@ Both can be used at the same time — they serve different purposes:
 ---
 
 ### Communication
-- **Easy Asterisk Intercom** - Voice communication and intercom system
-  - Downloads latest version from Easy Asterisk repository
-  - Automatic update detection and installation
-  - Configuration preservation during updates
-  - Full Asterisk PBX integration
-  - SIP/PJSIP support for IP phones and softphones
+- **Asterisk Intercom** (`./install.sh` → Addons) - connects this kiosk
+  as a Baresip SIP extension to an Asterisk server you already have
+  running elsewhere; does not install or manage Asterisk itself
+  - Manual or auto-answer (intercom) mode
+  - Optional TLS/SRTP transport
+  - Uninstall support (with or without removing saved credentials)
+- **Legacy Easy Asterisk Intercom** (`./ubuntu-based-kiosk.sh` → Addons,
+  not yet retired) - the original three-option version: Client Only
+  (same Baresip client as above), Server Only, or Full, where Server/
+  Full download and run a third-party installer from a separate
+  "Easy Asterisk" repository to stand up a whole Asterisk PBX on this
+  device. That repository has since gone through a major rework
+  upstream, so the modular `./install.sh` version above only carries
+  the client/endpoint piece forward - see "Modular Management" below.
 
 ### Audio
 - **Lyrion Music Server (LMS)** - Formerly Logitech Media Server
@@ -591,7 +598,7 @@ smb://WORKGROUP/COMPUTER/PrinterName
 
 ```bash
 # Run installer script again to access menu
-./$(ls ubuntu-based-kiosk-v*.sh | sort -V | tail -1)
+./ubuntu-based-kiosk.sh
 
 # Menu structure:
 # 1. Core Settings - Sites, WiFi, schedules, passwords, full reinstall, complete uninstall
@@ -600,51 +607,55 @@ smb://WORKGROUP/COMPUTER/PrinterName
 # 4. Restart Kiosk Display
 ```
 
-### Installing Easy Asterisk Intercom
+### Installing Asterisk Intercom
 
-The Easy Asterisk Intercom addon provides voice communication capabilities to your kiosk system.
+The Asterisk Intercom addon connects this kiosk as a SIP extension to an
+Asterisk server you already have running elsewhere (your own PBX, a
+Docker container, another box on the network - anywhere). It installs
+and configures Baresip as that extension; it does not install or manage
+Asterisk itself.
 
 **Access the addon menu:**
 ```bash
-./$(ls ubuntu-based-kiosk-v*.sh | sort -V | tail -1)
-# Select: 2) Addons
-# Then: 4) Easy Asterisk Intercom
+git clone https://github.com/outis1one/ubuntu-based-kiosk/
+cd ubuntu-based-kiosk
+./install.sh
+# Select: 2) Addons → Asterisk Intercom (SIP Extension)
 ```
 
-**Features:**
-- **Automatic installation** - Downloads and installs the latest version from the Easy Asterisk repository
-- **Update detection** - Checks for newer versions and prompts to update
-- **Safe re-runs** - Can be run multiple times without breaking existing configurations
-- **Config preservation** - Automatically backs up and restores configurations during updates
-- **Full Asterisk PBX** - Complete telephony features including SIP, extensions, voicemail
+**What you'll be asked for** (must match what's already configured on
+the Asterisk server): server IP/hostname, SIP port (default 5060, or
+5061 if you enable TLS), extension number, SIP password, and whether to
+auto-answer incoming calls (intercom mode) or ring for manual answer.
 
-**Installation behavior:**
-- **First install:** Downloads latest version from https://github.com/outis1one/easy-asterisk
-- **Already installed (latest):** Prompts to re-run installation (preserves configs)
-- **Update available:** Prompts to update and shows version difference
-- **All scenarios:** Configuration files in `/etc/asterisk/` and installation settings are preserved
-
-**Managing Easy Asterisk:**
+**Managing the client:**
 ```bash
-# Check installation status
-systemctl status asterisk
+# Check status (as the kiosk user)
+sudo -u kiosk systemctl --user status baresip
 
-# View Asterisk console
-asterisk -rvvv
+# Restart
+sudo -u kiosk systemctl --user restart baresip
 
-# Restart Asterisk
-systemctl restart asterisk
+# View logs
+sudo -u kiosk journalctl --user -u baresip -f
 
-# Configure intercom (rerun installation to update)
-./$(ls ubuntu-based-kiosk-v*.sh | sort -V | tail -1)
-# Select: 2) Addons → 4) Easy Asterisk Intercom
+# Reconfigure or uninstall
+./install.sh
+# Select: 2) Addons → Asterisk Intercom (SIP Extension)
 ```
 
 **Installation location:**
-- Installation files: `/opt/easy-asterisk/`
-- Configuration: `/etc/asterisk/`
-- Version tracking: `/opt/easy-asterisk/.version`
-- Config backups: `/opt/easy-asterisk/config_backup/`
+- Baresip config: `~kiosk/.baresip/` (`accounts`, `config`)
+- systemd user unit: `~kiosk/.config/systemd/user/baresip.service`
+
+**Not covered here:** standing up the Asterisk PBX server itself. The
+legacy `ubuntu-based-kiosk.sh` still offers a Server/Full option that
+downloads and runs a third-party installer from a separate "Easy
+Asterisk" repository - that repository has since gone through a major
+rework upstream, so it isn't carried forward into this addon. If you
+need a PBX, set one up separately (that same legacy option, a
+FreePBX/Issabel image, a Dockerized Asterisk, etc.) and point this
+addon at it as a plain SIP extension.
 
 ### Updating Electron
 
@@ -1020,7 +1031,7 @@ Full system cleanup that removes all kiosk components and restores the system to
 **Access:**
 ```bash
 # Core Settings menu → option 11
-./$(ls ubuntu-based-kiosk-v*.sh | sort -V | tail -1)
+./ubuntu-based-kiosk.sh
 # Choose: Core Settings → Complete Uninstall
 ```
 
@@ -1168,11 +1179,264 @@ See the LICENSE file in the repository for full terms.
 
 ---
 
+## Modular Management (new, in progress)
+
+The 12,000+ line single-file installer works, but every menu lives in the
+same file as everything else, which makes small changes risky. We're
+pulling the *menu system* out into small, independently editable files as
+groundwork for the planned web-based GUI (same modules will back both the
+terminal menu and the web UI, so they can't drift apart).
+
+**What's here so far:**
+- `lib/menu.sh` — a generic numbered-menu framework (auto-numbers entries,
+  always offers `0` to exit/return, validated input helpers). Menu files
+  just declare their labels and handler functions; they don't hand-roll
+  `echo`/`case` loops.
+- `lib/config.sh` — the single place that reads/writes `config.json`.
+- `menus/sites.sh` — **Sites & Page Timing**, fully migrated: add, edit,
+  delete, and reorder pages, and set the duration/timing mode
+  (auto-rotate / manual / hidden) and home page — as a working proof of
+  concept for this approach.
+- `menus/display.sh` — **Display & Interaction**: touch gesture mode,
+  link navigation security, and the on-screen pause/keyboard/navigation
+  button toggles. A different menu shape from Sites (settings toggles
+  vs. list CRUD).
+- `menus/timezone.sh` — **Timezone**: also replaces the legacy script's
+  hand-numbered 18-entry `case` statement with a plain data list plus one
+  handler — the numbering is just `run_menu`'s job now.
+- `menus/hidden_pin.sh` — **Hidden Site PIN**: the PIN gating hidden
+  pages (`duration: -1` in Sites). A fourth shape again — a flat file,
+  not `config.json`.
+- `menus/lockout.sh` — **Password Protection & Lockout**: enable/disable,
+  change password, inactivity timeout, daily lock time, boot password.
+  The password is SHA-256 hashed before it's ever written to disk, same
+  as the legacy menu — never stored as plaintext.
+- `menus/wifi.sh` — **WiFi**: the riskiest menu so far — rewrites live
+  netplan config and, over SSH, can disconnect the session configuring
+  it. Preserves the legacy menu's netplan backup, 60-second SSH
+  watchdog, and restore-on-failure exactly.
+- `menus/power_schedule.sh` — **Power/Display/Quiet Hours**: scheduled
+  shutdown (+ RTC wake where available), display on/off, quiet-hours
+  audio muting, and an Electron reload timer, each as systemd timers.
+  Can power the physical machine off and on a schedule.
+- `menus/diagnostics.sh` — **Diagnostics**: system status, log viewing,
+  audio diagnostics, network test — 4 of the legacy Advanced menu's 12
+  items, all read-only.
+- `menus/addon_cups.sh` — **CUPS Printing** (Addons): install,
+  reconfigure for network access, complete uninstall (purge). The first
+  Addon migrated — genuinely mutates real system state (apt packages,
+  `/etc/cups`, ufw) rather than this project's own files.
+- `menus/addon_authelia.sh` — **Authelia Auto-Login** (Addons):
+  encrypted SSO credentials plus the server-side setup instructions.
+  Prompted the `save_config` merge fix above.
+- `menus/addon_remote_access.sh` — **Remote Access** (Addons): VNC,
+  WireGuard, Tailscale, Netbird. The biggest Addon so far.
+- `menus/addon_lms_squeezelite.sh` — **LMS Server / Squeezelite Player**
+  (Addons): install/reconfigure/uninstall for an LMS (Lyrion/Logitech
+  Media Server) server the kiosk can host, and a Squeezelite player the
+  kiosk can run against any LMS server on the LAN. Squeezelite's own
+  start script and systemd unit go through `$BIN_DIR`/`$SYSTEMD_DIR`
+  like every other addon; LMS's own apt repo/GPG key/ufw rules stay at
+  their real fixed system paths, same as CUPS.
+- `menus/addon_asterisk_intercom.sh` — **Asterisk Intercom** (Addons):
+  installs Baresip and registers this kiosk as a SIP extension against
+  an Asterisk server you already have running elsewhere. Redesigned
+  during migration, not a straight port — see "Recent Updates (v2.10.0)"
+  below for why the legacy Server/Full PBX-install options didn't come
+  along.
+- `menus/advanced_electron.sh` — **Electron Maintenance** (Advanced):
+  manual update (with backup + rollback) and "fix blank screen" binary
+  repair, combined into one submenu since both share the same
+  binary-verification logic.
+- `menus/advanced_factory_reset.sh` — **Factory Reset** (Advanced):
+  wipes `config.json` back to defaults; addons are untouched.
+- `menus/advanced_virtual_consoles.sh` — **Virtual Consoles** (Advanced):
+  toggles Ctrl+Alt+F1-F8 terminal login access.
+- `menus/advanced_emergency_hotspot.sh` — **Emergency Hotspot**
+  (Advanced): auto-starts a WiFi hotspot if no internet is detected 60
+  seconds after boot. Its own runtime script/systemd unit go through
+  `$BIN_DIR`/`$SYSTEMD_DIR` like every other addon.
+- `menus/complete_uninstall.sh` — **Complete Uninstall** (Core
+  Settings): the last of the "destructive trio." Composed from every
+  addon's own `*_do_uninstall` helper instead of re-implementing
+  removal a second time — see "Recent Updates (v2.12.0)" below.
+- `menus/clone_settings.sh` — **Clone Settings** (Advanced): export/apply
+  the portable parts of `config.json` across several kiosks that should
+  share the same settings. New, not a legacy port — deliberately never
+  copies machine-bound credentials (Authelia, WireGuard, Asterisk
+  Intercom); see "Recent Updates (v2.13.0)" below.
+- `lib/electron.sh` — `electron_install_binary()`: verify/download the
+  Electron binary and fix `chrome-sandbox` permissions. Shared between
+  fresh provisioning and `menus/advanced_electron.sh`'s "Fix blank
+  screen" action — the same repair sequence applies whether the binary
+  never downloaded during the initial `npm install` or went missing
+  later.
+- `lib/provision.sh` — first-time provisioning: packages, kiosk user,
+  Node.js/Electron, LightDM+Openbox autologin, audio/video/HDMI/
+  power-button hardware setup, firewall, then hands off to
+  `core_settings_menu` and other already-migrated Advanced actions for
+  initial configuration, rather than reimplementing that logic a third
+  time. See "Recent Updates (v2.14.0)" below.
+- `kiosk-app/` — the Electron app source (`main.js`, `preload.js`, the
+  dialog HTML files, `package.json`, `start.sh`), copied to the kiosk
+  directory during provisioning and re-copied during Upgrade.
+- `provision/files/` — every other system template file provisioning
+  installs (X11 configs, udev rules, systemd units, the power-button
+  and HDMI-mirroring scripts, polkit rules), laid out mirroring their
+  real destination path, e.g. `provision/files/etc/X11/xorg.conf.d/
+  foo.conf` installs to `/etc/X11/xorg.conf.d/foo.conf`.
+- `menus/advanced_upgrade.sh` — **Upgrade** (Advanced): `git pull` (only
+  as a clean fast-forward) plus re-running the same
+  packages/kiosk-app/display/firewall/power-management provisioning
+  steps, so any code or hardware-config change picked up by the pull
+  actually takes effect. Also offers an on-demand Electron version
+  check. See "Recent Updates (v2.15.0)" below.
+- `install.sh` — entry point for the modular tool, now grouped **Core
+  Settings / Addons / Advanced** like the legacy menu. On a machine
+  with no kiosk installed yet, it provisions one first (see
+  `lib/provision.sh` above); on an already-installed kiosk, it goes
+  straight to the same menus:
+  ```bash
+  git clone https://github.com/outis1one/ubuntu-based-kiosk/
+  cd ubuntu-based-kiosk
+  ./install.sh
+  ```
+
+**Honest status:** first-time installation and Upgrade are now covered —
+`install.sh` provisions a kiosk from a bare Ubuntu Server box, not just
+an already-installed one, and can pull/apply its own updates — but
+`ubuntu-based-kiosk.sh` is still ~12,000 lines and still contains its
+own unremoved, unmodified copies of every menu above, including the
+legacy three-option (Client/Server/Full) Easy Asterisk Intercom — the
+modular version only replaces the Client option, by design. Full
+Reinstall is deliberately not being carried forward — it never worked
+reliably in the legacy script, and the modular tool already covers the
+same outcome more reliably as two already-tested pieces run back to
+back: Complete Uninstall (Core Settings), then `./install.sh` again to
+provision fresh. The legacy Export/Import Settings is also staying
+as-is; Clone Settings is a new, narrower feature alongside it, not a
+replacement for it — see "Recent Updates (v2.13.0)" below for why
+they're not the same thing.
+Both copies coexist deliberately: the old ones stay until enough of
+Core Settings/Addons/Advanced is migrated to retire them in one pass,
+rather than leaving the legacy menu half-wired.
+
+**Resolved (v2.9.0):** `is_service_enabled()` — shared by both scripts
+— had a pre-check (`systemctl list-unit-files | grep -q "^${service}\s"`)
+that never actually matched, since every call site passes a bare
+service name while `list-unit-files` lines start with
+`"$service.service"`. The function always fell through to `return 1`
+regardless of the real enabled state — under-reporting "enabled but not
+currently running" as "not installed" everywhere it's used, including
+LMS/Squeezelite's own status detection. Fixed in both `lib/config.sh`
+and `ubuntu-based-kiosk.sh` by dropping the dead pre-check —
+`systemctl is-enabled` already reports "not found" as a failure on its
+own.
+
+**Resolved (v2.7.0):** the config-clobbering bug fixed in `lib/config.sh`
+(v2.6.0 — `save_config` silently deleting fields it doesn't know about,
+like Authelia's credentials, on the next unrelated save) had the exact
+same shape in `ubuntu-based-kiosk.sh`'s own `save_config`. Backported
+just that one fix into the legacy script, independent of migrating the
+rest of that menu — it was a real credential-loss bug in the
+currently-shipping single-file installer and didn't need to wait for a
+full migration pass.
+
+---
+
 ## Project Status & Future Plans
 
-**Current Version:** 1.0.3
+**Current Version:** 2.15.0
 
-**Recent Updates (v1.0.3):**
+**Recent Updates (v2.15.0):**
+- **New: Upgrade** (Advanced → Upgrade) — not a port of the legacy Upgrade, which re-extracted `main.js`/`preload.js`/etc from its own heredocs on every run. `kiosk-app/` and `provision/files/` are real files in this git checkout now, so the modular Upgrade is `git pull` (after confirming a clean working tree, and only as a fast-forward — never an automatic merge) followed by re-running the same packages/kiosk-app/display/firewall/power-management steps `lib/provision.sh` already has for a fresh install, reused rather than reimplemented. Skips the interactive first-run settings wizard and the "reboot now" prompt.
+- Also offers an on-demand Electron version check regardless of whether there was code to pull (Electron isn't versioned by this repo) — reuses the existing, already-tested `action_update_electron` as-is.
+- Requires a real git checkout (not the no-git ZIP download option) and a clean working tree; a diverged local history fails the pull cleanly with a clear message rather than attempting an automatic merge.
+- **Full Reinstall dropped, not carried forward.** It never worked reliably in the legacy script, and the modular tool already covers the same outcome more reliably as two already-tested pieces run back to back: Complete Uninstall (Core Settings), then `./install.sh` again to provision fresh — no need for a dedicated combined action.
+
+**Previous (v2.14.0):**
+- **`./install.sh` now provisions a kiosk from scratch, not just manages an existing one.** Until now it only worked against an already-installed kiosk — `ubuntu-based-kiosk.sh` was still the only path from a bare Ubuntu Server box to a running one. On a machine with no kiosk-app directory yet, it now installs packages, creates the kiosk user, installs Node.js/Electron, sets up LightDM+Openbox autologin, audio/video/HDMI/power-button hardware handling, and the firewall, then hands off to the same Core Settings menus for initial configuration — matching the legacy script's own install-then-configure flow, on the modular codebase.
+- **New: `lib/provision.sh`**, the provisioning steps — built almost entirely by calling menus already migrated below (`core_settings_menu`, emergency hotspot, virtual consoles) instead of reimplementing that configuration logic a third time. Reuse cut it down to roughly 300 lines against the legacy script's ~4,000-line `first_time_install()`.
+- **New: `lib/electron.sh`** — `electron_install_binary()`, extracted out of `menus/advanced_electron.sh` so fresh provisioning and the existing "Fix blank screen" action share one implementation instead of two copies of the same repair sequence.
+- **New: `kiosk-app/`** (the Electron app source — `main.js`, `preload.js`, the dialog HTML files, `package.json`, `start.sh`) and **`provision/files/`** (every other system template file — X11 configs, udev rules, systemd units, the power-button and HDMI-mirroring scripts, polkit rules), extracted byte-for-byte out of `ubuntu-based-kiosk.sh`'s heredocs into real files, laid out mirroring their real destination paths.
+- **Bug found and fixed while writing this:** a bash `set -e` gotcha where testing a multi-statement function as an if-condition (`if ! some_func; then`) silently exempts everything inside that function from `set -e` for the duration of the call — found via direct testing, then swept for elsewhere in the codebase and also fixed in `menus/advanced_electron.sh`'s pre-existing "Fix blank screen" action, which had the same shape.
+- **Known, deliberate limitation carried over unchanged:** a few of the extracted system scripts (`start.sh`, `kiosk-hotplug.sh`, the power-button handler) hardcode the username `kiosk` rather than substituting `$KIOSK_USER`, exactly as the legacy script's quoted heredocs always did. Only matters if `$KIOSK_USER` is overridden from its default, which in practice is rare.
+- Upgrade and Full Reinstall are still not ported — both are coupled to `ubuntu-based-kiosk.sh`'s own heredoc self-extraction, a different mechanism than the new provisioning (which copies real files, not heredocs). `ubuntu-based-kiosk.sh` remains the way to upgrade/reinstall an existing install for now.
+
+**Previous (v2.13.0):**
+- **New: Clone Settings** (Advanced → Clone Settings) — not a port of the legacy Export/Import Settings, a narrower MVP for the "set up one kiosk, then stamp out a dozen more like it" use case. Exports the portable parts of `config.json` (sites, display/touch/navigation, lockout, password protection) to a JSON file; applies that file to any other already-installed kiosk.
+- **Deliberately does not copy machine-bound credentials**, because copying them would be actively wrong: Authelia's encrypted password is keyed off `/etc/machine-id` and decrypts to garbage on another machine; a WireGuard private key is a device identity, and reusing one across machines is a peer conflict, not a saving; most Asterisk PBXes reject two simultaneous registrations to the same extension. Applying a profile prints these as an explicit "needs a human" checklist instead of silently skipping or cloning them.
+- Records which addons were present at export time and reports which are/aren't present on the target — doesn't install anything itself. Non-interactive addon installation (so applying a profile needs zero prompts — scriptable over SSH to a whole fleet) is a deliberate follow-up, not bundled into this MVP.
+
+**Previous (v2.12.0):**
+- **Complete Uninstall migrated** — the last of the "destructive trio." Rather than re-implementing every addon's teardown a second time (the legacy shape — CUPS/VNC/WireGuard/Tailscale/Netbird/LMS/Squeezelite removal all inlined again, independently of each addon's own uninstall action), `menus/complete_uninstall.sh` composes the `*_do_uninstall` helpers each addon already has. Every addon menu with an uninstall action was split into a confirm-and-call wrapper (unchanged from the user's perspective) plus a silent removal helper that both the wrapper and Complete Uninstall call — no duplicated logic anywhere, and if an addon's removal logic changes later, Complete Uninstall picks it up automatically.
+- **Important bug found and fixed while composing these:** several `*_do_uninstall` helpers (CUPS's `apt autoremove`/`apt clean`, VNC/WireGuard/Tailscale/Netbird's `apt remove`) had a bare, unguarded `apt` call. Previously this only risked aborting that one menu action if the package was already gone. Composed together as sequential calls inside Complete Uninstall, the same failure would have silently truncated the *entire* uninstall partway through — e.g. the kiosk user might never get removed because an already-uninstalled VPN client's `apt remove` failed first. Guarded all of them with `|| true`.
+- Non-addon teardown (kiosk user/files, Node.js, LightDM/Openbox, remaining systemd units/scripts, polkit rules, re-enabling virtual consoles, final package cleanup) stays inline in `menus/complete_uninstall.sh`, since no single addon owns those paths — same as the legacy script.
+- Upgrade and Full Reinstall remain in `ubuntu-based-kiosk.sh` only — both are coupled to its own heredoc self-extraction of main.js/preload.js/etc, which has no modular equivalent yet.
+
+**Previous (v2.11.0):**
+- **4 more Advanced items migrated**, alongside Diagnostics: **Electron Maintenance** (`menus/advanced_electron.sh` — the legacy "Manual Electron Update" and "Fix Blank Screen" combined into one submenu, since both maintain the same installation and share the binary-repair logic), **Factory Reset** (`menus/advanced_factory_reset.sh` — wipes `config.json` only, addons untouched), **Virtual Consoles** (`menus/advanced_virtual_consoles.sh` — toggles Ctrl+Alt+F1-F8 terminal login), and **Emergency Hotspot** (`menus/advanced_emergency_hotspot.sh` — auto-starts a WiFi hotspot if no internet is detected 60 seconds after boot; its own runtime script and systemd unit now go through `$BIN_DIR`/`$SYSTEMD_DIR` like every other addon's own files).
+- That's 8 of the legacy Advanced menu's 12 entries now covered. Not migrated this round: Export/Import Settings (pending a decision on whether to rebuild it around actual paths instead of a hardcoded per-addon step list, or whether the future web UI replaces the need for it) and Fix Squeezelite Audio (small enough that it may fold into the LMS addon instead of staying standalone — not decided yet).
+- Complete Uninstall (the last of the "destructive trio") is next, composed from each addon's own uninstall action plus core teardown rather than rewriting removal logic a second time. Upgrade and Full Reinstall stay in the legacy script for now — both are coupled to its own heredoc self-extraction of main.js/preload.js/etc, which has no modular equivalent yet.
+
+**Previous (v2.10.0):**
+- **Asterisk Intercom migrated, and redesigned in the process.** The legacy addon offered Client Only (Baresip SIP client), Server Only, and Full (server + client) — the latter two downloaded and ran a third-party installer from a separate "Easy Asterisk" repository to stand up a whole Asterisk PBX. That repository has since gone through a major rework upstream, so the PBX-install path is dropped entirely rather than carrying a dependency on code that's moved on without it. The migrated addon (`menus/addon_asterisk_intercom.sh`) now does only the client/endpoint piece: install Baresip and register this kiosk as one SIP extension against an Asterisk server you already have running elsewhere. It never installs or manages Asterisk itself. The legacy script's own three-option version is untouched, same as every other migrated menu.
+- Dropped the dependency on the (now-reworked) Easy Asterisk repo's GitHub API for version tracking — reads the real installed `baresip` package version via `dpkg` instead.
+- **New capability:** an uninstall option for the Baresip client — the legacy addon never had one.
+- **Bug fix:** an unguarded `ver=$(baresip_installed_version)` assignment would have crashed the whole session the first time status was checked before Baresip was installed (`dpkg-query` legitimately fails when the package isn't there). Guarded with `|| true` before it shipped.
+
+**Previous (v2.9.0):**
+- **LMS Server / Squeezelite Player migrated** — install/reconfigure/uninstall for both, in `./install.sh`. Squeezelite's own start script and systemd unit now go through `$BIN_DIR`/`$SYSTEMD_DIR` like every other addon instead of hardcoded `/usr/local/bin`/`/etc/systemd/system`; LMS's own apt repo/GPG key/ufw rules stay at their real fixed system paths, same approach as CUPS.
+- **Bug fix:** the legacy `install_lms()` enabled/started the detected service via `sudo systemctl enable "$service_name" 2>&1 | tee /tmp/lms-enable.log` — piped through `tee`, the statement's exit status reflected `tee` (always 0), not `systemctl enable`, so a real enable/start failure was silently swallowed instead of falling through to a warning. Now uses the shared `enable_and_start_units()` helper.
+- **Bug fix (shared, backported to the legacy script too):** `is_service_enabled()`'s pre-check never matched a bare service name against `list-unit-files`' `"$service.service"` lines, so it always reported "not enabled" regardless of the real state. Dropped the dead pre-check — see "Modular Management" below.
+
+**Previous (v2.8.0):**
+- **Remote Access migrated** — VNC, WireGuard, Tailscale, and Netbird, each with its own install/connect/status/uninstall flow. The biggest Addon so far. Tailscale/Netbird install via the vendors' own `curl | sh` method, preserved as-is.
+- **Important framework-level bug found and fixed:** `run_menu()`'s *handler* call has been crash-guarded since v2.1.0, but its *status function* call was still completely bare. A status function is meant to be read-only display, but a pipeline whose `grep` matches nothing (which `pipefail` turns into a failure even though the actual last command succeeds) would crash the **entire session**, not just fail to show status. Found while building `wireguard_status()` and verifying its exact failure mode rather than assuming it was covered. Fixed once, in the framework, protecting every status function across every menu — present and future. Also audited every existing status function for the same shape and fixed one real instance in `power_schedule_status()`.
+- Deduplicated: promoted `power_schedule.sh`'s `enable_and_start_timers()` to a shared `enable_and_start_units()` in `lib/menu.sh` (works for services now, not just timers) rather than writing the same helper a second time for VNC/WireGuard.
+
+**Previous (v2.7.0):**
+- **Backported fix:** `ubuntu-based-kiosk.sh`'s own `save_config()` had the identical config-clobbering bug fixed in `lib/config.sh` under v2.6.0 — it silently deleted Authelia credentials (or any field it doesn't explicitly know about) the next time Sites, Touch Controls, Navigation, or Password Protection saved. This was a real, currently-shipping credential-loss bug, so it's fixed directly in the legacy script now rather than waiting for those menus to be migrated. Verified in isolation against the exact extracted function before touching the shipping copy. Nothing else about those menus changed.
+
+**Previous (v2.6.0):**
+- **Authelia Auto-Login migrated** — encrypted SSO credentials (same AES-256-CBC/scrypt algorithm `main.js` decrypts with, verified by a real encrypt→decrypt round trip in testing) plus the full server-side Docker setup instructions, viewable again later without reconfiguring.
+- **Important bug found and fixed, not specific to Authelia:** `save_config()` did a full rebuild of `config.json` from known fields — exactly like the legacy script's `save_config` still does. Authelia's own write is a careful merge that preserves everything else, but the *next* save from Sites, Touch Controls, Navigation, or Password Protection would silently delete the Authelia credentials, since none of those knew the three Authelia fields existed. **This is a real bug in the currently-shipping single-file installer**, not introduced by this migration. Fixed in `lib/config.sh` by changing `save_config` to merge its known fields onto whatever's already on disk instead of rebuilding from nothing, so any untracked field — Authelia's three today, anything else tomorrow — survives automatically. The equivalent bug still exists, unfixed, in `ubuntu-based-kiosk.sh`'s own `save_config` — see "Modular Management" below.
+
+**Previous (v2.5.0):**
+- **First Addon migrated:** CUPS Printing — install/reconfigure/complete uninstall, in `./install.sh`. Genuinely mutates real system state (`apt install`/`remove --purge`, `/etc/cups`, `ufw`) at fixed paths CUPS itself doesn't let us relocate, so every test uses full command-level `sudo` stubbing rather than the scratch-directory approach used for this project's own files.
+- **Menu restructured:** `install.sh`'s top level is now grouped Core Settings / Addons / Advanced, matching the legacy tool, instead of one flat list — done now while it's cheap, ahead of the list getting unwieldy.
+- **Bug fix:** a "wait for service to start" retry loop used a bare `cmd1 && cmd2 && break` as its body — that's not made safe by being inside a loop; a bare `&&`/`||` list used as a standalone statement is fully subject to `set -e`, and the first command failing on an early iteration (near-certain right after a fresh install) would have killed the whole session. Restored the `if cmd1 && cmd2; then break; fi` form.
+- **Resolved:** real uncertainty about how far `run_menu`'s `handler || true` guard (added in v2.1.0) actually reaches — confirmed with an isolated test that it protects against a failing command no matter how many function calls deep, so the session-crash risk chased since v2.1.0 is already covered end-to-end by that one fix. Per-statement guards still matter for a different reason: without them, a deep failure bubbles past the menu actually responsible for it to wherever the nearest `|| true` happens to catch it.
+
+**Previous (v2.4.0):**
+- **Diagnostics migrated** — system status, log viewing (Electron/LightDM/journal), an 8-step audio diagnostic, and a ping+DNS network test, from the legacy Advanced menu. A change of pace: everything here is read-only, no destructive-action risk to manage.
+- **Bug fix (set -e safety):** every diagnostic whose failure is the expected case — no lightdm running, no audio hardware, no network, missing logs, `ping`/`nslookup` not even installed — was a bare unguarded statement that would have crashed the whole session instead of reporting "not found" and moving on. Fixed throughout; a diagnostics tool has to survive exactly the broken states it exists to diagnose.
+- Manual Electron Update, Factory Reset, Export/Import Settings, Emergency Hotspot, and Fix Blank Screen are staying in the legacy script for now — destructive/mutating, and some share Upgrade's coupling to the legacy script's self-extraction mechanism (see v2.3.0 notes).
+
+**Previous (v2.3.0):**
+- **WiFi and Power/Display/Quiet Hours migrated** — by far the riskiest menus tackled so far. WiFi rewrites live netplan config and, over SSH, can disconnect the session configuring it; power scheduling can shut the physical machine down and wake it via RTC. Every legacy safety mechanism is preserved exactly: netplan backup, 60-second SSH watchdog, restore-on-failure for WiFi; RTC availability detection for power scheduling.
+- **Bug fix:** the legacy menu refused to open "Configure power schedule" at all without RTC hardware, even though shutdown-only scheduling never needed it.
+- **Bug fix:** none of the six HH:MM time prompts across these menus were format-validated before — a typo silently produced a broken schedule. All now go through the same `ask_time` validator as everywhere else.
+- **Bug fix (set -e safety):** several more bare statements whose failure would have killed the entire session — `ls *.yaml` with no netplan file present, the backup-restore reapply after a failed `netplan apply`, and `systemctl enable`/`start` after writing each timer pair. The last was only caught by testing without a live systemd; a real failure on actual hardware would have hit the same crash. All now report a warning and return to the menu.
+- Deliberately **not** migrated: the legacy "Test schedules & system" option, which leads into a shared diagnostics submenu (audio/network/keyboard tests) unrelated to scheduling — that belongs with a future Advanced/Diagnostics pass.
+
+**Previous (v2.2.0):**
+- **Fifth menu migrated:** Password Protection & Lockout (`menus/lockout.sh`) — enable/disable, change password, inactivity timeout, daily lock time, boot password. The password is SHA-256 hashed before it's ever written to `config.json` (matching the Electron app's own comparison logic) — verified never stored as plaintext.
+- **Bug fix:** `lib/menu.sh` was missing `ask_time`/`validate_time` entirely — caught by testing this menu before it shipped; "set a daily lock time" would otherwise have failed for every user. Ported from the legacy script.
+- **Refactor:** promoted the ON/OFF toggle-label helper out of `menus/display.sh` into a shared `onoff()` in `lib/menu.sh`, so `menus/lockout.sh` doesn't need to depend on another menu file — menus only ever depend on `lib/`.
+
+**Previous (v2.1.0):**
+- **Two more menus migrated:** Timezone (`menus/timezone.sh`) and Hidden Site PIN (`menus/hidden_pin.sh`), joining Sites & Page Timing and Display & Interaction in `./install.sh`. Timezone also replaces the old hand-numbered 18-entry list with a data-driven one built on the generic menu framework.
+- **Bug fix (framework-level):** `install.sh` runs under `set -e`; a menu action that legitimately fails (e.g. rejecting an invalid timezone) and returns non-zero as its last statement could take down the *entire* session instead of just that action. Caught by testing before this ever shipped broadly; `run_menu()` now absorbs a failed handler's exit code, protecting every menu — present and future.
+- The old, unmigrated `configure_sites`/`configure_touch_controls`/`configure_navigation_security`/`configure_optional_features` in `ubuntu-based-kiosk.sh` are staying in place for now (still carrying the v2.0.0 bugs below) until enough of Core Settings/Addons/Advanced is migrated to retire them in one pass — see "Modular Management" below for exactly what's covered so far.
+
+**Previous (v2.0.0):**
+- **Modular management path:** new `lib/menu.sh` (reusable numbered-menu framework: auto-numbered entries, `0` always exits/returns) and `lib/config.sh` (single load/save for `config.json`), with menus migrating into `menus/*.sh` one at a time — **Sites & Page Timing** and **Display & Interaction** are migrated so far. Run via `./install.sh` after cloning the repo, against an already-installed kiosk (see "Modular Management" below). Groundwork for the planned web-based GUI, which will share this same `lib/config.sh` layer.
+- **Bug fix:** the old Sites menu could save `config.json` without first loading swipe/navigation/lockout settings, silently resetting them to script defaults.
+- **Bug fix:** reordering sites had an off-by-one that left the moved site one slot short of the requested position.
+- **Renamed installer:** the main script is now `ubuntu-based-kiosk.sh` (no version number in the filename), updated in place going forward. Released versions are tracked via git history and this changelog instead of the filename; older `ubuntu-based-kiosk-v*.sh` / `install_kiosk_*.sh` files remain in the repo as archived releases.
+
+**Previous (v1.0.3):**
 - **HDMI/external display mirroring:** any connected display beyond the primary (e.g. HDMI-out to a monitor/TV) is now mirrored automatically at the primary's exact resolution — generating a custom `cvt` mode if the external display doesn't natively list it — both at kiosk login/boot and live on plug/unplug via a new udev-triggered `kiosk-hotplug.service`. Previously the external output was left inactive even when detected by X, and would otherwise mirror at its own native resolution instead of matching the kiosk panel
 - **HDMI audio routing:** audio now follows the same hotplug event — the default PipeWire sink automatically switches to the HDMI audio output when an external display is connected/mirrored, and back to the built-in sink when it's disconnected (`kiosk-audio-route.sh`)
 - **Package install:** installer now also installs `net-tools` and `ncdu` (alongside the already-installed `curl` and `git`)

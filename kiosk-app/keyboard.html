@@ -1,0 +1,261 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: rgba(0, 0, 0, 0.95);
+      color: #ecf0f1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 10px;
+      overflow: hidden;
+    }
+    .keyboard { width: 100%; max-width: 1200px; margin: 0 auto; }
+    .row { display: flex; justify-content: center; margin-bottom: 8px; gap: 6px; }
+    .key {
+      min-width: 60px; height: 60px;
+      background: linear-gradient(135deg, #34495e 0%, #2c3e50 100%);
+      border: 2px solid #4a5f7f; border-radius: 8px; color: white;
+      font-size: 24px; font-weight: 600; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: all 0.1s; user-select: none; box-shadow: 0 4px 8px rgba(0,0,0,0.3);
+    }
+    .key:active {
+      transform: scale(0.95);
+      background: linear-gradient(135deg, #3498db 0%, #2980b9 100%);
+      border-color: #5dade2;
+    }
+    .key.space { flex: 3; }
+    .key.wide { min-width: 90px; }
+    .key.extra-wide { min-width: 120px; }
+    .key.special {
+      background: linear-gradient(135deg, #2c3e50 0%, #1a252f 100%);
+      font-size: 16px;
+    }
+    .key.enter {
+      background: linear-gradient(135deg, #27ae60 0%, #229954 100%);
+      border-color: #52be80;
+    }
+    .key.backspace {
+      background: linear-gradient(135deg, #e74c3c 0%, #c0392b 100%);
+      border-color: #ec7063;
+    }
+    .key.shift, .key.caps {
+      background: linear-gradient(135deg, #f39c12 0%, #d68910 100%);
+      border-color: #f8c471;
+    }
+    .key.shift.active, .key.caps.active {
+      background: linear-gradient(135deg, #16a085 0%, #138d75 100%);
+      border-color: #48c9b0;
+    }
+    .header {
+      text-align: center;
+      margin-bottom: 10px;
+      font-size: 16px;
+      color: #bdc3c7;
+    }
+    .close-btn {
+      position: absolute;
+      top: 10px;
+      right: 10px;
+      width: 40px;
+      height: 40px;
+      background: rgba(231, 76, 60, 0.9);
+      border: 2px solid #e74c3c;
+      border-radius: 50%;
+      color: white;
+      font-size: 24px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s;
+      z-index: 9999;
+    }
+    .close-btn:active {
+      transform: scale(0.9);
+      background: rgba(192, 57, 43, 0.9);
+    }
+  </style>
+</head>
+<body>
+  <div class="close-btn" onclick="closeKeyboard()">×</div>
+  
+  <div class="keyboard">
+    <div class="header">⌨️ Keyboard - Click icon or swipe to reopen</div>
+    
+    <!-- Number Row -->
+    <div class="row">
+      <div class="key" data-key="1" data-shift="!" onclick="typeKey(this)">1</div>
+      <div class="key" data-key="2" data-shift="@" onclick="typeKey(this)">2</div>
+      <div class="key" data-key="3" data-shift="#" onclick="typeKey(this)">3</div>
+      <div class="key" data-key="4" data-shift="$" onclick="typeKey(this)">4</div>
+      <div class="key" data-key="5" data-shift="%" onclick="typeKey(this)">5</div>
+      <div class="key" data-key="6" data-shift="^" onclick="typeKey(this)">6</div>
+      <div class="key" data-key="7" data-shift="&" onclick="typeKey(this)">7</div>
+      <div class="key" data-key="8" data-shift="*" onclick="typeKey(this)">8</div>
+      <div class="key" data-key="9" data-shift="(" onclick="typeKey(this)">9</div>
+      <div class="key" data-key="0" data-shift=")" onclick="typeKey(this)">0</div>
+      <div class="key" data-key="-" data-shift="_" onclick="typeKey(this)">-</div>
+      <div class="key" data-key="=" data-shift="+" onclick="typeKey(this)">=</div>
+      <div class="key backspace wide" onclick="typeKey(this)" data-special="Backspace">⌫</div>
+    </div>
+    
+    <!-- Top Row -->
+    <div class="row">
+      <div class="key special wide" onclick="typeKey(this)" data-special="Tab">Tab</div>
+      <div class="key" data-key="q" onclick="typeKey(this)">q</div>
+      <div class="key" data-key="w" onclick="typeKey(this)">w</div>
+      <div class="key" data-key="e" onclick="typeKey(this)">e</div>
+      <div class="key" data-key="r" onclick="typeKey(this)">r</div>
+      <div class="key" data-key="t" onclick="typeKey(this)">t</div>
+      <div class="key" data-key="y" onclick="typeKey(this)">y</div>
+      <div class="key" data-key="u" onclick="typeKey(this)">u</div>
+      <div class="key" data-key="i" onclick="typeKey(this)">i</div>
+      <div class="key" data-key="o" onclick="typeKey(this)">o</div>
+      <div class="key" data-key="p" onclick="typeKey(this)">p</div>
+      <div class="key" data-key="[" data-shift="{" onclick="typeKey(this)">[</div>
+      <div class="key" data-key="]" data-shift="}" onclick="typeKey(this)">]</div>
+      <div class="key" data-key="\\" data-shift="|" onclick="typeKey(this)">\</div>
+    </div>
+    
+    <!-- Home Row -->
+    <div class="row">
+      <div class="key caps special extra-wide" onclick="toggleCaps()" id="caps-key">Caps</div>
+      <div class="key" data-key="a" onclick="typeKey(this)">a</div>
+      <div class="key" data-key="s" onclick="typeKey(this)">s</div>
+      <div class="key" data-key="d" onclick="typeKey(this)">d</div>
+      <div class="key" data-key="f" onclick="typeKey(this)">f</div>
+      <div class="key" data-key="g" onclick="typeKey(this)">g</div>
+      <div class="key" data-key="h" onclick="typeKey(this)">h</div>
+      <div class="key" data-key="j" onclick="typeKey(this)">j</div>
+      <div class="key" data-key="k" onclick="typeKey(this)">k</div>
+      <div class="key" data-key="l" onclick="typeKey(this)">l</div>
+      <div class="key" data-key=";" data-shift=":" onclick="typeKey(this)">;</div>
+      <div class="key" data-key="'" data-shift='"' onclick="typeKey(this)">'</div>
+      <div class="key enter extra-wide" onclick="typeKey(this)" data-special="Enter">↵</div>
+    </div>
+    
+    <!-- Bottom Row -->
+    <div class="row">
+      <div class="key shift extra-wide" onclick="toggleShift()" id="shift-left">⇧</div>
+      <div class="key" data-key="z" onclick="typeKey(this)">z</div>
+      <div class="key" data-key="x" onclick="typeKey(this)">x</div>
+      <div class="key" data-key="c" onclick="typeKey(this)">c</div>
+      <div class="key" data-key="v" onclick="typeKey(this)">v</div>
+      <div class="key" data-key="b" onclick="typeKey(this)">b</div>
+      <div class="key" data-key="n" onclick="typeKey(this)">n</div>
+      <div class="key" data-key="m" onclick="typeKey(this)">m</div>
+      <div class="key" data-key="," data-shift="<" onclick="typeKey(this)">,</div>
+      <div class="key" data-key="." data-shift=">" onclick="typeKey(this)">.</div>
+      <div class="key" data-key="/" data-shift="?" onclick="typeKey(this)">/</div>
+      <div class="key shift extra-wide" onclick="toggleShift()" id="shift-right">⇧</div>
+    </div>
+    
+    <!-- Space Row -->
+    <div class="row">
+      <div class="key special" onclick="typeKey(this)" data-special="Control">Ctrl</div>
+      <div class="key special" onclick="typeKey(this)" data-special="Alt">Alt</div>
+      <div class="key space" onclick="typeKey(this)" data-special=" ">Space</div>
+      <div class="key special" onclick="typeKey(this)" data-special="Alt">Alt</div>
+      <div class="key special" onclick="typeKey(this)" data-special="Control">Ctrl</div>
+    </div>
+  </div>
+  
+  <script>
+    const { ipcRenderer } = require('electron');
+    let shiftPressed = false;
+    let capsLock = false;
+    
+    // CRITICAL: Do NOT preventDefault on keyboard events
+    // This allows physical keyboard to work alongside OSK
+    window.addEventListener('keydown', (e) => {
+      // Don't interfere with physical keyboard
+      // Just update our visual state if needed
+      if (e.key === 'CapsLock') {
+        capsLock = !capsLock;
+        updateCapsDisplay();
+      }
+    }, {passive: true});
+    
+    function updateKeyDisplay() {
+      const keys = document.querySelectorAll('.key[data-key]');
+      keys.forEach(key => {
+        const baseKey = key.getAttribute('data-key');
+        const shiftKey = key.getAttribute('data-shift');
+        if (/^[a-z]$/.test(baseKey)) {
+          const shouldBeUpper = (shiftPressed && !capsLock) || (!shiftPressed && capsLock);
+          key.textContent = shouldBeUpper ? baseKey.toUpperCase() : baseKey.toLowerCase();
+        } else if (shiftKey) {
+          key.textContent = shiftPressed ? shiftKey : baseKey;
+        }
+      });
+    }
+    
+    function typeKey(element) {
+      const special = element.getAttribute('data-special');
+      if (special) {
+        ipcRenderer.send('keyboard-type', special);
+        return;
+      }
+      
+      const baseKey = element.getAttribute('data-key');
+      const shiftKey = element.getAttribute('data-shift');
+      let finalKey = baseKey;
+      
+      if (/^[a-z]$/.test(baseKey)) {
+        const shouldBeUpper = (shiftPressed && !capsLock) || (!shiftPressed && capsLock);
+        finalKey = shouldBeUpper ? baseKey.toUpperCase() : baseKey.toLowerCase();
+      } else if (shiftPressed && shiftKey) {
+        finalKey = shiftKey;
+      }
+      
+      ipcRenderer.send('keyboard-type', finalKey);
+      
+      if (shiftPressed) {
+        shiftPressed = false;
+        updateShiftDisplay();
+        updateKeyDisplay();
+      }
+    }
+    
+    function toggleShift() {
+      shiftPressed = !shiftPressed;
+      updateShiftDisplay();
+      updateKeyDisplay();
+    }
+    
+    function toggleCaps() {
+      capsLock = !capsLock;
+      updateCapsDisplay();
+      updateKeyDisplay();
+    }
+    
+    function updateShiftDisplay() {
+      document.querySelectorAll('.shift').forEach(key => {
+        if (shiftPressed) key.classList.add('active');
+        else key.classList.remove('active');
+      });
+    }
+    
+    function updateCapsDisplay() {
+      const capsKey = document.getElementById('caps-key');
+      if (capsLock) capsKey.classList.add('active');
+      else capsKey.classList.remove('active');
+    }
+    
+    function closeKeyboard() {
+      ipcRenderer.send('close-keyboard');
+    }
+    
+    updateKeyDisplay();
+    
+    // Tell main process we're ready
+    ipcRenderer.send('keyboard-ready');
+  </script>
+</body>
+</html>

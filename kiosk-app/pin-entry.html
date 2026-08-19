@@ -1,0 +1,139 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #2c3e50;
+      color: #ecf0f1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      padding: 20px;
+    }
+    .container { width: 100%; max-width: 400px; }
+    h2 { text-align: center; margin-bottom: 30px; font-size: 24px; }
+    #pin-display {
+      width: 100%;
+      padding: 20px;
+      font-size: 48px;
+      text-align: center;
+      margin: 20px 0;
+      border: 3px solid #34495e;
+      border-radius: 12px;
+      background: #34495e;
+      color: #ecf0f1;
+      letter-spacing: 20px;
+      min-height: 90px;
+      line-height: 50px;
+      font-family: monospace;
+    }
+    #error { color: #e74c3c; text-align: center; display: none; margin: 10px 0; font-weight: bold; font-size: 18px; }
+    .numpad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 15px; margin: 20px 0; }
+    .numpad button {
+      padding: 30px;
+      font-size: 32px;
+      border: none;
+      border-radius: 12px;
+      background: #34495e;
+      color: #ecf0f1;
+      cursor: pointer;
+      font-weight: bold;
+      transition: background 0.2s;
+    }
+    .numpad button:active { background: #3498db; }
+    .numpad button:hover { background: #475d6d; }
+    .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 15px; margin-top: 20px; }
+    .btn { padding: 20px; font-size: 20px; cursor: pointer; border: none; border-radius: 12px; font-weight: bold; }
+    #clear { background: #f39c12; color: white; }
+    #backspace { background: #e67e22; color: white; }
+    #submit { background: #27ae60; color: white; }
+    #cancel { background: #e74c3c; color: white; }
+    .info { text-align: center; font-size: 14px; color: #95a5a6; margin-top: 20px; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>🔒 Enter PIN</h2>
+    <div id="pin-display">••••</div>
+    <div id="error">❌ Incorrect PIN</div>
+    <div class="numpad">
+      <button onclick="addDigit('1')">1</button>
+      <button onclick="addDigit('2')">2</button>
+      <button onclick="addDigit('3')">3</button>
+      <button onclick="addDigit('4')">4</button>
+      <button onclick="addDigit('5')">5</button>
+      <button onclick="addDigit('6')">6</button>
+      <button onclick="addDigit('7')">7</button>
+      <button onclick="addDigit('8')">8</button>
+      <button onclick="addDigit('9')">9</button>
+      <button id="clear" onclick="clearPin()">Clear</button>
+      <button onclick="addDigit('0')">0</button>
+      <button id="backspace" onclick="backspace()">⌫</button>
+    </div>
+    <div class="actions">
+      <button class="btn" id="submit" onclick="submitPin()">✓ Submit</button>
+      <button class="btn" id="cancel" onclick="cancel()">✗ Cancel</button>
+    </div>
+    <div class="info">Default PIN: 1234 (4-8 digits)</div>
+  </div>
+  <script>
+    const {ipcRenderer} = require('electron');
+    const fs = require('fs');
+    const path = require('path');
+    const pinFile = path.join(__dirname, '.jitsi-pin');
+    let correctPin = '1234';
+    let enteredPin = '';
+    try {
+      const stored = fs.readFileSync(pinFile, 'utf8').trim();
+      if (stored !== 'NOPIN') correctPin = stored;
+      else correctPin = null;
+    } catch(e) {}
+    function updateDisplay() {
+      const display = document.getElementById('pin-display');
+      if (enteredPin.length === 0) {
+        display.textContent = '••••';
+        display.style.color = '#7f8c8d';
+      } else {
+        display.textContent = '•'.repeat(enteredPin.length);
+        display.style.color = '#ecf0f1';
+      }
+    }
+    function addDigit(digit) {
+      if (enteredPin.length < 8) {
+        enteredPin += digit;
+        updateDisplay();
+        document.getElementById('error').style.display = 'none';
+      }
+    }
+    function backspace() { enteredPin = enteredPin.slice(0, -1); updateDisplay(); }
+    function clearPin() { enteredPin = ''; updateDisplay(); document.getElementById('error').style.display = 'none'; }
+    function submitPin() {
+      if (enteredPin.length < 4) {
+        document.getElementById('error').textContent = '❌ PIN must be 4-8 digits';
+        document.getElementById('error').style.display = 'block';
+        return;
+      }
+      if (correctPin === null || enteredPin === correctPin) {
+        ipcRenderer.send('pin-correct');
+      } else {
+        document.getElementById('error').textContent = '❌ Incorrect PIN';
+        document.getElementById('error').style.display = 'block';
+        enteredPin = '';
+        updateDisplay();
+      }
+    }
+    function cancel() { ipcRenderer.send('pin-cancelled'); }
+    document.addEventListener('keydown', (e) => {
+      if (e.key >= '0' && e.key <= '9') addDigit(e.key);
+      else if (e.key === 'Backspace') backspace();
+      else if (e.key === 'Enter') submitPin();
+      else if (e.key === 'Escape') cancel();
+    });
+    updateDisplay();
+  </script>
+</body>
+</html>

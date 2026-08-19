@@ -1,7 +1,485 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk v1.0.3                ###
+###   Ubuntu Based Kiosk v2.15.0               ###
 ################################################################################
+#
+# RELEASE v2.15.0 - Upgrade Migrated to install.sh (Advanced -> Upgrade)
+# - New in ./install.sh's Advanced menu: Upgrade. Not a port of this
+#   script's Upgrade - that one re-extracted main.js/preload.js/etc from
+#   its own heredocs on every run, a mechanism that has no equivalent
+#   here now that kiosk-app/ and provision/files/ are real files in the
+#   git checkout. The modular Upgrade is `git pull` (only after
+#   confirming the working tree is clean and the pull is a fast-forward
+#   - never an automatic merge) followed by re-running the same
+#   packages/kiosk-app/display/firewall/power-management steps
+#   lib/provision.sh already has for a fresh install, reused rather than
+#   reimplemented. Skips the interactive first-run settings wizard and
+#   the "reboot now" prompt - those don't belong in a routine upgrade.
+# - Also offers an on-demand Electron version check/update regardless of
+#   whether there was any code to pull, since Electron isn't versioned
+#   by this repo - reuses the existing, already-tested
+#   action_update_electron (menus/advanced_electron.sh) as-is.
+# - Requires a git checkout (not the no-git ZIP download option) and a
+#   clean working tree; a diverged local history fails the pull cleanly
+#   with a clear message instead of attempting an automatic merge.
+# - Full Reinstall dropped, not carried forward - it never worked
+#   reliably in this script either, and the modular tool already covers
+#   the same outcome more reliably as two already-tested pieces run back
+#   to back: Complete Uninstall (Core Settings), then ./install.sh again
+#   to provision fresh. No dedicated combined action needed.
+#
+# RELEASE v2.14.0 - install.sh Now Provisions a Kiosk From Scratch,
+#                    Not Just Manages an Existing One
+# - Until now, ./install.sh only worked against an already-installed
+#   kiosk (this script was still the only path from a bare Ubuntu
+#   Server box to a running one). It now provisions too: on a machine
+#   with no kiosk-app directory yet, it installs packages, creates the
+#   kiosk user, installs Node.js/Electron, sets up LightDM+Openbox
+#   autologin, audio/video/HDMI/power-button hardware handling, the
+#   firewall, then hands off to the same Core Settings menus below for
+#   initial configuration - matching this script's own install-then-
+#   configure flow, on the new modular codebase.
+# - New: lib/provision.sh (the provisioning steps, built almost
+#   entirely by calling already-migrated menus - core_settings_menu,
+#   action_configure_emergency_hotspot, action_disable_virtual_consoles
+#   - rather than reimplementing that logic a third time), lib/electron.sh
+#   (electron_install_binary, extracted out of menus/advanced_electron.sh
+#   so both fresh provisioning and the existing "Fix blank screen"
+#   action share one implementation), kiosk-app/ (the Electron app
+#   source - main.js, preload.js, the dialog HTML files, package.json,
+#   start.sh - extracted byte-for-byte out of this script's heredocs
+#   into real files), provision/files/ (every other system template
+#   file - X11 configs, udev rules, systemd units, the power-button and
+#   HDMI-mirroring scripts, polkit rules - laid out mirroring their real
+#   destination paths, e.g. provision/files/etc/X11/xorg.conf.d/foo.conf
+#   installs to /etc/X11/xorg.conf.d/foo.conf).
+# - Reusing the already-migrated menus instead of reimplementing
+#   first-time configuration cut lib/provision.sh down to roughly 300
+#   lines against this script's ~4,000-line first_time_install().
+# - Fixed along the way: a bash `set -e` gotcha where testing a
+#   multi-statement function as an if-condition (`if ! some_func; then`)
+#   silently exempts everything inside that function from set -e for
+#   the duration - found via direct testing while writing the new
+#   provisioning code, then swept for elsewhere and also fixed in
+#   menus/advanced_electron.sh's existing "Fix blank screen" action
+#   (its electron_install_binary call had the same shape).
+# - Known, deliberate limitation carried over unchanged from this
+#   script: a few of the extracted system scripts (start.sh,
+#   kiosk-hotplug.sh, the power-button handler) hardcode the username
+#   "kiosk" rather than substituting $KIOSK_USER, exactly as the
+#   quoted heredocs here always did. Fine unless $KIOSK_USER is
+#   overridden from its default, which in practice it almost never is.
+# - Still not ported to ./install.sh: Upgrade and Full Reinstall, both
+#   coupled to this script's own heredoc self-extraction - a different
+#   mechanism than the new provisioning (which copies real files from
+#   kiosk-app/ and provision/files/, not heredocs). This script remains
+#   the way to upgrade/reinstall an existing install for now.
+#
+# RELEASE v2.13.0 - Clone Settings: New MVP for Standing Up Several
+#                    Kiosks with the Same Settings
+# - New in ./install.sh's Advanced menu: Clone Settings
+#   (menus/clone_settings.sh). Not a port of the legacy Export/Import
+#   Settings - a narrower, deliberately-scoped feature for the "set up
+#   one kiosk, then stamp out a dozen more like it" use case: export the
+#   portable parts of config.json (sites, display/touch/navigation,
+#   lockout, password protection) to a JSON file, apply that file to any
+#   other already-installed kiosk.
+# - Explicitly does NOT copy machine-bound credentials, because copying
+#   them would be actively wrong, not just incomplete: Authelia's
+#   encrypted password is keyed off /etc/machine-id and decrypts to
+#   garbage elsewhere; a WireGuard private key is a device identity and
+#   reusing one across machines is a peer conflict; most Asterisk PBXes
+#   reject two simultaneous registrations to the same extension. Apply
+#   prints these as an explicit "needs a human" checklist instead of
+#   silently skipping them or (worse) cloning them.
+# - Does not install missing addons - only records which addons were
+#   present at export time and reports which of those are/aren't
+#   present on the machine being applied to. Non-interactive addon
+#   installation (so applying a profile needs zero prompts, scriptable
+#   over SSH to a whole fleet) is deliberately left as a follow-up, not
+#   bundled into this MVP.
+#
+# RELEASE v2.12.0 - Complete Uninstall Migrated (Last of the
+#                    "Destructive Trio"); Composed, Not Re-Implemented
+# - New in ./install.sh's Core Settings menu: Complete Uninstall
+#   (menus/complete_uninstall.sh). Rather than re-implementing every
+#   addon's teardown a second time (the shape this function had in the
+#   legacy script - CUPS/VNC/WireGuard/Tailscale/Netbird/LMS/Squeezelite
+#   removal logic all inlined again, independently of the same logic in
+#   each addon's own uninstall action), it composes the *_do_uninstall
+#   helpers each addon already has. If an addon's removal logic changes,
+#   Complete Uninstall picks it up automatically instead of silently
+#   drifting out of sync.
+# - Every addon menu that had an uninstall action (CUPS, VNC, WireGuard,
+#   Tailscale, Netbird, LMS, Squeezelite, Asterisk Intercom) plus
+#   power_schedule's "remove all schedules" and the Emergency Hotspot
+#   disable action were each split into a confirm-and-call wrapper (the
+#   existing interactive action, unchanged from the user's perspective)
+#   and a silent do-the-removal helper that both the wrapper and
+#   Complete Uninstall call - no duplicated removal logic anywhere.
+# - IMPORTANT bug found and fixed while composing these: several
+#   *_do_uninstall helpers (CUPS's `apt autoremove`/`apt clean`, and
+#   VNC/WireGuard/Tailscale/Netbird's `apt remove`) had a bare, unguarded
+#   `apt` call as their second-to-last statement. Previously this only
+#   risked aborting that one menu action if the package was already
+#   gone (silently caught by run_menu's own guard) - a minor UX
+#   blemish. Composed together as bare sequential calls inside Complete
+#   Uninstall, the same failure would have silently truncated the
+#   *entire* uninstall sequence partway through - e.g. the kiosk user
+#   might never get removed because an already-uninstalled VPN client's
+#   `apt remove` failed first. Guarded all of them with `|| true`,
+#   fixing the risk in both the standalone action and the composition.
+# - Non-addon teardown (kiosk user/files, Node.js, LightDM/Openbox,
+#   remaining systemd units/scripts, polkit rules, re-enabling virtual
+#   consoles, final package cleanup) stays inline in
+#   menus/complete_uninstall.sh, same as the legacy script, since no
+#   single addon owns those paths.
+# - Upgrade and Full Reinstall remain in ubuntu-based-kiosk.sh only -
+#   both are fundamentally coupled to this file's own heredoc self-
+#   extraction of main.js/preload.js/etc, which has no equivalent in the
+#   modular system yet. This closes out the "destructive trio."
+#
+# RELEASE v2.11.0 - 4 More Advanced Items Migrated (Electron Maintenance,
+#                    Factory Reset, Virtual Consoles, Emergency Hotspot)
+# - New in ./install.sh's Advanced menu, alongside Diagnostics:
+#   - menus/advanced_electron.sh - "Electron Maintenance": the legacy
+#     "Manual Electron Update" and "Fix Blank Screen" combined under one
+#     submenu, since both maintain the same installation and share the
+#     binary-repair logic (electron_install_binary).
+#   - menus/advanced_factory_reset.sh - "Factory Reset": wipes
+#     config.json back to defaults only - addons are untouched.
+#   - menus/advanced_virtual_consoles.sh - "Virtual Consoles": toggles
+#     Ctrl+Alt+F1-F8 terminal login access.
+#   - menus/advanced_emergency_hotspot.sh - "Emergency Hotspot": auto-
+#     starts a WiFi hotspot if no internet is detected 60 seconds after
+#     boot. Its own runtime script and systemd unit now go through
+#     $BIN_DIR/$SYSTEMD_DIR like every other addon's own files, instead
+#     of the legacy's hardcoded /usr/local/bin and /etc/systemd/system.
+# - That leaves Diagnostics' original 4 items plus these 4 covering 8 of
+#   the legacy Advanced menu's 12 entries. Not migrated this round:
+#   Export/Import Settings (kept in the legacy script pending a decision
+#   on whether it's worth rebuilding around actual paths instead of a
+#   hardcoded per-addon step list, or whether the future web UI replaces
+#   the need for it) and Fix Squeezelite Audio (small and specific
+#   enough that it may fold into menus/addon_lms_squeezelite.sh instead
+#   of staying a standalone Advanced entry - not decided yet).
+# - Complete Uninstall (the last of the "destructive trio") is next,
+#   composed from each addon's own uninstall action plus core teardown
+#   rather than rewriting removal logic a second time. Upgrade and Full
+#   Reinstall stay in this script for now: both are fundamentally
+#   coupled to this file's own heredoc self-extraction of main.js/
+#   preload.js/etc, which has no equivalent yet in the modular system.
+#
+# RELEASE v2.10.0 - Asterisk Intercom Migrated, Redesigned as a SIP
+#                    Extension Client (No More PBX Server Install)
+# - New in ./install.sh: Asterisk Intercom (menus/addon_asterisk_intercom.sh).
+#   The legacy addon offered three options: Client Only (a Baresip SIP
+#   client), Server Only, and Full (server + client) - the latter two
+#   downloaded and ran a third-party installer from a separate "Easy
+#   Asterisk" repository to stand up a whole Asterisk PBX. That
+#   repository has since gone through a major rework upstream, so this
+#   migration drops the PBX-install path entirely rather than carrying
+#   a dependency on code that's moved on without it. The addon now does
+#   only the client/endpoint piece: install Baresip and register it as
+#   one SIP extension against an Asterisk server the user already has
+#   running somewhere else. It never installs or manages Asterisk
+#   itself. The legacy script's own three-option version is untouched -
+#   both copies coexist deliberately, same as every other migrated menu.
+# - Dropped the legacy client path's dependency on the (now-reworked)
+#   Easy Asterisk repo's GitHub API for version tracking. It now reads
+#   the real installed `baresip` package version via dpkg instead - one
+#   less network dependency and one less thing to keep in sync with an
+#   external repo.
+# - New capability: an uninstall option for the Baresip client, which
+#   the legacy addon never had at all.
+# - Bug fix (found while porting): `baresip_installed_version()`'s
+#   `dpkg-query` call fails (as expected) when the package isn't
+#   installed, and the unguarded `ver=$(...)` assignment around it would
+#   have crashed the whole session under this tool's `set -e` the first
+#   time status was checked before Baresip was installed. Guarded with
+#   `|| true` - the same class of bug hunted throughout this migration,
+#   caught by testing before it shipped.
+#
+# RELEASE v2.9.0 - LMS Server / Squeezelite Player Migrated;
+#                   is_service_enabled() Dead Pre-Check Fixed
+# - New in ./install.sh: LMS Server / Squeezelite Player
+#   (menus/addon_lms_squeezelite.sh) - install/reconfigure/uninstall for
+#   an LMS (Lyrion/Logitech Media Server) server the kiosk can host, and
+#   a Squeezelite player the kiosk can run against any LMS server on the
+#   LAN. Squeezelite's own start script and systemd unit now go through
+#   $BIN_DIR/$SYSTEMD_DIR (lib/config.sh) instead of hardcoded
+#   /usr/local/bin and /etc/systemd/system, matching every other addon;
+#   LMS's own apt repo/GPG key/ufw rules stay at their real fixed system
+#   paths, same as CUPS.
+# - Fixed a real unguarded-pipeline bug from the legacy install_lms():
+#   `sudo systemctl enable "$service_name" 2>&1 | tee /tmp/lms-enable.log`
+#   made the whole statement's exit status depend on `tee` (always 0)
+#   instead of `systemctl enable`, so a real enable/start failure was
+#   silently swallowed rather than falling through to a warning. Now
+#   uses the shared enable_and_start_units() helper instead.
+# - Fixed is_service_enabled() (shared by both scripts): its pre-check
+#   `systemctl list-unit-files | grep -q "^${service}\s"` never matched,
+#   since every call site passes a bare service name (e.g.
+#   "squeezelite") while list-unit-files lines start with
+#   "squeezelite.service" - so the function always fell through to
+#   `return 1` regardless of the real enabled state. `systemctl
+#   is-enabled` already reports "not found" as a failure on its own, so
+#   the dead pre-check is simply dropped. Backported here since it's the
+#   same shared function in both scripts and the fix is low-risk
+#   (behavior-preserving for every state except the one it was silently
+#   getting wrong).
+#
+# RELEASE v2.8.0 - Remote Access Migrated (VNC/WireGuard/Tailscale/
+#                   Netbird); Framework-Level Status-Function Crash Fixed
+# - New in ./install.sh: Remote Access (menus/addon_remote_access.sh) -
+#   VNC (x11vnc), WireGuard, Tailscale, and Netbird, each with its own
+#   install/connect/status/uninstall flow. The biggest Addon migrated so
+#   far (4 sub-areas). Tailscale and Netbird install via the vendors'
+#   own documented `curl -fsSL <url> | sh` method, preserved as-is.
+# - New $WIREGUARD_DIR (lib/config.sh), same pattern as $SYSTEMD_DIR
+#   etc - nothing here hardcodes /etc/wireguard.
+# - Promoted power_schedule.sh's enable_and_start_timers() to a shared
+#   enable_and_start_units() in lib/menu.sh (works for services now too,
+#   not just timers) - Remote Access needed the identical pattern for
+#   x11vnc and wg-quick@, so this is now fixed and reusable everywhere
+#   instead of being duplicated a second time.
+# - IMPORTANT framework-level bug found and fixed in lib/menu.sh's
+#   run_menu(): the *handler* call has been `|| true`-guarded since
+#   v2.1.0, but the *status function* call was still bare and completely
+#   unprotected. A status function's job is read-only display, but if
+#   one contains so much as a pipeline whose grep matches nothing (which
+#   pipefail turns into a pipeline failure even though the actual last
+#   command in it succeeds), that bare call would crash the *entire
+#   session* - not just fail to show status. Found while writing
+#   wireguard_status()'s `sudo wg show | grep ... | sed ...` and
+#   confirming its exact failure mode before assuming it was already
+#   covered. Fixed once in run_menu() itself, protecting every status
+#   function across every menu, present and future - same "fix once at
+#   the framework level" pattern as the v2.1.0 handler fix. Also audited
+#   every existing status function across all menus for the same
+#   specific shape (a bare `var=$(...)` assignment from a grep-based
+#   pipeline, not embedded in an echo and not already guarded) and found
+#   one real instance in power_schedule_status(), now fixed too.
+#
+# RELEASE v2.7.0 - Backported Fix: save_config() No Longer Deletes
+#                   Authelia Credentials (or Any Other Untracked Field)
+# - This script's own save_config() had the exact bug described under
+#   v2.6.0 below: it rebuilt config.json from a fixed list of known
+#   fields via `jq -n`, which silently deleted anything it didn't know
+#   about - specifically autheliaURL/autheliaUsername/
+#   autheliaEncryptedPassword, written by configure_authelia()'s own
+#   careful `. + {...}` merge. Configure Authelia, then visit Core
+#   Settings → Sites/Touch Controls/Navigation/Password Protection (all
+#   of which call save_config), and the Authelia credentials were
+#   silently gone - a real credential-loss bug that was shipping in this
+#   script independent of the modular migration.
+# - Fixed the same way as lib/config.sh's save_config: merge the known
+#   fields onto whatever's already in config.json (`. + {...}`) instead
+#   of rebuilding it from nothing, with a `jq empty` validity check
+#   falling back to `{}` if the existing file is missing or corrupt.
+#   Verified in isolation (the exact function extracted and exercised
+#   against a stub config.json seeded with Authelia-style fields,
+#   confirming they survive a second save_config call while an actual
+#   settings change still takes effect, plus the corrupt/missing-file
+#   edge cases) before touching the shipping copy.
+# - This is a standalone backport of one specific fix, not a wider
+#   migration of the Sites/Touch/Navigation/Authelia menus into this
+#   script - those still work exactly as before, just without the
+#   credential-loss bug. The modular ./install.sh path (lib/config.sh)
+#   got the equivalent fix in v2.6.0.
+#
+# RELEASE v2.6.0 - Authelia Migrated; Real Config-Clobbering Bug Fixed
+# - New in ./install.sh: Authelia Auto-Login (menus/addon_authelia.sh) -
+#   encrypted SSO credentials (AES-256-CBC, key derived from this
+#   machine's /etc/machine-id via scrypt - same algorithm main.js
+#   decrypts with, verified by test with a real round-trip encrypt/
+#   decrypt, not just "some string came out"), plus the full Dockerized
+#   server-side setup instructions, viewable again later without
+#   reconfiguring.
+# - IMPORTANT bug found and fixed in lib/config.sh, NOT specific to
+#   Authelia or to this migration: save_config() did a full `jq -n`
+#   rebuild of config.json from known fields, exactly like the legacy
+#   script's save_config still does. Authelia's own write is a careful
+#   `. + {...}` merge that preserves everything - but the legacy
+#   configure_authelia() writes autheliaURL/autheliaUsername/
+#   autheliaEncryptedPassword into config.json via that merge, and
+#   *neither* the legacy save_config nor this project's own (before this
+#   fix) had any idea those three fields existed. The next time a user
+#   visited Sites, Touch Controls, Navigation, or Password Protection -
+#   all of which call save_config - their Authelia credentials were
+#   silently deleted. This is a real bug in the currently-shipping
+#   single-file installer, not introduced by this migration; ported
+#   faithfully into lib/config.sh's first version because no test
+#   happened to set an untracked field before calling save_config.
+#   Fixed here by changing save_config to merge its known fields onto
+#   whatever's already in config.json (jq `. + {...}`) instead of
+#   rebuilding the file from nothing, so any field this tool doesn't
+#   track - Authelia's three today, anything else tomorrow - survives
+#   automatically. autheliaURL/autheliaUsername/autheliaEncryptedPassword
+#   are also now tracked fields in their own right, same as every other
+#   config.json field this tool manages. NOTE: the equivalent bug still
+#   exists in this script's own save_config below, unfixed - see
+#   Readme.md ("Modular Management") for the open question of whether to
+#   backport this specific fix here independent of the wider migration,
+#   given it's a real, currently-shipping credential-loss bug.
+#
+# RELEASE v2.5.0 - First Addon Migrated (CUPS), Menu Restructured
+# - New in ./install.sh: CUPS Printing (menus/addon_cups.sh) - the first
+#   Addon migrated. Install/reconfigure/complete uninstall (purge),
+#   genuinely mutating real system state (apt install/remove --purge,
+#   /etc/cups, ufw) at fixed paths CUPS itself doesn't let us relocate -
+#   unlike the systemd/cron/bin paths this project controls, there is no
+#   scratch equivalent for a real apt-managed subsystem's own file
+#   layout, so every test uses full command-level `sudo` stubbing
+#   instead. Only the polkit rule's directory is parameterized
+#   ($POLKIT_DIR, since that one is ours to place).
+# - install.sh's top-level menu is now grouped the same way the legacy
+#   menu groups things - Core Settings / Addons / Advanced - instead of
+#   one flat list, ahead of that list getting unwieldy as more Addons
+#   and Advanced items migrate in.
+# - Two bugs caught and fixed before they ever shipped, both instructive
+#   beyond this one file:
+#   - A "wait for service to start" retry loop used a bare `cmd1 &&
+#     cmd2 && break` as its body. That's not safe merely because it's
+#     inside a loop - a bare &&/|| list used as a standalone statement
+#     (not the condition of if/while/until) is fully subject to set -e,
+#     and cmd1 failing on an early iteration (near-certain right after
+#     a fresh install) would have killed the whole session. Restored
+#     the `if cmd1 && cmd2; then break; fi` form the legacy script
+#     already used correctly, rather than "simplifying" it away.
+#   - Resolved real uncertainty about how far run_menu's `handler ||
+#     true` guard (added in v2.1.0) actually reaches: verified with a
+#     minimal isolated test that it protects against a bare failing
+#     command no matter how many function calls deep it occurs - bash's
+#     errexit exemption for the left side of `||` covers the entire
+#     evaluation, not just the immediately-called function. So the
+#     session-crash risk this project has been chasing since v2.1.0 is
+#     already covered end-to-end by that one fix. Per-statement guards
+#     (`|| true`, explicit `if`) still matter for a different reason:
+#     without them a deep failure silently bubbles up past the menu
+#     that's actually responsible for it to wherever the nearest `||
+#     true` happens to catch it, which may be several menu levels
+#     higher than where the user actually was.
+#
+# RELEASE v2.4.0 - Diagnostics Migrated
+# - New in ./install.sh: Diagnostics (menus/diagnostics.sh) - system
+#   status, log viewing (Electron/LightDM/journal), an 8-step audio
+#   diagnostic, and a ping+DNS network test, pulled from the legacy
+#   Advanced menu. Everything here is read-only except one optional
+#   "play a test sound?" prompt - a deliberate change of pace after
+#   Sites/WiFi/Power, with no destructive-action risk to design around.
+#   Manual Electron Update, Factory Reset, Export/Import Settings,
+#   Emergency Hotspot, and Fix Blank Screen are staying in the legacy
+#   script for now - they're mutating/destructive, and some share
+#   Upgrade's coupling to the legacy script's own self-extraction
+#   mechanism (see v2.3.0 below for why Upgrade/Reinstall/Uninstall
+#   aren't migrated either).
+# - Fixed (set -e safety, same class as v2.1.0/v2.3.0): every diagnostic
+#   command whose failure is actually the expected, common case - no
+#   lightdm running, no audio hardware, no network, missing log files,
+#   `ping`/`nslookup` not even installed - was a bare unguarded
+#   statement that would have crashed the whole session instead of
+#   reporting "not found" and moving on. A diagnostics tool has to be
+#   the most crash-proof code in the project, since it exists to run
+#   *when something is already broken*; every one of these now reports
+#   and continues instead. Also worth noting for future menus: writing
+#   `local var;` and `var=$(cmd)` as separate statements (good practice,
+#   and how earlier real bugs in this migration were caught) removes an
+#   accidental safety net bash's `local x=$(cmd)` has on one line - that
+#   form masks the substitution's exit code with `local`'s own
+#   always-success status. Splitting them is correct, but each split
+#   assignment needs its own explicit `|| true` (or real fallback) where
+#   a failure is expected and non-fatal, rather than relying on that
+#   quirk by accident.
+#
+# RELEASE v2.3.0 - WiFi and Power/Display/Quiet Hours Migrated
+# - New in ./install.sh: WiFi (menus/wifi.sh) and Power/Display/Quiet
+#   Hours (menus/power_schedule.sh) - by far the biggest and riskiest
+#   menus migrated so far. WiFi can rewrite live netplan config and, if
+#   run over SSH, disconnect the very session configuring it; Power
+#   schedule can shut the physical machine down and wake it via RTC.
+#   Every safety mechanism from the legacy menus is preserved exactly:
+#   netplan backup + 60s SSH watchdog + restore-on-apply-failure for
+#   WiFi; RTC availability detection for power scheduling. New
+#   $SYSTEMD_DIR/$CRON_D_DIR/$BIN_DIR/$NETPLAN_DIR variables (lib/config.sh)
+#   mean nothing under menus/ hardcodes /etc/systemd/system, /etc/cron.d,
+#   /usr/local/bin, or /etc/netplan - tests point them at scratch space.
+# - Fixed: the legacy dispatcher refused to open "Configure power
+#   schedule" at all when no RTC wake was detected, even though
+#   shutdown-only scheduling never needed RTC in the first place.
+# - Fixed: none of shutdown/wake/display-off/display-on/quiet-start/
+#   quiet-end/custom-Electron-reload times were validated as HH:MM in
+#   the legacy menus (plain `read`, no format check) - now all go
+#   through ask_time.
+# - Fixed (set -e safety, same class as v2.1.0's run_menu fix): several
+#   bare, unguarded statements whose failure would have taken down the
+#   entire session instead of just that action - `ls *.yaml` when no
+#   netplan file exists (masked in practice by cloud-init usually
+#   leaving one behind), the restore-and-reapply `netplan apply` after
+#   an initial apply failure, and `systemctl enable`/`start` after
+#   writing each of the four timer pairs. The last of these was caught
+#   only by testing in an environment without a live systemd - a real
+#   `enable`/`start` failure on actual hardware (bad unit, daemon-reload
+#   skipped, ...) would have hit the same bug. All now report a clear
+#   warning and return to the menu instead.
+# - Deliberately NOT migrated: the legacy dispatcher's "Test schedules &
+#   system" led into a shared diagnostics submenu (audio/network/
+#   keyboard tests) that isn't specific to scheduling and belongs with a
+#   future Advanced/Diagnostics migration instead.
+#
+# RELEASE v2.2.0 - Password Protection & Lockout Migrated
+# - New in ./install.sh: Password Protection & Lockout (menus/lockout.sh) -
+#   enable/disable, change password (SHA-256 hashed before it's ever
+#   written to disk, matching main.js's comparison logic - never
+#   plaintext), inactivity timeout, daily lock time, boot password.
+# - Fixed: lib/menu.sh was missing ask_time/validate_time entirely (only
+#   caught by testing this menu, before it shipped - "Set daily lock
+#   time" would have failed with "ask_time: command not found" for every
+#   user). Ported from the legacy script; also promoted the ON/OFF
+#   toggle-label helper (previously private to menus/display.sh) to a
+#   shared `onoff()` in lib/menu.sh so menus/lockout.sh doesn't have to
+#   depend on menus/display.sh - menus should only ever depend on lib/.
+#
+# RELEASE v2.1.0 - Two More Menus Migrated, Menu Framework Hardened
+# - New in ./install.sh: Timezone (menus/timezone.sh) and Hidden Site PIN
+#   (menus/hidden_pin.sh) menus, alongside Sites & Page Timing and Display
+#   & Interaction from v2.0.0. Timezone doubles as a demonstration of the
+#   framework: the old hand-numbered 18-entry case statement is now just
+#   a data list plus one handler.
+# - Hardened lib/menu.sh: since this whole tool runs under `set -e`, a menu
+#   action that legitimately fails (e.g. rejecting an invalid timezone) and
+#   returns non-zero as its last statement could take down the *entire*
+#   session, not just that one action - one typo would silently drop the
+#   user back to their shell. Caught by testing menus/timezone.sh (its
+#   set_timezone() does `return 1` on an invalid zone) before this ever
+#   shipped; run_menu() now absorbs a failed handler's exit code so it
+#   only redraws the menu, protecting every menu, present and future.
+# - The old (unmigrated) configure_sites/configure_touch_controls/
+#   configure_navigation_security/configure_optional_features functions
+#   still live in this script, unchanged, and still have both v2.0.0 bugs
+#   above - left in place deliberately until enough of Core Settings/
+#   Addons/Advanced is migrated to retire them in one pass. configure_
+#   timezone/configure_hidden_site_pin don't share the set -e hazard
+#   (they never use a bare `return 1`), but are otherwise also still
+#   here unchanged pending the same cleanup. See Readme.md ("Modular
+#   Management") for current migration status.
+#
+# RELEASE v2.0.0 - Modular Management & Unversioned Filename
+# - New git-clone-based management path: lib/menu.sh (reusable numbered-menu
+#   framework) + lib/config.sh (single config.json load/save) + menus/*.sh,
+#   run via ./install.sh against an already-installed kiosk. Sites & Page
+#   Timing and Display & Interaction are migrated; the rest of Core
+#   Settings/Addons/Advanced still live here and will move over the same
+#   way, one menu at a time. See Readme.md ("Modular Management").
+# - Fixed: the old Sites menu could save config.json without first loading
+#   swipe/navigation/lockout settings, silently resetting them to defaults.
+# - Fixed: reordering sites had an off-by-one that left the moved site one
+#   slot short of the requested position.
+# - This script is now distributed as ubuntu-based-kiosk.sh (no version
+#   number in the filename) so it can be updated in place; released
+#   versions are tracked via git history and this changelog instead.
+#   Older ubuntu-based-kiosk-v*.sh / install_kiosk_*.sh files remain in the
+#   repo as archived releases.
 #
 # RELEASE v1.0.3 - Touch Screen Detection & Upgrade Reliability
 # - Authelia auto-login addon (Addons menu → 5)
@@ -68,7 +546,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="1.0.3"
+SCRIPT_VERSION="2.15.0"
 
 # Resolve the real path to this script file.
 # When piped (curl|bash or wget|bash), BASH_SOURCE[0] is a pipe descriptor,
@@ -326,12 +804,14 @@ is_service_active() {
 
 is_service_enabled() {
     local service="$1"
-    # Check if service file exists first
-    if systemctl list-unit-files 2>/dev/null | grep -q "^${service}\s"; then
-        systemctl is-enabled --quiet "$service" 2>/dev/null
-    else
-        return 1
-    fi
+    # `systemctl is-enabled` already reports "not found" as a failure on
+    # its own - no need for (and no correct way to write, given every
+    # call site here passes a bare service name while list-unit-files
+    # lines start with "$service.service") a pre-check via
+    # list-unit-files. The previous "^${service}\s" pre-check never
+    # matched, so this function always fell through to `return 1`
+    # regardless of the real enabled state.
+    systemctl is-enabled --quiet "$service" 2>/dev/null
 }
 
 get_ip_address() {
@@ -3519,7 +3999,22 @@ save_config() {
     local boot_password_json="false"
     [[ "$REQUIRE_PASSWORD_ON_BOOT" == "true" ]] && boot_password_json="true"
 
-    jq -n \
+    # Merge onto whatever's already in config.json rather than rebuilding
+    # it from nothing (fixed in v2.7.0). The old `jq -n` rebuild silently
+    # deleted any field this function doesn't explicitly know about -
+    # notably autheliaURL/autheliaUsername/autheliaEncryptedPassword,
+    # written by configure_authelia()'s own careful `. + {...}` merge.
+    # Configuring Authelia and then visiting Sites, Touch Controls,
+    # Navigation, or Password Protection (all of which call this
+    # function) silently deleted the Authelia credentials. See the
+    # RELEASE v2.7.0 note above.
+    local existing="{}"
+    if sudo -u "$KIOSK_USER" test -f "$CONFIG_PATH" 2>/dev/null; then
+        existing=$(sudo -u "$KIOSK_USER" cat "$CONFIG_PATH" 2>/dev/null)
+        echo "$existing" | jq empty 2>/dev/null || existing="{}"
+    fi
+
+    echo "$existing" | jq \
       --arg unit "s" \
       --argjson autoswitch "$auto_json" \
       --argjson enableTouch true \
@@ -3538,7 +4033,7 @@ save_config() {
       --arg lockoutActiveStart "${LOCKOUT_ACTIVE_START:-}" \
       --arg lockoutActiveEnd "${LOCKOUT_ACTIVE_END:-}" \
       --argjson requirePasswordOnBoot "$boot_password_json" \
-      '{unit:$unit,autoswitch:$autoswitch,enableTouch:$enableTouch,dualSwipe:$dualSwipe,swipeMode:$swipeMode,allowNavigation:$allowNavigation,homeTabIndex:$homeTabIndex,inactivityTimeout:$inactivityTimeout,enablePauseButton:$enablePauseButton,enableKeyboardButton:$enableKeyboardButton,enableNavButton:$enableNavButton,enablePasswordProtection:$enablePasswordProtection,lockoutPassword:$lockoutPassword,lockoutTimeout:$lockoutTimeout,lockoutAtTime:$lockoutAtTime,lockoutActiveStart:$lockoutActiveStart,lockoutActiveEnd:$lockoutActiveEnd,requirePasswordOnBoot:$requirePasswordOnBoot,tabs:[]}' > "$tmp"
+      '. + {unit:$unit,autoswitch:$autoswitch,enableTouch:$enableTouch,dualSwipe:$dualSwipe,swipeMode:$swipeMode,allowNavigation:$allowNavigation,homeTabIndex:$homeTabIndex,inactivityTimeout:$inactivityTimeout,enablePauseButton:$enablePauseButton,enableKeyboardButton:$enableKeyboardButton,enableNavButton:$enableNavButton,enablePasswordProtection:$enablePasswordProtection,lockoutPassword:$lockoutPassword,lockoutTimeout:$lockoutTimeout,lockoutAtTime:$lockoutAtTime,lockoutActiveStart:$lockoutActiveStart,lockoutActiveEnd:$lockoutActiveEnd,requirePasswordOnBoot:$requirePasswordOnBoot,tabs:[]}' > "$tmp"
     
     if [[ ${#URLS[@]} -gt 0 ]]; then
         for idx in "${!URLS[@]}"; do
