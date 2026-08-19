@@ -1,0 +1,2 @@
+event=button/power PWRF
+action=/usr/local/bin/kiosk-power-button.sh

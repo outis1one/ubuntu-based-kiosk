@@ -1,7 +1,54 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk v2.13.0               ###
+###   Ubuntu Based Kiosk v2.14.0               ###
 ################################################################################
+#
+# RELEASE v2.14.0 - install.sh Now Provisions a Kiosk From Scratch,
+#                    Not Just Manages an Existing One
+# - Until now, ./install.sh only worked against an already-installed
+#   kiosk (this script was still the only path from a bare Ubuntu
+#   Server box to a running one). It now provisions too: on a machine
+#   with no kiosk-app directory yet, it installs packages, creates the
+#   kiosk user, installs Node.js/Electron, sets up LightDM+Openbox
+#   autologin, audio/video/HDMI/power-button hardware handling, the
+#   firewall, then hands off to the same Core Settings menus below for
+#   initial configuration - matching this script's own install-then-
+#   configure flow, on the new modular codebase.
+# - New: lib/provision.sh (the provisioning steps, built almost
+#   entirely by calling already-migrated menus - core_settings_menu,
+#   action_configure_emergency_hotspot, action_disable_virtual_consoles
+#   - rather than reimplementing that logic a third time), lib/electron.sh
+#   (electron_install_binary, extracted out of menus/advanced_electron.sh
+#   so both fresh provisioning and the existing "Fix blank screen"
+#   action share one implementation), kiosk-app/ (the Electron app
+#   source - main.js, preload.js, the dialog HTML files, package.json,
+#   start.sh - extracted byte-for-byte out of this script's heredocs
+#   into real files), provision/files/ (every other system template
+#   file - X11 configs, udev rules, systemd units, the power-button and
+#   HDMI-mirroring scripts, polkit rules - laid out mirroring their real
+#   destination paths, e.g. provision/files/etc/X11/xorg.conf.d/foo.conf
+#   installs to /etc/X11/xorg.conf.d/foo.conf).
+# - Reusing the already-migrated menus instead of reimplementing
+#   first-time configuration cut lib/provision.sh down to roughly 300
+#   lines against this script's ~4,000-line first_time_install().
+# - Fixed along the way: a bash `set -e` gotcha where testing a
+#   multi-statement function as an if-condition (`if ! some_func; then`)
+#   silently exempts everything inside that function from set -e for
+#   the duration - found via direct testing while writing the new
+#   provisioning code, then swept for elsewhere and also fixed in
+#   menus/advanced_electron.sh's existing "Fix blank screen" action
+#   (its electron_install_binary call had the same shape).
+# - Known, deliberate limitation carried over unchanged from this
+#   script: a few of the extracted system scripts (start.sh,
+#   kiosk-hotplug.sh, the power-button handler) hardcode the username
+#   "kiosk" rather than substituting $KIOSK_USER, exactly as the
+#   quoted heredocs here always did. Fine unless $KIOSK_USER is
+#   overridden from its default, which in practice it almost never is.
+# - Still not ported to ./install.sh: Upgrade and Full Reinstall, both
+#   coupled to this script's own heredoc self-extraction - a different
+#   mechanism than the new provisioning (which copies real files from
+#   kiosk-app/ and provision/files/, not heredocs). This script remains
+#   the way to upgrade/reinstall an existing install for now.
 #
 # RELEASE v2.13.0 - Clone Settings: New MVP for Standing Up Several
 #                    Kiosks with the Same Settings
@@ -474,7 +521,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="2.13.0"
+SCRIPT_VERSION="2.14.0"
 
 # Resolve the real path to this script file.
 # When piped (curl|bash or wget|bash), BASH_SOURCE[0] is a pipe descriptor,

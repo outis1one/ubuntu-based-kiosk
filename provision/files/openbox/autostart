@@ -1,0 +1,143 @@
+#!/bin/bash
+
+# Mirror any connected external display (e.g. HDMI-out to a monitor/TV) onto
+# the primary display, forcing it to the primary's exact resolution.
+/usr/local/bin/kiosk-mirror-display.sh
+
+# AGGRESSIVE DPMS disable - multiple methods
+xset s off
+xset s noblank
+xset -dpms
+xset s 0 0
+xset dpms 0 0 0
+xset dpms force on
+
+# Keep screen on forever - watchdog (schedule-aware)
+(
+  while true; do
+    sleep 300  # Every 5 minutes
+
+    # Check if display schedule is active
+    schedule_active=false
+    if systemctl is-active --quiet kiosk-display-off.timer && systemctl is-active --quiet kiosk-display-on.timer; then
+      # Get display off and on times from systemd timers
+      doff=$(systemctl cat kiosk-display-off.timer 2>/dev/null | grep "^OnCalendar=" | sed 's/.*\*-\*-\* //' | sed 's/:00$//')
+      don=$(systemctl cat kiosk-display-on.timer 2>/dev/null | grep "^OnCalendar=" | sed 's/.*\*-\*-\* //' | sed 's/:00$//')
+
+      if [ -n "$doff" ] && [ -n "$don" ]; then
+        # Get current time in HH:MM format
+        current_time=$(date +%H:%M)
+
+        # Convert times to minutes since midnight for comparison
+        # Using 10# prefix to force decimal interpretation (fixes octal bug for 08:xx and 09:xx times)
+        current_mins=$(( 10#$(date +%H) * 60 + 10#$(date +%M) ))
+        off_mins=$(( 10#$(echo "$doff" | cut -d: -f1) * 60 + 10#$(echo "$doff" | cut -d: -f2) ))
+        on_mins=$(( 10#$(echo "$don" | cut -d: -f1) * 60 + 10#$(echo "$don" | cut -d: -f2) ))
+
+        # Check if we're in the "display off" window
+        if [ "$off_mins" -lt "$on_mins" ]; then
+          # Normal case: off time is before on time (e.g., 22:00 to 06:00 next day)
+          if [ "$current_mins" -ge "$off_mins" ] && [ "$current_mins" -lt "$on_mins" ]; then
+            schedule_active=true
+          fi
+        else
+          # Overnight case: off time is after on time (e.g., 06:00 to 22:00)
+          if [ "$current_mins" -ge "$off_mins" ] || [ "$current_mins" -lt "$on_mins" ]; then
+            schedule_active=true
+          fi
+        fi
+      fi
+    fi
+
+    # Only force display on if NOT in scheduled off period
+    if [ "$schedule_active" = "false" ]; then
+      xset s reset 2>/dev/null
+      xset dpms force on 2>/dev/null
+    fi
+  done
+) &
+
+# Start PipeWire user services
+systemctl --user start pipewire pipewire-pulse wireplumber
+sleep 3
+
+# Wait for PipeWire to be ready
+for i in {1..15}; do
+    pactl info >/dev/null 2>&1 && break
+    sleep 1
+done
+
+# Wait for ALSA devices
+for i in {1..10}; do
+    pactl list sinks short | grep -q alsa && break
+    sleep 1
+done
+
+# Route audio to HDMI if an external display is connected/mirrored, else built-in
+/usr/local/bin/kiosk-audio-route.sh
+
+# Set audio levels (speakers 100%, mic 100%, mic unmuted)
+pactl set-sink-volume @DEFAULT_SINK@ 100%
+pactl set-source-volume @DEFAULT_SOURCE@ 100%
+pactl set-source-mute @DEFAULT_SOURCE@ 0
+
+# Audio watchdog - checks every 30 seconds (quiet hours aware)
+(
+  while true; do
+    sleep 30
+
+    # Check if quiet hours is active
+    quiet_active=false
+    if systemctl is-active --quiet kiosk-quiet-start.timer && systemctl is-active --quiet kiosk-quiet-end.timer; then
+      # Get quiet hours start and end times from systemd timers
+      qstart=$(systemctl cat kiosk-quiet-start.timer 2>/dev/null | grep "^OnCalendar=" | sed 's/.*\*-\*-\* //' | sed 's/:00$//')
+      qend=$(systemctl cat kiosk-quiet-end.timer 2>/dev/null | grep "^OnCalendar=" | sed 's/.*\*-\*-\* //' | sed 's/:00$//')
+
+      if [ -n "$qstart" ] && [ -n "$qend" ]; then
+        # Convert times to minutes since midnight for comparison
+        # Using 10# prefix to force decimal interpretation (fixes octal bug for 08:xx and 09:xx times)
+        current_mins=$(( 10#$(date +%H) * 60 + 10#$(date +%M) ))
+        start_mins=$(( 10#$(echo "$qstart" | cut -d: -f1) * 60 + 10#$(echo "$qstart" | cut -d: -f2) ))
+        end_mins=$(( 10#$(echo "$qend" | cut -d: -f1) * 60 + 10#$(echo "$qend" | cut -d: -f2) ))
+
+        # Check if we're in quiet hours window
+        if [ "$start_mins" -lt "$end_mins" ]; then
+          # Normal case: start time is before end time (e.g., 08:00 to 17:00)
+          if [ "$current_mins" -ge "$start_mins" ] && [ "$current_mins" -lt "$end_mins" ]; then
+            quiet_active=true
+          fi
+        else
+          # Overnight case: start time is after end time (e.g., 22:00 to 07:00)
+          if [ "$current_mins" -ge "$start_mins" ] || [ "$current_mins" -lt "$end_mins" ]; then
+            quiet_active=true
+          fi
+        fi
+      fi
+    fi
+
+    # Check if PipeWire is running
+    if ! pactl info >/dev/null 2>&1; then
+      logger "KIOSK: Audio dead, restarting PipeWire"
+      systemctl --user restart pipewire pipewire-pulse wireplumber
+      sleep 5
+      # Only restore audio levels if NOT in quiet hours
+      if [ "$quiet_active" = "false" ]; then
+        pactl set-sink-volume @DEFAULT_SINK@ 100%
+        pactl set-source-volume @DEFAULT_SOURCE@ 100%
+        pactl set-source-mute @DEFAULT_SOURCE@ 0
+      fi
+    fi
+
+  done
+) &
+
+# Other services
+unclutter -idle 0.1 -root &
+XDG_RUNTIME_DIR=/run/user/$(id -u) xbindkeys &
+
+# Create boot flag for password requirement on boot
+touch /home/kiosk/kiosk-app/.boot-flag
+
+# Start kiosk app AFTER audio is ready
+sleep 2
+/home/kiosk/kiosk-app/start.sh &

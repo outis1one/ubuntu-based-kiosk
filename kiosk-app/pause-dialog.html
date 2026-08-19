@@ -1,0 +1,119 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: rgba(0,0,0,0.9);
+      color: #ecf0f1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      padding: 40px;
+    }
+    .container { text-align: center; max-width: 600px; }
+    h2 { font-size: 32px; margin-bottom: 20px; }
+    .message { font-size: 20px; margin-bottom: 30px; line-height: 1.5; }
+    .options {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 15px;
+      margin: 30px 0;
+    }
+    .btn {
+      padding: 20px 40px;
+      font-size: 18px;
+      cursor: pointer;
+      border: none;
+      border-radius: 12px;
+      font-weight: bold;
+      transition: all 0.2s;
+      color: white;
+    }
+    .btn-extend { background: #e67e22; }
+    .btn-extend:hover { background: #d35400; }
+    .btn-extend:active { background: #ba4a00; }
+
+    .btn-cancel {
+      background: #95a5a6;
+      grid-column: 1 / -1;
+      font-size: 16px;
+      padding: 15px;
+    }
+    .btn-cancel:hover { background: #7f8c8d; }
+
+    .info {
+      font-size: 14px;
+      color: #95a5a6;
+      margin-top: 20px;
+      line-height: 1.6;
+    }
+    .countdown {
+      font-size: 16px;
+      color: #e74c3c;
+      margin-top: 15px;
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>⏸️ Pause Timers</h2>
+    <div class="message">
+      Select how long to pause rotation and inactivity timers:
+    </div>
+
+    <div class="options">
+      <button class="btn btn-extend" onclick="selectTime(15)">
+        🍿 15 minutes
+      </button>
+
+      <button class="btn btn-extend" onclick="selectTime(30)">
+        ⏱️ 30 minutes
+      </button>
+
+      <button class="btn btn-extend" onclick="selectTime(60)">
+        🎬 1 hour
+      </button>
+
+      <button class="btn btn-extend" onclick="selectTime(120)">
+        📺 2 hours
+      </button>
+
+      <button class="btn btn-cancel" onclick="selectTime(0)">
+        ✗ Cancel
+      </button>
+    </div>
+
+    <div class="info">
+      After the time expires, normal rotation and return-to-home logic will resume.
+    </div>
+    <div class="countdown" id="countdown">Auto-closing in 30 seconds...</div>
+  </div>
+
+  <script>
+    const {ipcRenderer} = require('electron');
+    let timeLeft = 30;
+    let countdownInterval;
+
+    function selectTime(minutes) {
+      clearInterval(countdownInterval);
+      ipcRenderer.send('pause-time-selected', minutes);
+    }
+
+    function updateCountdown() {
+      timeLeft--;
+      document.getElementById('countdown').textContent = 'Auto-closing in ' + timeLeft + ' seconds...';
+      if (timeLeft <= 0) {
+        clearInterval(countdownInterval);
+        selectTime(0);
+      }
+    }
+
+    countdownInterval = setInterval(updateCountdown, 1000);
+  </script>
+</body>
+</html>

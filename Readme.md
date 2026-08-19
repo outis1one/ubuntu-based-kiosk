@@ -54,6 +54,12 @@ chmod +x ubuntu-based-kiosk.sh && ./ubuntu-based-kiosk.sh
 
 The installer will guide you through configuration during setup.
 
+> The modular `./install.sh` (see "Modular Management" below) can also
+> provision a kiosk from scratch now, as an alternative to the
+> single-file installer above. `ubuntu-based-kiosk.sh` remains the more
+> battle-tested path and the only one that supports Upgrade/Full
+> Reinstall of an existing install.
+
 ---
 
 ## Offline / Air-Gapped Download
@@ -1260,33 +1266,55 @@ terminal menu and the web UI, so they can't drift apart).
   share the same settings. New, not a legacy port — deliberately never
   copies machine-bound credentials (Authelia, WireGuard, Asterisk
   Intercom); see "Recent Updates (v2.13.0)" below.
+- `lib/electron.sh` — `electron_install_binary()`: verify/download the
+  Electron binary and fix `chrome-sandbox` permissions. Shared between
+  fresh provisioning and `menus/advanced_electron.sh`'s "Fix blank
+  screen" action — the same repair sequence applies whether the binary
+  never downloaded during the initial `npm install` or went missing
+  later.
+- `lib/provision.sh` — first-time provisioning: packages, kiosk user,
+  Node.js/Electron, LightDM+Openbox autologin, audio/video/HDMI/
+  power-button hardware setup, firewall, then hands off to
+  `core_settings_menu` and other already-migrated Advanced actions for
+  initial configuration, rather than reimplementing that logic a third
+  time. See "Recent Updates (v2.14.0)" below.
+- `kiosk-app/` — the Electron app source (`main.js`, `preload.js`, the
+  dialog HTML files, `package.json`, `start.sh`), copied to the kiosk
+  directory during provisioning. Also the basis for a future clean
+  `git pull`-based Upgrade.
+- `provision/files/` — every other system template file provisioning
+  installs (X11 configs, udev rules, systemd units, the power-button
+  and HDMI-mirroring scripts, polkit rules), laid out mirroring their
+  real destination path, e.g. `provision/files/etc/X11/xorg.conf.d/
+  foo.conf` installs to `/etc/X11/xorg.conf.d/foo.conf`.
 - `install.sh` — entry point for the modular tool, now grouped **Core
-  Settings / Addons / Advanced** like the legacy menu. Run it against an
-  *already-installed* kiosk:
+  Settings / Addons / Advanced** like the legacy menu. On a machine
+  with no kiosk installed yet, it provisions one first (see
+  `lib/provision.sh` above); on an already-installed kiosk, it goes
+  straight to the same menus:
   ```bash
   git clone https://github.com/outis1one/ubuntu-based-kiosk/
   cd ubuntu-based-kiosk
   ./install.sh
   ```
 
-**Honest status:** this does not yet replace first-time installation, or
-most of the old installer. `ubuntu-based-kiosk.sh` is still ~12,000
+**Honest status:** first-time installation is now covered — `install.sh`
+provisions a kiosk from a bare Ubuntu Server box, not just an
+already-installed one — but `ubuntu-based-kiosk.sh` is still ~12,000
 lines and still contains its own unremoved, unmodified copies of every
 menu above, including the legacy three-option (Client/Server/Full)
 Easy Asterisk Intercom — the modular version only replaces the Client
-option, by design (plus Upgrade, Full Reinstall, and Fix Squeezelite
-Audio — none of that has moved yet; Complete Uninstall *is* now
-migrated, but Upgrade and Full Reinstall are staying put — both are
-coupled to this file's own heredoc self-extraction of main.js/
-preload.js/etc, which has no modular equivalent). The legacy Export/
-Import Settings is also staying as-is; Clone Settings is a new,
-narrower feature alongside it, not a replacement for it — see "Recent
-Updates (v2.13.0)" below for why they're not the same thing.
+option, by design. Two pieces remain legacy-only: Upgrade and Full
+Reinstall, both coupled to `ubuntu-based-kiosk.sh`'s own heredoc
+self-extraction of main.js/preload.js/etc — a different mechanism from
+the new provisioning, which copies real files from `kiosk-app/` and
+`provision/files/` instead. The legacy Export/Import Settings is also
+staying as-is; Clone Settings is a new, narrower feature alongside it,
+not a replacement for it — see "Recent Updates (v2.13.0)" below for why
+they're not the same thing.
 Both copies coexist deliberately: the old ones stay until enough of
 Core Settings/Addons/Advanced is migrated to retire them in one pass,
-rather than leaving the legacy menu half-wired. Migration continues one
-`menus/*.sh` file at a time; first-time installation itself is the last
-and largest piece to move, if it moves at all.
+rather than leaving the legacy menu half-wired.
 
 **Resolved (v2.9.0):** `is_service_enabled()` — shared by both scripts
 — had a pre-check (`systemctl list-unit-files | grep -q "^${service}\s"`)
@@ -1313,9 +1341,18 @@ full migration pass.
 
 ## Project Status & Future Plans
 
-**Current Version:** 2.13.0
+**Current Version:** 2.14.0
 
-**Recent Updates (v2.13.0):**
+**Recent Updates (v2.14.0):**
+- **`./install.sh` now provisions a kiosk from scratch, not just manages an existing one.** Until now it only worked against an already-installed kiosk — `ubuntu-based-kiosk.sh` was still the only path from a bare Ubuntu Server box to a running one. On a machine with no kiosk-app directory yet, it now installs packages, creates the kiosk user, installs Node.js/Electron, sets up LightDM+Openbox autologin, audio/video/HDMI/power-button hardware handling, and the firewall, then hands off to the same Core Settings menus for initial configuration — matching the legacy script's own install-then-configure flow, on the modular codebase.
+- **New: `lib/provision.sh`**, the provisioning steps — built almost entirely by calling menus already migrated below (`core_settings_menu`, emergency hotspot, virtual consoles) instead of reimplementing that configuration logic a third time. Reuse cut it down to roughly 300 lines against the legacy script's ~4,000-line `first_time_install()`.
+- **New: `lib/electron.sh`** — `electron_install_binary()`, extracted out of `menus/advanced_electron.sh` so fresh provisioning and the existing "Fix blank screen" action share one implementation instead of two copies of the same repair sequence.
+- **New: `kiosk-app/`** (the Electron app source — `main.js`, `preload.js`, the dialog HTML files, `package.json`, `start.sh`) and **`provision/files/`** (every other system template file — X11 configs, udev rules, systemd units, the power-button and HDMI-mirroring scripts, polkit rules), extracted byte-for-byte out of `ubuntu-based-kiosk.sh`'s heredocs into real files, laid out mirroring their real destination paths.
+- **Bug found and fixed while writing this:** a bash `set -e` gotcha where testing a multi-statement function as an if-condition (`if ! some_func; then`) silently exempts everything inside that function from `set -e` for the duration of the call — found via direct testing, then swept for elsewhere in the codebase and also fixed in `menus/advanced_electron.sh`'s pre-existing "Fix blank screen" action, which had the same shape.
+- **Known, deliberate limitation carried over unchanged:** a few of the extracted system scripts (`start.sh`, `kiosk-hotplug.sh`, the power-button handler) hardcode the username `kiosk` rather than substituting `$KIOSK_USER`, exactly as the legacy script's quoted heredocs always did. Only matters if `$KIOSK_USER` is overridden from its default, which in practice is rare.
+- Upgrade and Full Reinstall are still not ported — both are coupled to `ubuntu-based-kiosk.sh`'s own heredoc self-extraction, a different mechanism than the new provisioning (which copies real files, not heredocs). `ubuntu-based-kiosk.sh` remains the way to upgrade/reinstall an existing install for now.
+
+**Previous (v2.13.0):**
 - **New: Clone Settings** (Advanced → Clone Settings) — not a port of the legacy Export/Import Settings, a narrower MVP for the "set up one kiosk, then stamp out a dozen more like it" use case. Exports the portable parts of `config.json` (sites, display/touch/navigation, lockout, password protection) to a JSON file; applies that file to any other already-installed kiosk.
 - **Deliberately does not copy machine-bound credentials**, because copying them would be actively wrong: Authelia's encrypted password is keyed off `/etc/machine-id` and decrypts to garbage on another machine; a WireGuard private key is a device identity, and reusing one across machines is a peer conflict, not a saving; most Asterisk PBXes reject two simultaneous registrations to the same extension. Applying a profile prints these as an explicit "needs a human" checklist instead of silently skipping or cloning them.
 - Records which addons were present at export time and reports which are/aren't present on the target — doesn't install anything itself. Non-interactive addon installation (so applying a profile needs zero prompts — scriptable over SSH to a whole fleet) is a deliberate follow-up, not bundled into this MVP.

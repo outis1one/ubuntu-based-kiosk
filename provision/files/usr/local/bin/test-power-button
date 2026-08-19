@@ -1,0 +1,51 @@
+#!/bin/bash
+echo "Testing power button configuration..."
+echo
+
+echo "1. Checking acpid service..."
+if systemctl is-active --quiet acpid; then
+  echo "  ✓ acpid is running"
+else
+  echo "  ✗ acpid is NOT running"
+  echo "  Fix: sudo systemctl enable --now acpid"
+fi
+echo
+
+echo "2. Checking ACPI event handler..."
+if [ -f /etc/acpi/events/kiosk-power-button ]; then
+  echo "  ✓ Event handler exists"
+  cat /etc/acpi/events/kiosk-power-button
+else
+  echo "  ✗ Event handler not found"
+fi
+echo
+
+echo "3. Checking power button script..."
+if [ -x /usr/local/bin/kiosk-power-button.sh ]; then
+  echo "  ✓ Script exists and is executable"
+else
+  echo "  ✗ Script not found or not executable"
+fi
+echo
+
+echo "4. Checking Electron process..."
+PIDS=$(pgrep -u kiosk -f "electron" 2>/dev/null)
+if [ -n "$PIDS" ]; then
+  echo "  ✓ Found Electron PIDs: $PIDS"
+else
+  echo "  ✗ No Electron process found"
+fi
+echo
+
+echo "5. Testing power button trigger NOW..."
+if [ -x /usr/local/bin/kiosk-power-button.sh ]; then
+  echo "  Running: /usr/local/bin/kiosk-power-button.sh"
+  /usr/local/bin/kiosk-power-button.sh
+  echo "  Check if power menu appeared!"
+else
+  echo "  Script not found"
+fi
+echo
+
+echo "6. To watch ACPI events: sudo acpi_listen"
+echo "   Then press power button and look for 'button/power' events"

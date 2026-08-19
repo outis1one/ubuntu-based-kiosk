@@ -2,15 +2,18 @@
 ################################################################################
 # menus/advanced_electron.sh - "Electron Maintenance" (Advanced): the
 # legacy "Manual Electron Update" and "Fix Blank Screen" items, combined
-# under one submenu since both maintain the same Electron installation
-# and share the binary-repair logic (electron_install_binary).
+# under one submenu since both maintain the same Electron installation.
+# The binary-repair logic itself (electron_install_binary) now lives in
+# lib/electron.sh, shared with fresh provisioning (lib/provision.sh) -
+# the same repair sequence applies whether the binary never downloaded
+# during the initial `npm install` or went missing later.
 #
 # Real system state: $KIOSK_DIR/node_modules, package.json, lightdm.
 # Every write goes through `sudo`/`sudo -u "$KIOSK_USER"`, stubbed at the
 # command level in tests - there's no relocatable equivalent for another
 # project's (npm/Electron's) own directory layout.
 #
-# Depends on: lib/menu.sh, lib/config.sh being sourced first.
+# Depends on: lib/menu.sh, lib/config.sh, lib/electron.sh being sourced first.
 ################################################################################
 
 electron_installed_version() {
@@ -33,55 +36,6 @@ electron_installed_version() {
 
 electron_is_running() {
     pgrep -f "electron.*main.js" &>/dev/null || pgrep -f "node.*electron" &>/dev/null
-}
-
-# Re-verify/download the Electron binary and fix chrome-sandbox
-# permissions, without touching package.json or reinstalling anything
-# else. Shared by both actions below.
-electron_install_binary() {
-    local electron_bin="$KIOSK_DIR/node_modules/electron/dist/electron"
-
-    if ! sudo -u "$KIOSK_USER" test -f "$electron_bin"; then
-        log_warning "Electron binary missing - retrying via install.js..."
-        sudo -u "$KIOSK_USER" bash -lc "cd '$KIOSK_DIR' && ELECTRON_FORCE_DOWNLOAD=true node node_modules/electron/install.js" || true
-    fi
-
-    if ! sudo -u "$KIOSK_USER" test -f "$electron_bin"; then
-        log_warning "Attempting direct download of Electron binary (~120MB)..."
-        local electron_ver
-        electron_ver=$(sudo -u "$KIOSK_USER" node -e \
-            "try{console.log(require('$KIOSK_DIR/node_modules/electron/package.json').version)}catch(e){}" 2>/dev/null || true)
-        if [[ -n "$electron_ver" ]]; then
-            local electron_url="https://github.com/electron/electron/releases/download/v${electron_ver}/electron-v${electron_ver}-linux-x64.zip"
-            log_info "Downloading Electron v${electron_ver} directly..."
-            local tmp_zip
-            tmp_zip=$(mktemp --suffix=.zip)
-            if wget --timeout=300 --tries=3 -O "$tmp_zip" "$electron_url"; then
-                command -v unzip &>/dev/null || sudo apt install -y unzip
-                chmod 644 "$tmp_zip"
-                sudo chown -R "$KIOSK_USER:$KIOSK_USER" "$KIOSK_DIR/node_modules/electron/" 2>/dev/null || true
-                sudo -u "$KIOSK_USER" mkdir -p "$KIOSK_DIR/node_modules/electron/dist"
-                sudo -u "$KIOSK_USER" unzip -o "$tmp_zip" -d "$KIOSK_DIR/node_modules/electron/dist/" || true
-                sudo -u "$KIOSK_USER" chmod +x "$electron_bin" || true
-            fi
-            rm -f "$tmp_zip"
-        fi
-    fi
-
-    if ! sudo -u "$KIOSK_USER" test -f "$electron_bin"; then
-        log_error "Electron binary download failed after all attempts."
-        log_error "Check your internet connection and try again."
-        return 1
-    fi
-    log_success "Electron binary verified"
-
-    # chrome-sandbox MUST be owned by root and setuid, or Electron shows a blank screen.
-    local sandbox="$KIOSK_DIR/node_modules/electron/dist/chrome-sandbox"
-    if sudo -u "$KIOSK_USER" test -f "$sandbox"; then
-        sudo chown root:root "$sandbox"
-        sudo chmod 4755 "$sandbox"
-        log_success "Chrome sandbox permissions set (required for display)"
-    fi
 }
 
 advanced_electron_status() {
@@ -258,7 +212,16 @@ action_repair_electron() {
     sudo systemctl stop lightdm 2>/dev/null || true
     sleep 1
 
-    if ! electron_install_binary; then
+    # Bare call, not `if ! electron_install_binary; then`: testing a
+    # multi-statement function as an if-condition exempts everything
+    # inside it from set -e for the duration (e.g. the sandbox chown/
+    # chmod below would silently continue past an earlier failure).
+    # Capturing $? right after a bare call doesn't have that problem -
+    # the exemption only affects whether a nonzero status halts the
+    # script, never the actual value $? holds.
+    electron_install_binary
+    local electron_rc=$?
+    if [[ $electron_rc -ne 0 ]]; then
         log_error "Could not install Electron. Check internet and retry."
         pause
         return 1

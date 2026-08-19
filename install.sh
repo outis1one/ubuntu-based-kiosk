@@ -1,25 +1,28 @@
 #!/bin/bash
 ################################################################################
-# install.sh - Modular management entry point for Ubuntu Based Kiosk.
+# install.sh - Ubuntu Based Kiosk: install and manage, one entry point.
 #
-# This is NOT yet the full system installer - that is still the big
-# single-file script (ubuntu-based-kiosk.sh) documented in Readme.md, and
-# first-time provisioning of a new kiosk still goes through it. That file
-# still also contains its own (unmigrated, unmodified) copies of every
-# menu below - both copies coexist deliberately until enough of Core
-# Settings/Addons/Advanced has moved over to retire the old ones in one
-# pass. This entry point is the modular replacement, one menus/*.sh file
-# at a time, so a change to (say) the Sites menu can't accidentally break
-# WiFi setup or the uninstaller three thousand lines away.
+# On a bare Ubuntu Server box with no kiosk installed, this provisions
+# one (lib/provision.sh) - packages, kiosk user, LightDM/Openbox, the
+# Electron app, audio/video/power hardware setup - then hands off to the
+# same Core Settings/Addons/Advanced menus below for initial
+# configuration. On a machine that already has a kiosk, it skips
+# straight to those menus. Same entry point either way.
+#
+# ubuntu-based-kiosk.sh, the original single-file installer, still
+# exists and still works, but is no longer the only way to provision a
+# new kiosk. Two things remain there that this tool deliberately doesn't
+# reimplement: Upgrade and Full Reinstall, both coupled to that script's
+# own heredoc self-extraction of main.js/preload.js/etc - a different
+# mechanism than provisioning (which now copies real files from
+# kiosk-app/ and provision/files/, not heredocs) and not yet ported.
 #
 # Migrated so far, grouped the same way the legacy menu groups them:
 #   Core Settings: Sites & Page Timing, Display & Interaction, Timezone,
 #     Hidden Site PIN, Password Protection & Lockout, WiFi,
 #     Power/Display/Quiet Hours, Complete Uninstall
 #     (menus/complete_uninstall.sh - composed from every addon's own
-#     uninstall helper rather than re-implementing removal a second
-#     time; Upgrade and Full Reinstall stay in the legacy script, both
-#     coupled to its heredoc self-extraction of main.js/preload.js/etc).
+#     uninstall helper rather than re-implementing removal a second time).
 #   Addons: CUPS Printing (menus/addon_cups.sh), Authelia Auto-Login
 #     (menus/addon_authelia.sh), Remote Access - VNC/WireGuard/
 #     Tailscale/Netbird (menus/addon_remote_access.sh), LMS Server /
@@ -35,7 +38,7 @@
 #     several kiosks; deliberately excludes machine-bound credentials
 #     like Authelia/WireGuard/Asterisk Intercom - see the file header).
 #
-# Usage (once the kiosk has already been installed):
+# Usage (works whether or not a kiosk is already installed):
 #   git clone <repo>
 #   cd ubuntu-based-kiosk
 #   ./install.sh
@@ -49,6 +52,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 source "$SCRIPT_DIR/lib/menu.sh"
 # shellcheck source=lib/config.sh
 source "$SCRIPT_DIR/lib/config.sh"
+# shellcheck source=lib/electron.sh
+source "$SCRIPT_DIR/lib/electron.sh"
 # shellcheck source=menus/sites.sh
 source "$SCRIPT_DIR/menus/sites.sh"
 # shellcheck source=menus/display.sh
@@ -84,12 +89,18 @@ source "$SCRIPT_DIR/menus/advanced_virtual_consoles.sh"
 # shellcheck source=menus/advanced_emergency_hotspot.sh
 source "$SCRIPT_DIR/menus/advanced_emergency_hotspot.sh"
 # shellcheck source=menus/complete_uninstall.sh
-# Sourced last: composes the *_do_uninstall/*_do_remove_all/*_do_disable
-# helpers defined in every file above it.
+# Sourced last among menus/*.sh: composes the *_do_uninstall/
+# *_do_remove_all/*_do_disable helpers defined in every file above it.
 source "$SCRIPT_DIR/menus/complete_uninstall.sh"
 # shellcheck source=menus/clone_settings.sh
 # Also composes detection helpers (*_is_installed) from every addon above.
 source "$SCRIPT_DIR/menus/clone_settings.sh"
+# shellcheck source=lib/provision.sh
+# Sourced last of all: calls into core_settings_menu and the Advanced
+# actions below during first-time setup, so everything they depend on
+# must already be defined by the time it actually runs (not merely
+# sourced - bash resolves function calls at run time either way).
+source "$SCRIPT_DIR/lib/provision.sh"
 
 ################################################################################
 # Preflight
@@ -107,17 +118,6 @@ fi
 
 if ! command -v jq &>/dev/null; then
     log_error "jq is required but not installed. Run: sudo apt-get install -y jq"
-    exit 1
-fi
-
-if ! is_kiosk_installed; then
-    echo
-    log_error "No installed kiosk found at ${KIOSK_DIR}."
-    echo
-    echo "This tool manages an already-installed kiosk. To provision a new"
-    echo "one for the first time, use the full installer instead - see"
-    echo "Readme.md ('Quick Install') for the current download command."
-    echo
     exit 1
 fi
 
@@ -180,5 +180,30 @@ main_menu_builder() {
 main_menu_status() {
     echo "Managing kiosk at: ${KIOSK_DIR}"
 }
+
+################################################################################
+# Provision if there's nothing here yet, otherwise go straight to management.
+################################################################################
+
+if ! is_kiosk_installed; then
+    echo
+    echo "No installed kiosk found at ${KIOSK_DIR}."
+    echo "This will provision a new one on this machine."
+    echo
+    # Bare call, not `if run_first_time_install; then ...`: this is a
+    # large multi-step function, and testing it as an if-condition would
+    # exempt every step inside it from set -e for the duration - see the
+    # comment at its own call to provision_install_app for why that
+    # matters. Called bare, a real failure anywhere inside it halts the
+    # whole script immediately (set -e's normal behavior); reaching the
+    # lines below is itself proof every step succeeded. A declined
+    # install prints "Cancelled" from inside the function and returns
+    # non-zero, which the same bare-statement rule turns into a normal
+    # exit here - nothing further to print either way.
+    run_first_time_install
+    echo
+    echo "Run ./install.sh again to manage this kiosk."
+    exit 0
+fi
 
 run_menu "UBUNTU BASED KIOSK - MANAGEMENT" main_menu_builder main_menu_status "Exit"

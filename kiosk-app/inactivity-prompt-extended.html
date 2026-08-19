@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: rgba(0,0,0,0.9);
+      color: #ecf0f1;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      padding: 40px;
+    }
+    .container { text-align: center; max-width: 600px; }
+    h2 { font-size: 32px; margin-bottom: 20px; }
+    .message { font-size: 20px; margin-bottom: 20px; line-height: 1.5; }
+    .countdown { font-size: 72px; font-weight: bold; color: #e74c3c; margin: 20px 0; }
+    .options { 
+      display: grid; 
+      grid-template-columns: 1fr 1fr; 
+      gap: 15px; 
+      margin: 30px 0;
+    }
+    .btn {
+      padding: 20px 40px;
+      font-size: 18px;
+      cursor: pointer;
+      border: none;
+      border-radius: 12px;
+      font-weight: bold;
+      transition: all 0.2s;
+      color: white;
+    }
+    .btn-primary {
+      background: #27ae60;
+      grid-column: 1 / -1;
+    }
+    .btn-primary:hover { background: #229954; }
+    .btn-primary:active { background: #1e8449; }
+    
+    .btn-extend { background: #3498db; }
+    .btn-extend:hover { background: #2980b9; }
+    .btn-extend:active { background: #21618c; }
+    
+    .btn-home {
+      background: #95a5a6;
+      grid-column: 1 / -1;
+      font-size: 14px;
+      padding: 12px;
+    }
+    .btn-home:hover { background: #7f8c8d; }
+    
+    .info {
+      font-size: 14px;
+      color: #95a5a6;
+      margin-top: 20px;
+      line-height: 1.6;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <h2>👋 Are you still here?</h2>
+    <div class="message">
+      No activity detected. Choose an option:
+    </div>
+    <div class="countdown" id="countdown">15</div>
+    
+    <div class="options">
+      <button class="btn btn-primary" onclick="imHere(0)">
+        ✓ Yes, I'm here!
+      </button>
+      
+      <button class="btn btn-extend" onclick="imHere(15)">
+        🍿 15 more minutes
+      </button>
+      
+      <button class="btn btn-extend" onclick="imHere(30)">
+        ⏱️ 30 more minutes
+      </button>
+      
+      <button class="btn btn-extend" onclick="imHere(60)">
+        🎬 1 hour
+      </button>
+      
+      <button class="btn btn-extend" onclick="imHere(120)">
+        📺 2 hours
+      </button>
+      
+      <button class="btn btn-home" onclick="goHome()">
+        🏠 Return to home now
+      </button>
+    </div>
+    
+    <div class="info">
+      ℹ️ Extensions pause the inactivity timer<br>
+      Media playback (video/audio) automatically pauses the timer<br>
+      Maximum extension: 4 hours (safety timeout)
+    </div>
+  </div>
+  <script>
+    const {ipcRenderer} = require('electron');
+    let count = 15;
+    const interval = setInterval(() => {
+      count--;
+      document.getElementById('countdown').textContent = count;
+      if (count <= 0) {
+        clearInterval(interval);
+      }
+    }, 1000);
+    
+    function imHere(minutes) {
+      clearInterval(interval);
+      console.log('[PROMPT] User selected: '+(minutes===0?'Continue':minutes+' minutes'));
+      ipcRenderer.send('user-still-here', minutes);
+    }
+
+   function goHome() {
+      clearInterval(interval);
+      console.log('[PROMPT] User requested immediate home return');
+      ipcRenderer.send('user-still-here', -1);
+    }
+    
+    document.addEventListener('keydown', (e) => {
+      if (e.key === ' ' || e.key === 'Enter') {
+        e.preventDefault();
+        imHere(0);
+      } else if (e.key === 'Escape') {
+        goHome();
+      }
+    });
+  </script>
+</body>
+</html>
