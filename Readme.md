@@ -1,6 +1,6 @@
 # Ubuntu Based Kiosk
 
-**Current Version:** 2.9.0 (check script header for latest version)
+**Current Version:** 2.10.0 (check script header for latest version)
 **Built with Claude Sonnet 4.6 AI assistance**
 **License:** GPL v3 - Keep derivatives open source
 **Repository:** https://github.com/outis1one/ubuntu-based-kiosk/
@@ -251,12 +251,20 @@ Both can be used at the same time — they serve different purposes:
 ---
 
 ### Communication
-- **Easy Asterisk Intercom** - Voice communication and intercom system
-  - Downloads latest version from Easy Asterisk repository
-  - Automatic update detection and installation
-  - Configuration preservation during updates
-  - Full Asterisk PBX integration
-  - SIP/PJSIP support for IP phones and softphones
+- **Asterisk Intercom** (`./install.sh` → Addons) - connects this kiosk
+  as a Baresip SIP extension to an Asterisk server you already have
+  running elsewhere; does not install or manage Asterisk itself
+  - Manual or auto-answer (intercom) mode
+  - Optional TLS/SRTP transport
+  - Uninstall support (with or without removing saved credentials)
+- **Legacy Easy Asterisk Intercom** (`./ubuntu-based-kiosk.sh` → Addons,
+  not yet retired) - the original three-option version: Client Only
+  (same Baresip client as above), Server Only, or Full, where Server/
+  Full download and run a third-party installer from a separate
+  "Easy Asterisk" repository to stand up a whole Asterisk PBX on this
+  device. That repository has since gone through a major rework
+  upstream, so the modular `./install.sh` version above only carries
+  the client/endpoint piece forward - see "Modular Management" below.
 
 ### Audio
 - **Lyrion Music Server (LMS)** - Formerly Logitech Media Server
@@ -594,51 +602,55 @@ smb://WORKGROUP/COMPUTER/PrinterName
 # 4. Restart Kiosk Display
 ```
 
-### Installing Easy Asterisk Intercom
+### Installing Asterisk Intercom
 
-The Easy Asterisk Intercom addon provides voice communication capabilities to your kiosk system.
+The Asterisk Intercom addon connects this kiosk as a SIP extension to an
+Asterisk server you already have running elsewhere (your own PBX, a
+Docker container, another box on the network - anywhere). It installs
+and configures Baresip as that extension; it does not install or manage
+Asterisk itself.
 
 **Access the addon menu:**
 ```bash
-./ubuntu-based-kiosk.sh
-# Select: 2) Addons
-# Then: 4) Easy Asterisk Intercom
+git clone https://github.com/outis1one/ubuntu-based-kiosk/
+cd ubuntu-based-kiosk
+./install.sh
+# Select: 2) Addons → Asterisk Intercom (SIP Extension)
 ```
 
-**Features:**
-- **Automatic installation** - Downloads and installs the latest version from the Easy Asterisk repository
-- **Update detection** - Checks for newer versions and prompts to update
-- **Safe re-runs** - Can be run multiple times without breaking existing configurations
-- **Config preservation** - Automatically backs up and restores configurations during updates
-- **Full Asterisk PBX** - Complete telephony features including SIP, extensions, voicemail
+**What you'll be asked for** (must match what's already configured on
+the Asterisk server): server IP/hostname, SIP port (default 5060, or
+5061 if you enable TLS), extension number, SIP password, and whether to
+auto-answer incoming calls (intercom mode) or ring for manual answer.
 
-**Installation behavior:**
-- **First install:** Downloads latest version from https://github.com/outis1one/easy-asterisk
-- **Already installed (latest):** Prompts to re-run installation (preserves configs)
-- **Update available:** Prompts to update and shows version difference
-- **All scenarios:** Configuration files in `/etc/asterisk/` and installation settings are preserved
-
-**Managing Easy Asterisk:**
+**Managing the client:**
 ```bash
-# Check installation status
-systemctl status asterisk
+# Check status (as the kiosk user)
+sudo -u kiosk systemctl --user status baresip
 
-# View Asterisk console
-asterisk -rvvv
+# Restart
+sudo -u kiosk systemctl --user restart baresip
 
-# Restart Asterisk
-systemctl restart asterisk
+# View logs
+sudo -u kiosk journalctl --user -u baresip -f
 
-# Configure intercom (rerun installation to update)
-./ubuntu-based-kiosk.sh
-# Select: 2) Addons → 4) Easy Asterisk Intercom
+# Reconfigure or uninstall
+./install.sh
+# Select: 2) Addons → Asterisk Intercom (SIP Extension)
 ```
 
 **Installation location:**
-- Installation files: `/opt/easy-asterisk/`
-- Configuration: `/etc/asterisk/`
-- Version tracking: `/opt/easy-asterisk/.version`
-- Config backups: `/opt/easy-asterisk/config_backup/`
+- Baresip config: `~kiosk/.baresip/` (`accounts`, `config`)
+- systemd user unit: `~kiosk/.config/systemd/user/baresip.service`
+
+**Not covered here:** standing up the Asterisk PBX server itself. The
+legacy `ubuntu-based-kiosk.sh` still offers a Server/Full option that
+downloads and runs a third-party installer from a separate "Easy
+Asterisk" repository - that repository has since gone through a major
+rework upstream, so it isn't carried forward into this addon. If you
+need a PBX, set one up separately (that same legacy option, a
+FreePBX/Issabel image, a Dockerized Asterisk, etc.) and point this
+addon at it as a plain SIP extension.
 
 ### Updating Electron
 
@@ -1221,6 +1233,12 @@ terminal menu and the web UI, so they can't drift apart).
   start script and systemd unit go through `$BIN_DIR`/`$SYSTEMD_DIR`
   like every other addon; LMS's own apt repo/GPG key/ufw rules stay at
   their real fixed system paths, same as CUPS.
+- `menus/addon_asterisk_intercom.sh` — **Asterisk Intercom** (Addons):
+  installs Baresip and registers this kiosk as a SIP extension against
+  an Asterisk server you already have running elsewhere. Redesigned
+  during migration, not a straight port — see "Recent Updates (v2.10.0)"
+  below for why the legacy Server/Full PBX-install options didn't come
+  along.
 - `install.sh` — entry point for the modular tool, now grouped **Core
   Settings / Addons / Advanced** like the legacy menu. Run it against an
   *already-installed* kiosk:
@@ -1233,13 +1251,15 @@ terminal menu and the web UI, so they can't drift apart).
 **Honest status:** this does not yet replace first-time installation, or
 most of the old installer. `ubuntu-based-kiosk.sh` is still ~12,000
 lines and still contains its own unremoved, unmodified copies of every
-menu above (plus Upgrade, Reinstall, Uninstall, 1 more Addon — Easy
-Asterisk Intercom — and the other 8 Advanced items — none of that has
-moved yet). Both copies coexist deliberately: the old ones stay until
-enough of Core Settings/Addons/Advanced is migrated to retire them in
-one pass, rather than leaving the legacy menu half-wired. Migration
-continues one `menus/*.sh` file at a time; first-time installation
-itself is the last and largest piece to move, if it moves at all.
+menu above, including the legacy three-option (Client/Server/Full)
+Easy Asterisk Intercom — the modular version only replaces the Client
+option, by design (plus Upgrade, Reinstall, Uninstall, and the other 8
+Advanced items — none of that has moved yet). Both copies coexist
+deliberately: the old ones stay until enough of Core Settings/Addons/
+Advanced is migrated to retire them in one pass, rather than leaving
+the legacy menu half-wired. Migration continues one `menus/*.sh` file
+at a time; first-time installation itself is the last and largest piece
+to move, if it moves at all.
 
 **Resolved (v2.9.0):** `is_service_enabled()` — shared by both scripts
 — had a pre-check (`systemctl list-unit-files | grep -q "^${service}\s"`)
@@ -1266,9 +1286,15 @@ full migration pass.
 
 ## Project Status & Future Plans
 
-**Current Version:** 2.9.0
+**Current Version:** 2.10.0
 
-**Recent Updates (v2.9.0):**
+**Recent Updates (v2.10.0):**
+- **Asterisk Intercom migrated, and redesigned in the process.** The legacy addon offered Client Only (Baresip SIP client), Server Only, and Full (server + client) — the latter two downloaded and ran a third-party installer from a separate "Easy Asterisk" repository to stand up a whole Asterisk PBX. That repository has since gone through a major rework upstream, so the PBX-install path is dropped entirely rather than carrying a dependency on code that's moved on without it. The migrated addon (`menus/addon_asterisk_intercom.sh`) now does only the client/endpoint piece: install Baresip and register this kiosk as one SIP extension against an Asterisk server you already have running elsewhere. It never installs or manages Asterisk itself. The legacy script's own three-option version is untouched, same as every other migrated menu.
+- Dropped the dependency on the (now-reworked) Easy Asterisk repo's GitHub API for version tracking — reads the real installed `baresip` package version via `dpkg` instead.
+- **New capability:** an uninstall option for the Baresip client — the legacy addon never had one.
+- **Bug fix:** an unguarded `ver=$(baresip_installed_version)` assignment would have crashed the whole session the first time status was checked before Baresip was installed (`dpkg-query` legitimately fails when the package isn't there). Guarded with `|| true` before it shipped.
+
+**Previous (v2.9.0):**
 - **LMS Server / Squeezelite Player migrated** — install/reconfigure/uninstall for both, in `./install.sh`. Squeezelite's own start script and systemd unit now go through `$BIN_DIR`/`$SYSTEMD_DIR` like every other addon instead of hardcoded `/usr/local/bin`/`/etc/systemd/system`; LMS's own apt repo/GPG key/ufw rules stay at their real fixed system paths, same approach as CUPS.
 - **Bug fix:** the legacy `install_lms()` enabled/started the detected service via `sudo systemctl enable "$service_name" 2>&1 | tee /tmp/lms-enable.log` — piped through `tee`, the statement's exit status reflected `tee` (always 0), not `systemctl enable`, so a real enable/start failure was silently swallowed instead of falling through to a warning. Now uses the shared `enable_and_start_units()` helper.
 - **Bug fix (shared, backported to the legacy script too):** `is_service_enabled()`'s pre-check never matched a bare service name against `list-unit-files`' `"$service.service"` lines, so it always reported "not enabled" regardless of the real state. Dropped the dead pre-check — see "Modular Management" below.

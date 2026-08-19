@@ -1,7 +1,37 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk v2.9.0                ###
+###   Ubuntu Based Kiosk v2.10.0               ###
 ################################################################################
+#
+# RELEASE v2.10.0 - Asterisk Intercom Migrated, Redesigned as a SIP
+#                    Extension Client (No More PBX Server Install)
+# - New in ./install.sh: Asterisk Intercom (menus/addon_asterisk_intercom.sh).
+#   The legacy addon offered three options: Client Only (a Baresip SIP
+#   client), Server Only, and Full (server + client) - the latter two
+#   downloaded and ran a third-party installer from a separate "Easy
+#   Asterisk" repository to stand up a whole Asterisk PBX. That
+#   repository has since gone through a major rework upstream, so this
+#   migration drops the PBX-install path entirely rather than carrying
+#   a dependency on code that's moved on without it. The addon now does
+#   only the client/endpoint piece: install Baresip and register it as
+#   one SIP extension against an Asterisk server the user already has
+#   running somewhere else. It never installs or manages Asterisk
+#   itself. The legacy script's own three-option version is untouched -
+#   both copies coexist deliberately, same as every other migrated menu.
+# - Dropped the legacy client path's dependency on the (now-reworked)
+#   Easy Asterisk repo's GitHub API for version tracking. It now reads
+#   the real installed `baresip` package version via dpkg instead - one
+#   less network dependency and one less thing to keep in sync with an
+#   external repo.
+# - New capability: an uninstall option for the Baresip client, which
+#   the legacy addon never had at all.
+# - Bug fix (found while porting): `baresip_installed_version()`'s
+#   `dpkg-query` call fails (as expected) when the package isn't
+#   installed, and the unguarded `ver=$(...)` assignment around it would
+#   have crashed the whole session under this tool's `set -e` the first
+#   time status was checked before Baresip was installed. Guarded with
+#   `|| true` - the same class of bug hunted throughout this migration,
+#   caught by testing before it shipped.
 #
 # RELEASE v2.9.0 - LMS Server / Squeezelite Player Migrated;
 #                   is_service_enabled() Dead Pre-Check Fixed
@@ -349,7 +379,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="2.9.0"
+SCRIPT_VERSION="2.10.0"
 
 # Resolve the real path to this script file.
 # When piped (curl|bash or wget|bash), BASH_SOURCE[0] is a pipe descriptor,
