@@ -57,8 +57,7 @@ The installer will guide you through configuration during setup.
 > The modular `./install.sh` (see "Modular Management" below) can also
 > provision a kiosk from scratch now, and has its own Upgrade, as an
 > alternative to the single-file installer above. `ubuntu-based-kiosk.sh`
-> remains the more battle-tested path and the only one that supports
-> Full Reinstall of an existing install.
+> remains the more battle-tested path.
 
 ---
 
@@ -1309,14 +1308,14 @@ an already-installed one, and can pull/apply its own updates — but
 `ubuntu-based-kiosk.sh` is still ~12,000 lines and still contains its
 own unremoved, unmodified copies of every menu above, including the
 legacy three-option (Client/Server/Full) Easy Asterisk Intercom — the
-modular version only replaces the Client option, by design. One piece
-remains legacy-only: Full Reinstall, coupled to
-`ubuntu-based-kiosk.sh`'s own heredoc self-extraction of
-main.js/preload.js/etc — a different mechanism from the new
-provisioning, which copies real files from `kiosk-app/` and
-`provision/files/` instead. The legacy Export/Import Settings is also
-staying as-is; Clone Settings is a new, narrower feature alongside it,
-not a replacement for it — see "Recent Updates (v2.13.0)" below for why
+modular version only replaces the Client option, by design. Full
+Reinstall is deliberately not being carried forward — it never worked
+reliably in the legacy script, and the modular tool already covers the
+same outcome more reliably as two already-tested pieces run back to
+back: Complete Uninstall (Core Settings), then `./install.sh` again to
+provision fresh. The legacy Export/Import Settings is also staying
+as-is; Clone Settings is a new, narrower feature alongside it, not a
+replacement for it — see "Recent Updates (v2.13.0)" below for why
 they're not the same thing.
 Both copies coexist deliberately: the old ones stay until enough of
 Core Settings/Addons/Advanced is migrated to retire them in one pass,
@@ -1353,6 +1352,7 @@ full migration pass.
 - **New: Upgrade** (Advanced → Upgrade) — not a port of the legacy Upgrade, which re-extracted `main.js`/`preload.js`/etc from its own heredocs on every run. `kiosk-app/` and `provision/files/` are real files in this git checkout now, so the modular Upgrade is `git pull` (after confirming a clean working tree, and only as a fast-forward — never an automatic merge) followed by re-running the same packages/kiosk-app/display/firewall/power-management steps `lib/provision.sh` already has for a fresh install, reused rather than reimplemented. Skips the interactive first-run settings wizard and the "reboot now" prompt.
 - Also offers an on-demand Electron version check regardless of whether there was code to pull (Electron isn't versioned by this repo) — reuses the existing, already-tested `action_update_electron` as-is.
 - Requires a real git checkout (not the no-git ZIP download option) and a clean working tree; a diverged local history fails the pull cleanly with a clear message rather than attempting an automatic merge.
+- **Full Reinstall dropped, not carried forward.** It never worked reliably in the legacy script, and the modular tool already covers the same outcome more reliably as two already-tested pieces run back to back: Complete Uninstall (Core Settings), then `./install.sh` again to provision fresh — no need for a dedicated combined action.
 
 **Previous (v2.14.0):**
 - **`./install.sh` now provisions a kiosk from scratch, not just manages an existing one.** Until now it only worked against an already-installed kiosk — `ubuntu-based-kiosk.sh` was still the only path from a bare Ubuntu Server box to a running one. On a machine with no kiosk-app directory yet, it now installs packages, creates the kiosk user, installs Node.js/Electron, sets up LightDM+Openbox autologin, audio/video/HDMI/power-button hardware handling, and the firewall, then hands off to the same Core Settings menus for initial configuration — matching the legacy script's own install-then-configure flow, on the modular codebase.

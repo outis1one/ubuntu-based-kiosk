@@ -22,6 +22,11 @@
 # - Requires a git checkout (not the no-git ZIP download option) and a
 #   clean working tree; a diverged local history fails the pull cleanly
 #   with a clear message instead of attempting an automatic merge.
+# - Full Reinstall dropped, not carried forward - it never worked
+#   reliably in this script either, and the modular tool already covers
+#   the same outcome more reliably as two already-tested pieces run back
+#   to back: Complete Uninstall (Core Settings), then ./install.sh again
+#   to provision fresh. No dedicated combined action needed.
 #
 # RELEASE v2.14.0 - install.sh Now Provisions a Kiosk From Scratch,
 #                    Not Just Manages an Existing One

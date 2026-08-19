@@ -16,8 +16,11 @@
 # run; kiosk-app/ and provision/files/ are real files in this git
 # checkout, so the modular Upgrade is `git pull` + re-running the same
 # provisioning steps, reused rather than reimplemented (see
-# menus/advanced_upgrade.sh). Full Reinstall remains legacy-only - it
-# has no equivalent here yet.
+# menus/advanced_upgrade.sh). Full Reinstall is deliberately not
+# carried forward - it never worked reliably in the legacy script, and
+# the same outcome is already available here, more reliably, as two
+# already-tested pieces run back to back: Complete Uninstall (Core
+# Settings), then ./install.sh again to provision fresh.
 #
 # Migrated so far, grouped the same way the legacy menu groups them:
 #   Core Settings: Sites & Page Timing, Display & Interaction, Timezone,
