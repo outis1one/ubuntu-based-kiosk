@@ -17,8 +17,14 @@
 // config.json - so it never needs sudo.
 
 const path = require('path');
+const { execFile } = require('child_process');
 const express = require('express');
 const { loadConfig, saveConfig } = require('./lib/config');
+const { ACTIONS } = require('./lib/actions');
+const { startJob, getJob } = require('./lib/jobs');
+
+const HELPER_PATH = process.env.HELPER_PATH || '/usr/local/bin/kiosk-webui-helper';
+const SUDO_CMD = process.env.SUDO_CMD !== undefined ? process.env.SUDO_CMD : 'sudo';
 
 const app = express();
 app.use(express.json({ limit: '256kb' }));
@@ -128,6 +134,80 @@ app.put('/api/config', (req, res) => {
         console.error('saveConfig failed:', e);
         res.status(500).json({ error: 'Failed to save configuration' });
     }
+});
+
+/* ---------------------------------------------------------------------- */
+/* Addons: install/reconfigure via the allow-listed root helper           */
+/* ---------------------------------------------------------------------- */
+
+app.get('/api/actions', (req, res) => {
+    const list = Object.entries(ACTIONS).map(([name, a]) => ({ name, label: a.label, fields: a.fields }));
+    res.json(list);
+});
+
+app.get('/api/addons/status', (req, res) => {
+    const cmd = SUDO_CMD || HELPER_PATH;
+    const args = SUDO_CMD ? [HELPER_PATH, 'status_all'] : ['status_all'];
+    execFile(cmd, args, { timeout: 10_000 }, (err, stdout, stderr) => {
+        if (err) {
+            console.error('status_all failed:', stderr || err.message);
+            return res.status(500).json({ error: 'Could not read addon status' });
+        }
+        try {
+            res.json(JSON.parse(stdout.trim()));
+        } catch (e) {
+            res.status(500).json({ error: 'Malformed status response' });
+        }
+    });
+});
+
+app.post('/api/actions/:name/run', (req, res) => {
+    try {
+        const job = startJob(req.params.name, req.body || {});
+        res.json({ jobId: job.id, status: job.status, label: job.label });
+    } catch (e) {
+        res.status(e.status || 500).json({ error: e.message });
+    }
+});
+
+app.get('/api/actions/jobs/:jobId', (req, res) => {
+    const job = getJob(req.params.jobId);
+    if (!job) return res.status(404).json({ error: 'Unknown job' });
+    res.json({ id: job.id, name: job.name, label: job.label, status: job.status, exitCode: job.exitCode, log: job.log.join('') });
+});
+
+// Server-Sent Events: replays whatever's already logged, then streams
+// new lines as they arrive, then a final `done` event - works whether
+// the client connects before the job starts producing output or
+// reconnects partway through (e.g. after a page reload).
+app.get('/api/actions/jobs/:jobId/stream', (req, res) => {
+    const job = getJob(req.params.jobId);
+    if (!job) return res.status(404).end();
+
+    res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        Connection: 'keep-alive',
+    });
+
+    if (job.log.length) {
+        res.write(`event: log\ndata: ${JSON.stringify(job.log.join(''))}\n\n`);
+    }
+    if (job.status !== 'running') {
+        res.write(`event: done\ndata: ${JSON.stringify({ status: job.status, exitCode: job.exitCode })}\n\n`);
+        return res.end();
+    }
+
+    const listener = (text) => {
+        if (text === null) {
+            res.write(`event: done\ndata: ${JSON.stringify({ status: job.status, exitCode: job.exitCode })}\n\n`);
+            res.end();
+        } else {
+            res.write(`event: log\ndata: ${JSON.stringify(text)}\n\n`);
+        }
+    };
+    job.listeners.add(listener);
+    req.on('close', () => job.listeners.delete(listener));
 });
 
 const PORT = process.env.PORT || 8090;

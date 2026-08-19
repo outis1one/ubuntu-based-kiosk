@@ -1,7 +1,60 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk v2.16.0               ###
+###   Ubuntu Based Kiosk v2.17.0               ###
 ################################################################################
+#
+# RELEASE v2.17.0 - Web UI Now Installs by Default and Can Install/
+#                    Reconfigure Addons + Check for Updates
+# - Web UI (Addons -> Web UI) now installs by default during first-time
+#   provisioning (lib/provision.sh's provision_configure_webui), not
+#   opt-in - fixed port 8090, no prompt (matches every other core step).
+#   The Addons menu entry still works standalone for reconfiguring the
+#   port or reinstalling it on a kiosk provisioned before this change.
+# - The web UI can now install/reconfigure CUPS Printing, LMS Server,
+#   Squeezelite Player, and Asterisk Intercom, and check for updates -
+#   the same four addons plus Update this project's user asked for by
+#   name. Every one of these is the exact same interactive action_*
+#   function the terminal menu already uses (action_install_cups,
+#   action_install_lms, action_install_squeezelite,
+#   action_configure_asterisk_intercom, action_upgrade) - no
+#   prompt/mutation refactor of any addon file, driven instead by
+#   piping the right answers on stdin, the same technique this
+#   project's own bash tests already use to drive these functions.
+# - Privilege model: the web service itself still runs as $KIOSK_USER
+#   with zero ambient sudo. A new narrow, allow-listed root helper
+#   (menus/addon_webui.sh's webui_write_helper_script, reachable only
+#   via a single-path passwordless sudo rule generated and validated
+#   with `visudo -c -f` before being installed) is the only way the web
+#   UI ever gains privilege, and it re-checks its own fixed action
+#   allow-list before dispatching anything - a request that reaches it
+#   can only ever trigger one of five vetted actions, never a root
+#   shell. Chosen over running the whole service as root after asking
+#   directly: this repo has no login of its own by design (Authelia
+#   runs elsewhere), so a request that reaches it with no reverse proxy
+#   in front is effectively unauthenticated - the allow-list bounds
+#   what that can actually do.
+# - Long-running installs stream live output to the browser via
+#   Server-Sent Events (webui/lib/jobs.js), with only one action
+#   running at a time (a second request while one is in flight gets a
+#   clear 409, not silently queued or dropped).
+# - Full visual redesign: a sidebar shell (Sites/Display/Lockout/
+#   Addons/Update) replacing the single scrolling page of three cards,
+#   both light and dark themes via prefers-color-scheme, no external
+#   font/CDN dependency.
+# - A real bug was found and fixed by actually driving the redesigned
+#   UI in a headless browser, not just by reading the code: refreshing
+#   an addon's pill/button after a successful install used to rebuild
+#   the whole card, which raced (and usually lost to) the success
+#   status/log that same job had just written a moment earlier. Fixed
+#   to update pill/buttons in place, leaving the completed job's log
+#   exactly as the user left it.
+# - Uninstall-via-web is deliberately still not offered, for any addon -
+#   flagged as needing its own double-confirmation design, not bundled
+#   into this pass. WiFi, Timezone, Power/Display/Quiet Hours,
+#   Diagnostics, Remote Access, Authelia, Factory Reset, Virtual
+#   Consoles, Emergency Hotspot, Clone Settings, and the fleet/
+#   multi-kiosk dashboard all remain out of scope for the web UI too,
+#   each a named, sequenced follow-up rather than an oversight.
 #
 # RELEASE v2.16.0 - Web UI: Browser-Based Config Editor (install.sh ->
 #                    Addons -> Web UI)
@@ -580,7 +633,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="2.16.0"
+SCRIPT_VERSION="2.17.0"
 
 # Resolve the real path to this script file.
 # When piped (curl|bash or wget|bash), BASH_SOURCE[0] is a pipe descriptor,
