@@ -1,7 +1,31 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk v2.12.0               ###
+###   Ubuntu Based Kiosk v2.13.0               ###
 ################################################################################
+#
+# RELEASE v2.13.0 - Fleet Profile: New MVP for Standing Up Several
+#                    Kiosks with the Same Settings
+# - New in ./install.sh's Advanced menu: Fleet Profile
+#   (menus/fleet_profile.sh). Not a port of the legacy Export/Import
+#   Settings - a narrower, deliberately-scoped feature for the "set up
+#   one kiosk, then stamp out a dozen more like it" use case: export the
+#   portable parts of config.json (sites, display/touch/navigation,
+#   lockout, password protection) to a JSON file, apply that file to any
+#   other already-installed kiosk.
+# - Explicitly does NOT copy machine-bound credentials, because copying
+#   them would be actively wrong, not just incomplete: Authelia's
+#   encrypted password is keyed off /etc/machine-id and decrypts to
+#   garbage elsewhere; a WireGuard private key is a device identity and
+#   reusing one across machines is a peer conflict; most Asterisk PBXes
+#   reject two simultaneous registrations to the same extension. Apply
+#   prints these as an explicit "needs a human" checklist instead of
+#   silently skipping them or (worse) cloning them.
+# - Does not install missing addons - only records which addons were
+#   present at export time and reports which of those are/aren't
+#   present on the machine being applied to. Non-interactive addon
+#   installation (so applying a profile needs zero prompts, scriptable
+#   over SSH to a whole fleet) is deliberately left as a follow-up, not
+#   bundled into this MVP.
 #
 # RELEASE v2.12.0 - Complete Uninstall Migrated (Last of the
 #                    "Destructive Trio"); Composed, Not Re-Implemented
@@ -450,7 +474,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="2.12.0"
+SCRIPT_VERSION="2.13.0"
 
 # Resolve the real path to this script file.
 # When piped (curl|bash or wget|bash), BASH_SOURCE[0] is a pipe descriptor,

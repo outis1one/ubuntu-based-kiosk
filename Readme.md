@@ -1,6 +1,6 @@
 # Ubuntu Based Kiosk
 
-**Current Version:** 2.12.0 (check script header for latest version)
+**Current Version:** 2.13.0 (check script header for latest version)
 **Built with Claude Sonnet 4.6 AI assistance**
 **License:** GPL v3 - Keep derivatives open source
 **Repository:** https://github.com/outis1one/ubuntu-based-kiosk/
@@ -1255,6 +1255,11 @@ terminal menu and the web UI, so they can't drift apart).
   Settings): the last of the "destructive trio." Composed from every
   addon's own `*_do_uninstall` helper instead of re-implementing
   removal a second time — see "Recent Updates (v2.12.0)" below.
+- `menus/fleet_profile.sh` — **Fleet Profile** (Advanced): export/apply
+  the portable parts of `config.json` across several kiosks that should
+  share the same settings. New, not a legacy port — deliberately never
+  copies machine-bound credentials (Authelia, WireGuard, Asterisk
+  Intercom); see "Recent Updates (v2.13.0)" below.
 - `install.sh` — entry point for the modular tool, now grouped **Core
   Settings / Addons / Advanced** like the legacy menu. Run it against an
   *already-installed* kiosk:
@@ -1269,11 +1274,14 @@ most of the old installer. `ubuntu-based-kiosk.sh` is still ~12,000
 lines and still contains its own unremoved, unmodified copies of every
 menu above, including the legacy three-option (Client/Server/Full)
 Easy Asterisk Intercom — the modular version only replaces the Client
-option, by design (plus Upgrade, Full Reinstall, Export/Import
-Settings, and Fix Squeezelite Audio — none of that has moved yet;
-Complete Uninstall *is* now migrated, but Upgrade and Full Reinstall
-are staying put — both are coupled to this file's own heredoc self-
-extraction of main.js/preload.js/etc, which has no modular equivalent).
+option, by design (plus Upgrade, Full Reinstall, and Fix Squeezelite
+Audio — none of that has moved yet; Complete Uninstall *is* now
+migrated, but Upgrade and Full Reinstall are staying put — both are
+coupled to this file's own heredoc self-extraction of main.js/
+preload.js/etc, which has no modular equivalent). The legacy Export/
+Import Settings is also staying as-is; Fleet Profile is a new,
+narrower feature alongside it, not a replacement for it — see "Recent
+Updates (v2.13.0)" below for why they're not the same thing.
 Both copies coexist deliberately: the old ones stay until enough of
 Core Settings/Addons/Advanced is migrated to retire them in one pass,
 rather than leaving the legacy menu half-wired. Migration continues one
@@ -1305,9 +1313,14 @@ full migration pass.
 
 ## Project Status & Future Plans
 
-**Current Version:** 2.12.0
+**Current Version:** 2.13.0
 
-**Recent Updates (v2.12.0):**
+**Recent Updates (v2.13.0):**
+- **New: Fleet Profile** (Advanced → Fleet Profile) — not a port of the legacy Export/Import Settings, a narrower MVP for the "set up one kiosk, then stamp out a dozen more like it" use case. Exports the portable parts of `config.json` (sites, display/touch/navigation, lockout, password protection) to a JSON file; applies that file to any other already-installed kiosk.
+- **Deliberately does not copy machine-bound credentials**, because copying them would be actively wrong: Authelia's encrypted password is keyed off `/etc/machine-id` and decrypts to garbage on another machine; a WireGuard private key is a device identity, and reusing one across machines is a peer conflict, not a saving; most Asterisk PBXes reject two simultaneous registrations to the same extension. Applying a profile prints these as an explicit "needs a human" checklist instead of silently skipping or cloning them.
+- Records which addons were present at export time and reports which are/aren't present on the target — doesn't install anything itself. Non-interactive addon installation (so applying a profile needs zero prompts — scriptable over SSH to a whole fleet) is a deliberate follow-up, not bundled into this MVP.
+
+**Previous (v2.12.0):**
 - **Complete Uninstall migrated** — the last of the "destructive trio." Rather than re-implementing every addon's teardown a second time (the legacy shape — CUPS/VNC/WireGuard/Tailscale/Netbird/LMS/Squeezelite removal all inlined again, independently of each addon's own uninstall action), `menus/complete_uninstall.sh` composes the `*_do_uninstall` helpers each addon already has. Every addon menu with an uninstall action was split into a confirm-and-call wrapper (unchanged from the user's perspective) plus a silent removal helper that both the wrapper and Complete Uninstall call — no duplicated logic anywhere, and if an addon's removal logic changes later, Complete Uninstall picks it up automatically.
 - **Important bug found and fixed while composing these:** several `*_do_uninstall` helpers (CUPS's `apt autoremove`/`apt clean`, VNC/WireGuard/Tailscale/Netbird's `apt remove`) had a bare, unguarded `apt` call. Previously this only risked aborting that one menu action if the package was already gone. Composed together as sequential calls inside Complete Uninstall, the same failure would have silently truncated the *entire* uninstall partway through — e.g. the kiosk user might never get removed because an already-uninstalled VPN client's `apt remove` failed first. Guarded all of them with `|| true`.
 - Non-addon teardown (kiosk user/files, Node.js, LightDM/Openbox, remaining systemd units/scripts, polkit rules, re-enabling virtual consoles, final package cleanup) stays inline in `menus/complete_uninstall.sh`, since no single addon owns those paths — same as the legacy script.
