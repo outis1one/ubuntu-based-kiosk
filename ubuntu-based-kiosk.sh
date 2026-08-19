@@ -1,7 +1,39 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk v2.7.0                ###
+###   Ubuntu Based Kiosk v2.8.0                ###
 ################################################################################
+#
+# RELEASE v2.8.0 - Remote Access Migrated (VNC/WireGuard/Tailscale/
+#                   Netbird); Framework-Level Status-Function Crash Fixed
+# - New in ./install.sh: Remote Access (menus/addon_remote_access.sh) -
+#   VNC (x11vnc), WireGuard, Tailscale, and Netbird, each with its own
+#   install/connect/status/uninstall flow. The biggest Addon migrated so
+#   far (4 sub-areas). Tailscale and Netbird install via the vendors'
+#   own documented `curl -fsSL <url> | sh` method, preserved as-is.
+# - New $WIREGUARD_DIR (lib/config.sh), same pattern as $SYSTEMD_DIR
+#   etc - nothing here hardcodes /etc/wireguard.
+# - Promoted power_schedule.sh's enable_and_start_timers() to a shared
+#   enable_and_start_units() in lib/menu.sh (works for services now too,
+#   not just timers) - Remote Access needed the identical pattern for
+#   x11vnc and wg-quick@, so this is now fixed and reusable everywhere
+#   instead of being duplicated a second time.
+# - IMPORTANT framework-level bug found and fixed in lib/menu.sh's
+#   run_menu(): the *handler* call has been `|| true`-guarded since
+#   v2.1.0, but the *status function* call was still bare and completely
+#   unprotected. A status function's job is read-only display, but if
+#   one contains so much as a pipeline whose grep matches nothing (which
+#   pipefail turns into a pipeline failure even though the actual last
+#   command in it succeeds), that bare call would crash the *entire
+#   session* - not just fail to show status. Found while writing
+#   wireguard_status()'s `sudo wg show | grep ... | sed ...` and
+#   confirming its exact failure mode before assuming it was already
+#   covered. Fixed once in run_menu() itself, protecting every status
+#   function across every menu, present and future - same "fix once at
+#   the framework level" pattern as the v2.1.0 handler fix. Also audited
+#   every existing status function across all menus for the same
+#   specific shape (a bare `var=$(...)` assignment from a grep-based
+#   pipeline, not embedded in an echo and not already guarded) and found
+#   one real instance in power_schedule_status(), now fixed too.
 #
 # RELEASE v2.7.0 - Backported Fix: save_config() No Longer Deletes
 #                   Authelia Credentials (or Any Other Untracked Field)
@@ -288,7 +320,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="2.7.0"
+SCRIPT_VERSION="2.8.0"
 
 # Resolve the real path to this script file.
 # When piped (curl|bash or wget|bash), BASH_SOURCE[0] is a pipe descriptor,

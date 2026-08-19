@@ -46,17 +46,6 @@ timer_oncalendar() {
     grep "^OnCalendar=" "$SYSTEMD_DIR/$1" 2>/dev/null | cut -d'=' -f2 | sed 's/\*-\*-\* //' | sed 's/:00$//'
 }
 
-# enable_and_start_timers TIMER [TIMER...]
-# Reloads systemd and enables+starts the given timer units, returning
-# non-zero if enable or start fails (e.g. systemd/D-Bus unreachable).
-# Always call this from an `if`/`&&`/`||` context: this whole tool runs
-# under set -e, so a bare, unguarded call whose last command fails would
-# take down the entire session instead of just this one action.
-enable_and_start_timers() {
-    sudo systemctl daemon-reload 2>/dev/null || true
-    sudo systemctl enable "$@" 2>/dev/null && sudo systemctl start "$@" 2>/dev/null
-}
-
 ################################################################################
 # Top-level menu
 ################################################################################
@@ -66,7 +55,7 @@ power_schedule_status() {
 
     if timer_exists kiosk-shutdown.timer; then
         any=true
-        local t; t=$(timer_oncalendar kiosk-shutdown.timer)
+        local t; t=$(timer_oncalendar kiosk-shutdown.timer) || true
         echo "Power:    shutdown daily at ${t:-an unknown time}"
     fi
     if timer_exists kiosk-display-off.timer; then
@@ -205,7 +194,7 @@ EOF
         log_info "RTC wake cron job created"
     fi
 
-    if enable_and_start_timers kiosk-shutdown.timer; then
+    if enable_and_start_units kiosk-shutdown.timer; then
         log_success "Power schedule configured: shutdown at ${shutdown_time}$( [[ -n "$wake_time" ]] && echo ", wake at ${wake_time}")"
     else
         log_warning "Schedule files written, but systemctl enable/start failed - check 'systemctl status kiosk-shutdown.timer'"
@@ -342,7 +331,7 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
-    if enable_and_start_timers kiosk-display-off.timer kiosk-display-on.timer; then
+    if enable_and_start_units kiosk-display-off.timer kiosk-display-on.timer; then
         log_success "Display schedule configured: off at ${doff}, on at ${don}"
     else
         log_warning "Schedule files written, but systemctl enable/start failed - check 'systemctl status kiosk-display-off.timer'"
@@ -476,7 +465,7 @@ EOF
     local mode_label="All audio muted"
     [[ "$qmode" == "2" ]] && mode_label="Squeezelite stopped"
 
-    if enable_and_start_timers kiosk-quiet-start.timer kiosk-quiet-end.timer; then
+    if enable_and_start_units kiosk-quiet-start.timer kiosk-quiet-end.timer; then
         log_success "Quiet hours configured: ${qstart} to ${qend} (${mode_label})"
     else
         log_warning "Schedule files written, but systemctl enable/start failed - check 'systemctl status kiosk-quiet-start.timer'"
@@ -561,7 +550,7 @@ Persistent=true
 WantedBy=timers.target
 EOF
 
-    if enable_and_start_timers kiosk-electron-reload.timer; then
+    if enable_and_start_units kiosk-electron-reload.timer; then
         log_success "Electron reload configured: $description"
     else
         log_warning "Schedule files written, but systemctl enable/start failed - check 'systemctl status kiosk-electron-reload.timer'"

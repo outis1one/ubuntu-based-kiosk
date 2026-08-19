@@ -1,6 +1,6 @@
 # Ubuntu Based Kiosk
 
-**Current Version:** 2.7.0 (check script header for latest version)
+**Current Version:** 2.8.0 (check script header for latest version)
 **Built with Claude Sonnet 4.6 AI assistance**
 **License:** GPL v3 - Keep derivatives open source
 **Repository:** https://github.com/outis1one/ubuntu-based-kiosk/
@@ -1212,6 +1212,8 @@ terminal menu and the web UI, so they can't drift apart).
 - `menus/addon_authelia.sh` — **Authelia Auto-Login** (Addons):
   encrypted SSO credentials plus the server-side setup instructions.
   Prompted the `save_config` merge fix above.
+- `menus/addon_remote_access.sh` — **Remote Access** (Addons): VNC,
+  WireGuard, Tailscale, Netbird. The biggest Addon so far.
 - `install.sh` — entry point for the modular tool, now grouped **Core
   Settings / Addons / Advanced** like the legacy menu. Run it against an
   *already-installed* kiosk:
@@ -1224,7 +1226,7 @@ terminal menu and the web UI, so they can't drift apart).
 **Honest status:** this does not yet replace first-time installation, or
 most of the old installer. `ubuntu-based-kiosk.sh` is still ~12,000
 lines and still contains its own unremoved, unmodified copies of every
-menu above (plus Upgrade, Reinstall, Uninstall, 3 more Addons, and the
+menu above (plus Upgrade, Reinstall, Uninstall, 2 more Addons, and the
 other 8 Advanced items — none of that has moved yet). Both copies
 coexist deliberately: the old ones stay until enough
 of Core Settings/Addons/Advanced is migrated to
@@ -1246,9 +1248,14 @@ full migration pass.
 
 ## Project Status & Future Plans
 
-**Current Version:** 2.7.0
+**Current Version:** 2.8.0
 
-**Recent Updates (v2.7.0):**
+**Recent Updates (v2.8.0):**
+- **Remote Access migrated** — VNC, WireGuard, Tailscale, and Netbird, each with its own install/connect/status/uninstall flow. The biggest Addon so far. Tailscale/Netbird install via the vendors' own `curl | sh` method, preserved as-is.
+- **Important framework-level bug found and fixed:** `run_menu()`'s *handler* call has been crash-guarded since v2.1.0, but its *status function* call was still completely bare. A status function is meant to be read-only display, but a pipeline whose `grep` matches nothing (which `pipefail` turns into a failure even though the actual last command succeeds) would crash the **entire session**, not just fail to show status. Found while building `wireguard_status()` and verifying its exact failure mode rather than assuming it was covered. Fixed once, in the framework, protecting every status function across every menu — present and future. Also audited every existing status function for the same shape and fixed one real instance in `power_schedule_status()`.
+- Deduplicated: promoted `power_schedule.sh`'s `enable_and_start_timers()` to a shared `enable_and_start_units()` in `lib/menu.sh` (works for services now, not just timers) rather than writing the same helper a second time for VNC/WireGuard.
+
+**Previous (v2.7.0):**
 - **Backported fix:** `ubuntu-based-kiosk.sh`'s own `save_config()` had the identical config-clobbering bug fixed in `lib/config.sh` under v2.6.0 — it silently deleted Authelia credentials (or any field it doesn't explicitly know about) the next time Sites, Touch Controls, Navigation, or Password Protection saved. This was a real, currently-shipping credential-loss bug, so it's fixed directly in the legacy script now rather than waiting for those menus to be migrated. Verified in isolation against the exact extracted function before touching the shipping copy. Nothing else about those menus changed.
 
 **Previous (v2.6.0):**

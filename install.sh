@@ -17,7 +17,8 @@
 #     Hidden Site PIN, Password Protection & Lockout, WiFi,
 #     Power/Display/Quiet Hours.
 #   Addons: CUPS Printing (menus/addon_cups.sh), Authelia Auto-Login
-#     (menus/addon_authelia.sh).
+#     (menus/addon_authelia.sh), Remote Access - VNC/WireGuard/
+#     Tailscale/Netbird (menus/addon_remote_access.sh).
 #   Advanced: Diagnostics (menus/diagnostics.sh - system status/logs/
 #     audio/network).
 #
@@ -55,6 +56,8 @@ source "$SCRIPT_DIR/menus/diagnostics.sh"
 source "$SCRIPT_DIR/menus/addon_cups.sh"
 # shellcheck source=menus/addon_authelia.sh
 source "$SCRIPT_DIR/menus/addon_authelia.sh"
+# shellcheck source=menus/addon_remote_access.sh
+source "$SCRIPT_DIR/menus/addon_remote_access.sh"
 
 ################################################################################
 # Preflight
@@ -118,8 +121,8 @@ core_settings_menu() {
 }
 
 addons_menu_builder() {
-    MENU_LABELS=("CUPS Printing" "Authelia Auto-Login")
-    MENU_HANDLERS=(addon_cups_menu addon_authelia_menu)
+    MENU_LABELS=("CUPS Printing" "Authelia Auto-Login" "Remote Access")
+    MENU_HANDLERS=(addon_cups_menu addon_authelia_menu remote_access_menu)
 }
 
 addons_menu() {

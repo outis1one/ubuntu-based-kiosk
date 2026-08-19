@@ -84,6 +84,18 @@ get_vpn_ips() {
     [[ -n "$vpn_info" ]] && echo "$vpn_info" || echo "None"
 }
 
+# enable_and_start_units UNIT [UNIT...]
+# Reloads systemd and enables+starts the given unit(s) - services or
+# timers - returning non-zero if enable or start fails (e.g. systemd/
+# D-Bus unreachable, or a real failure on real hardware). Always call
+# this from an `if`/`&&`/`||` context: this whole tool runs under
+# set -e, so a bare, unguarded call whose last command fails would take
+# down the entire session instead of just this one action.
+enable_and_start_units() {
+    sudo systemctl daemon-reload 2>/dev/null || true
+    sudo systemctl enable "$@" 2>/dev/null && sudo systemctl start "$@" 2>/dev/null
+}
+
 pause() {
     read -r -p "Press Enter to continue..."
 }
@@ -279,7 +291,14 @@ run_menu() {
         print_menu_header "$title"
 
         if [[ -n "$status_func" ]]; then
-            "$status_func"
+            # `|| true`: same reasoning as the handler call below - a
+            # status function's job is read-only display, and a
+            # legitimately failing command inside it (e.g. a pipeline
+            # whose grep matches nothing, which pipefail turns into a
+            # pipeline failure even though the actual last command
+            # succeeded) must not be allowed to kill the whole session
+            # over what should be, at worst, incomplete status text.
+            "$status_func" || true
             echo
         fi
 
