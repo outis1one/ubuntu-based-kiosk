@@ -1,6 +1,6 @@
 # Ubuntu Based Kiosk
 
-**Current Version:** 2.6.0 (check script header for latest version)
+**Current Version:** 2.7.0 (check script header for latest version)
 **Built with Claude Sonnet 4.6 AI assistance**
 **License:** GPL v3 - Keep derivatives open source
 **Repository:** https://github.com/outis1one/ubuntu-based-kiosk/
@@ -1233,22 +1233,25 @@ Migration continues one `menus/*.sh` file at a time; first-time
 installation itself is the last and largest piece to move, if it moves
 at all.
 
-**Open question:** the config-clobbering bug fixed in `lib/config.sh`
+**Resolved (v2.7.0):** the config-clobbering bug fixed in `lib/config.sh`
 (v2.6.0 — `save_config` silently deleting fields it doesn't know about,
-like Authelia's credentials, on the next unrelated save) has the exact
-same shape in `ubuntu-based-kiosk.sh`'s own `save_config`, unfixed. It's
-a real bug in the currently-shipping single-file installer, independent
-of whether the rest of that menu ever gets migrated. Worth deciding
-separately whether to backport just that fix into the legacy script now
-rather than waiting for a full migration pass.
+like Authelia's credentials, on the next unrelated save) had the exact
+same shape in `ubuntu-based-kiosk.sh`'s own `save_config`. Backported
+just that one fix into the legacy script, independent of migrating the
+rest of that menu — it was a real credential-loss bug in the
+currently-shipping single-file installer and didn't need to wait for a
+full migration pass.
 
 ---
 
 ## Project Status & Future Plans
 
-**Current Version:** 2.6.0
+**Current Version:** 2.7.0
 
-**Recent Updates (v2.6.0):**
+**Recent Updates (v2.7.0):**
+- **Backported fix:** `ubuntu-based-kiosk.sh`'s own `save_config()` had the identical config-clobbering bug fixed in `lib/config.sh` under v2.6.0 — it silently deleted Authelia credentials (or any field it doesn't explicitly know about) the next time Sites, Touch Controls, Navigation, or Password Protection saved. This was a real, currently-shipping credential-loss bug, so it's fixed directly in the legacy script now rather than waiting for those menus to be migrated. Verified in isolation against the exact extracted function before touching the shipping copy. Nothing else about those menus changed.
+
+**Previous (v2.6.0):**
 - **Authelia Auto-Login migrated** — encrypted SSO credentials (same AES-256-CBC/scrypt algorithm `main.js` decrypts with, verified by a real encrypt→decrypt round trip in testing) plus the full server-side Docker setup instructions, viewable again later without reconfiguring.
 - **Important bug found and fixed, not specific to Authelia:** `save_config()` did a full rebuild of `config.json` from known fields — exactly like the legacy script's `save_config` still does. Authelia's own write is a careful merge that preserves everything else, but the *next* save from Sites, Touch Controls, Navigation, or Password Protection would silently delete the Authelia credentials, since none of those knew the three Authelia fields existed. **This is a real bug in the currently-shipping single-file installer**, not introduced by this migration. Fixed in `lib/config.sh` by changing `save_config` to merge its known fields onto whatever's already on disk instead of rebuilding from nothing, so any untracked field — Authelia's three today, anything else tomorrow — survives automatically. The equivalent bug still exists, unfixed, in `ubuntu-based-kiosk.sh`'s own `save_config` — see "Modular Management" below.
 

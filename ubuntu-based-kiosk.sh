@@ -1,7 +1,34 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk v2.6.0                ###
+###   Ubuntu Based Kiosk v2.7.0                ###
 ################################################################################
+#
+# RELEASE v2.7.0 - Backported Fix: save_config() No Longer Deletes
+#                   Authelia Credentials (or Any Other Untracked Field)
+# - This script's own save_config() had the exact bug described under
+#   v2.6.0 below: it rebuilt config.json from a fixed list of known
+#   fields via `jq -n`, which silently deleted anything it didn't know
+#   about - specifically autheliaURL/autheliaUsername/
+#   autheliaEncryptedPassword, written by configure_authelia()'s own
+#   careful `. + {...}` merge. Configure Authelia, then visit Core
+#   Settings → Sites/Touch Controls/Navigation/Password Protection (all
+#   of which call save_config), and the Authelia credentials were
+#   silently gone - a real credential-loss bug that was shipping in this
+#   script independent of the modular migration.
+# - Fixed the same way as lib/config.sh's save_config: merge the known
+#   fields onto whatever's already in config.json (`. + {...}`) instead
+#   of rebuilding it from nothing, with a `jq empty` validity check
+#   falling back to `{}` if the existing file is missing or corrupt.
+#   Verified in isolation (the exact function extracted and exercised
+#   against a stub config.json seeded with Authelia-style fields,
+#   confirming they survive a second save_config call while an actual
+#   settings change still takes effect, plus the corrupt/missing-file
+#   edge cases) before touching the shipping copy.
+# - This is a standalone backport of one specific fix, not a wider
+#   migration of the Sites/Touch/Navigation/Authelia menus into this
+#   script - those still work exactly as before, just without the
+#   credential-loss bug. The modular ./install.sh path (lib/config.sh)
+#   got the equivalent fix in v2.6.0.
 #
 # RELEASE v2.6.0 - Authelia Migrated; Real Config-Clobbering Bug Fixed
 # - New in ./install.sh: Authelia Auto-Login (menus/addon_authelia.sh) -
@@ -261,7 +288,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="2.6.0"
+SCRIPT_VERSION="2.7.0"
 
 # Resolve the real path to this script file.
 # When piped (curl|bash or wget|bash), BASH_SOURCE[0] is a pipe descriptor,
@@ -3712,7 +3739,22 @@ save_config() {
     local boot_password_json="false"
     [[ "$REQUIRE_PASSWORD_ON_BOOT" == "true" ]] && boot_password_json="true"
 
-    jq -n \
+    # Merge onto whatever's already in config.json rather than rebuilding
+    # it from nothing (fixed in v2.7.0). The old `jq -n` rebuild silently
+    # deleted any field this function doesn't explicitly know about -
+    # notably autheliaURL/autheliaUsername/autheliaEncryptedPassword,
+    # written by configure_authelia()'s own careful `. + {...}` merge.
+    # Configuring Authelia and then visiting Sites, Touch Controls,
+    # Navigation, or Password Protection (all of which call this
+    # function) silently deleted the Authelia credentials. See the
+    # RELEASE v2.7.0 note above.
+    local existing="{}"
+    if sudo -u "$KIOSK_USER" test -f "$CONFIG_PATH" 2>/dev/null; then
+        existing=$(sudo -u "$KIOSK_USER" cat "$CONFIG_PATH" 2>/dev/null)
+        echo "$existing" | jq empty 2>/dev/null || existing="{}"
+    fi
+
+    echo "$existing" | jq \
       --arg unit "s" \
       --argjson autoswitch "$auto_json" \
       --argjson enableTouch true \
@@ -3731,7 +3773,7 @@ save_config() {
       --arg lockoutActiveStart "${LOCKOUT_ACTIVE_START:-}" \
       --arg lockoutActiveEnd "${LOCKOUT_ACTIVE_END:-}" \
       --argjson requirePasswordOnBoot "$boot_password_json" \
-      '{unit:$unit,autoswitch:$autoswitch,enableTouch:$enableTouch,dualSwipe:$dualSwipe,swipeMode:$swipeMode,allowNavigation:$allowNavigation,homeTabIndex:$homeTabIndex,inactivityTimeout:$inactivityTimeout,enablePauseButton:$enablePauseButton,enableKeyboardButton:$enableKeyboardButton,enableNavButton:$enableNavButton,enablePasswordProtection:$enablePasswordProtection,lockoutPassword:$lockoutPassword,lockoutTimeout:$lockoutTimeout,lockoutAtTime:$lockoutAtTime,lockoutActiveStart:$lockoutActiveStart,lockoutActiveEnd:$lockoutActiveEnd,requirePasswordOnBoot:$requirePasswordOnBoot,tabs:[]}' > "$tmp"
+      '. + {unit:$unit,autoswitch:$autoswitch,enableTouch:$enableTouch,dualSwipe:$dualSwipe,swipeMode:$swipeMode,allowNavigation:$allowNavigation,homeTabIndex:$homeTabIndex,inactivityTimeout:$inactivityTimeout,enablePauseButton:$enablePauseButton,enableKeyboardButton:$enableKeyboardButton,enableNavButton:$enableNavButton,enablePasswordProtection:$enablePasswordProtection,lockoutPassword:$lockoutPassword,lockoutTimeout:$lockoutTimeout,lockoutAtTime:$lockoutAtTime,lockoutActiveStart:$lockoutActiveStart,lockoutActiveEnd:$lockoutActiveEnd,requirePasswordOnBoot:$requirePasswordOnBoot,tabs:[]}' > "$tmp"
     
     if [[ ${#URLS[@]} -gt 0 ]]; then
         for idx in "${!URLS[@]}"; do
