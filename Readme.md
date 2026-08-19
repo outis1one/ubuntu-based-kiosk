@@ -1255,7 +1255,7 @@ terminal menu and the web UI, so they can't drift apart).
   Settings): the last of the "destructive trio." Composed from every
   addon's own `*_do_uninstall` helper instead of re-implementing
   removal a second time — see "Recent Updates (v2.12.0)" below.
-- `menus/fleet_profile.sh` — **Fleet Profile** (Advanced): export/apply
+- `menus/clone_settings.sh` — **Clone Settings** (Advanced): export/apply
   the portable parts of `config.json` across several kiosks that should
   share the same settings. New, not a legacy port — deliberately never
   copies machine-bound credentials (Authelia, WireGuard, Asterisk
@@ -1279,7 +1279,7 @@ Audio — none of that has moved yet; Complete Uninstall *is* now
 migrated, but Upgrade and Full Reinstall are staying put — both are
 coupled to this file's own heredoc self-extraction of main.js/
 preload.js/etc, which has no modular equivalent). The legacy Export/
-Import Settings is also staying as-is; Fleet Profile is a new,
+Import Settings is also staying as-is; Clone Settings is a new,
 narrower feature alongside it, not a replacement for it — see "Recent
 Updates (v2.13.0)" below for why they're not the same thing.
 Both copies coexist deliberately: the old ones stay until enough of
@@ -1316,7 +1316,7 @@ full migration pass.
 **Current Version:** 2.13.0
 
 **Recent Updates (v2.13.0):**
-- **New: Fleet Profile** (Advanced → Fleet Profile) — not a port of the legacy Export/Import Settings, a narrower MVP for the "set up one kiosk, then stamp out a dozen more like it" use case. Exports the portable parts of `config.json` (sites, display/touch/navigation, lockout, password protection) to a JSON file; applies that file to any other already-installed kiosk.
+- **New: Clone Settings** (Advanced → Clone Settings) — not a port of the legacy Export/Import Settings, a narrower MVP for the "set up one kiosk, then stamp out a dozen more like it" use case. Exports the portable parts of `config.json` (sites, display/touch/navigation, lockout, password protection) to a JSON file; applies that file to any other already-installed kiosk.
 - **Deliberately does not copy machine-bound credentials**, because copying them would be actively wrong: Authelia's encrypted password is keyed off `/etc/machine-id` and decrypts to garbage on another machine; a WireGuard private key is a device identity, and reusing one across machines is a peer conflict, not a saving; most Asterisk PBXes reject two simultaneous registrations to the same extension. Applying a profile prints these as an explicit "needs a human" checklist instead of silently skipping or cloning them.
 - Records which addons were present at export time and reports which are/aren't present on the target — doesn't install anything itself. Non-interactive addon installation (so applying a profile needs zero prompts — scriptable over SSH to a whole fleet) is a deliberate follow-up, not bundled into this MVP.
 

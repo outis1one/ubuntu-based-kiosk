@@ -30,8 +30,8 @@
 #     manual update, fix blank screen), Factory Reset
 #     (menus/advanced_factory_reset.sh), Virtual Consoles
 #     (menus/advanced_virtual_consoles.sh), Emergency Hotspot
-#     (menus/advanced_emergency_hotspot.sh), Fleet Profile
-#     (menus/fleet_profile.sh - export/apply portable settings across
+#     (menus/advanced_emergency_hotspot.sh), Clone Settings
+#     (menus/clone_settings.sh - export/apply portable settings across
 #     several kiosks; deliberately excludes machine-bound credentials
 #     like Authelia/WireGuard/Asterisk Intercom - see the file header).
 #
@@ -87,9 +87,9 @@ source "$SCRIPT_DIR/menus/advanced_emergency_hotspot.sh"
 # Sourced last: composes the *_do_uninstall/*_do_remove_all/*_do_disable
 # helpers defined in every file above it.
 source "$SCRIPT_DIR/menus/complete_uninstall.sh"
-# shellcheck source=menus/fleet_profile.sh
+# shellcheck source=menus/clone_settings.sh
 # Also composes detection helpers (*_is_installed) from every addon above.
-source "$SCRIPT_DIR/menus/fleet_profile.sh"
+source "$SCRIPT_DIR/menus/clone_settings.sh"
 
 ################################################################################
 # Preflight
@@ -164,8 +164,8 @@ addons_menu() {
 }
 
 advanced_menu_builder() {
-    MENU_LABELS=("Diagnostics" "Electron Maintenance" "Factory Reset" "Virtual Consoles" "Emergency Hotspot" "Fleet Profile")
-    MENU_HANDLERS=(diagnostics_menu advanced_electron_menu advanced_factory_reset_menu advanced_virtual_consoles_menu advanced_emergency_hotspot_menu fleet_profile_menu)
+    MENU_LABELS=("Diagnostics" "Electron Maintenance" "Factory Reset" "Virtual Consoles" "Emergency Hotspot" "Clone Settings")
+    MENU_HANDLERS=(diagnostics_menu advanced_electron_menu advanced_factory_reset_menu advanced_virtual_consoles_menu advanced_emergency_hotspot_menu clone_settings_menu)
 }
 
 advanced_menu() {

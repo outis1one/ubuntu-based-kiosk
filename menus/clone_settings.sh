@@ -1,6 +1,6 @@
 #!/bin/bash
 ################################################################################
-# menus/fleet_profile.sh - "Fleet Profile" (Advanced): export the portable
+# menus/clone_settings.sh - "Clone Settings" (Advanced): export the portable
 # parts of this kiosk's configuration to a JSON file, and apply that file
 # to other already-installed kiosks - for standing up several kiosks that
 # should share the same sites/settings.
@@ -32,20 +32,20 @@
 # being sourced first (for the *_is_installed detection helpers).
 ################################################################################
 
-fleet_profile_status() {
+clone_settings_status() {
     echo "Exports/applies sites, display, navigation, and lockout settings"
     echo "between already-installed kiosks. Addon credentials that are"
     echo "bound to one machine (Authelia, WireGuard, Asterisk Intercom)"
     echo "are never copied - see the checklist after applying a profile."
 }
 
-fleet_profile_menu_builder() {
-    MENU_LABELS=("Export fleet profile" "Apply fleet profile")
-    MENU_HANDLERS=(action_export_fleet_profile action_apply_fleet_profile)
+clone_settings_menu_builder() {
+    MENU_LABELS=("Export settings" "Apply settings (clone)")
+    MENU_HANDLERS=(action_export_clone_settings action_apply_clone_settings)
 }
 
-fleet_profile_menu() {
-    run_menu "FLEET PROFILE" fleet_profile_menu_builder fleet_profile_status
+clone_settings_menu() {
+    run_menu "CLONE SETTINGS" clone_settings_menu_builder clone_settings_status
 }
 
 ################################################################################
@@ -53,7 +53,7 @@ fleet_profile_menu() {
 ################################################################################
 
 # JSON array of addon identifiers currently present on this machine.
-fleet_detect_addons() {
+clone_detect_addons() {
     local addons=()
 
     cups_is_installed 2>/dev/null && addons+=("cups")
@@ -82,7 +82,7 @@ fleet_detect_addons() {
 # Actions
 ################################################################################
 
-action_export_fleet_profile() {
+action_export_clone_settings() {
     echo
     if ! sudo -u "$KIOSK_USER" test -f "$CONFIG_PATH" 2>/dev/null; then
         log_error "config.json not found at $CONFIG_PATH - configure sites/settings first"
@@ -91,7 +91,7 @@ action_export_fleet_profile() {
     fi
 
     local out_path
-    out_path=$(ask_text "Export profile to" "$HOME/kiosk-fleet-profile.json")
+    out_path=$(ask_text "Export profile to" "$HOME/kiosk-clone-settings.json")
 
     local raw_config
     raw_config=$(sudo -u "$KIOSK_USER" cat "$CONFIG_PATH" 2>/dev/null)
@@ -105,7 +105,7 @@ action_export_fleet_profile() {
     settings=$(echo "$raw_config" | jq 'del(.autheliaURL, .autheliaUsername, .autheliaEncryptedPassword)')
 
     local addons_present
-    addons_present=$(fleet_detect_addons)
+    addons_present=$(clone_detect_addons)
 
     jq -n \
         --argjson settings "$settings" \
@@ -114,7 +114,7 @@ action_export_fleet_profile() {
         '{profile_version: 1, script_version: $script_version, settings: $settings, addons_present: $addons}' \
         > "$out_path"
 
-    log_success "Fleet profile exported to $out_path"
+    log_success "Settings exported to $out_path"
     echo
     echo "Included: sites, display/touch/navigation settings, lockout,"
     echo "password protection (SHA-256 hash only)."
@@ -127,7 +127,7 @@ action_export_fleet_profile() {
     pause
 }
 
-action_apply_fleet_profile() {
+action_apply_clone_settings() {
     echo
     local in_path
     in_path=$(ask_text "Profile file to apply" "")

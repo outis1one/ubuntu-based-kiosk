@@ -3,10 +3,10 @@
 ###   Ubuntu Based Kiosk v2.13.0               ###
 ################################################################################
 #
-# RELEASE v2.13.0 - Fleet Profile: New MVP for Standing Up Several
+# RELEASE v2.13.0 - Clone Settings: New MVP for Standing Up Several
 #                    Kiosks with the Same Settings
-# - New in ./install.sh's Advanced menu: Fleet Profile
-#   (menus/fleet_profile.sh). Not a port of the legacy Export/Import
+# - New in ./install.sh's Advanced menu: Clone Settings
+#   (menus/clone_settings.sh). Not a port of the legacy Export/Import
 #   Settings - a narrower, deliberately-scoped feature for the "set up
 #   one kiosk, then stamp out a dozen more like it" use case: export the
 #   portable parts of config.json (sites, display/touch/navigation,
