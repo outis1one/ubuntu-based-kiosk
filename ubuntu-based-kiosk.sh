@@ -1,7 +1,27 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk v2.14.0               ###
+###   Ubuntu Based Kiosk v2.15.0               ###
 ################################################################################
+#
+# RELEASE v2.15.0 - Upgrade Migrated to install.sh (Advanced -> Upgrade)
+# - New in ./install.sh's Advanced menu: Upgrade. Not a port of this
+#   script's Upgrade - that one re-extracted main.js/preload.js/etc from
+#   its own heredocs on every run, a mechanism that has no equivalent
+#   here now that kiosk-app/ and provision/files/ are real files in the
+#   git checkout. The modular Upgrade is `git pull` (only after
+#   confirming the working tree is clean and the pull is a fast-forward
+#   - never an automatic merge) followed by re-running the same
+#   packages/kiosk-app/display/firewall/power-management steps
+#   lib/provision.sh already has for a fresh install, reused rather than
+#   reimplemented. Skips the interactive first-run settings wizard and
+#   the "reboot now" prompt - those don't belong in a routine upgrade.
+# - Also offers an on-demand Electron version check/update regardless of
+#   whether there was any code to pull, since Electron isn't versioned
+#   by this repo - reuses the existing, already-tested
+#   action_update_electron (menus/advanced_electron.sh) as-is.
+# - Requires a git checkout (not the no-git ZIP download option) and a
+#   clean working tree; a diverged local history fails the pull cleanly
+#   with a clear message instead of attempting an automatic merge.
 #
 # RELEASE v2.14.0 - install.sh Now Provisions a Kiosk From Scratch,
 #                    Not Just Manages an Existing One
@@ -521,7 +541,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="2.14.0"
+SCRIPT_VERSION="2.15.0"
 
 # Resolve the real path to this script file.
 # When piped (curl|bash or wget|bash), BASH_SOURCE[0] is a pipe descriptor,

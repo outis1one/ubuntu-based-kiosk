@@ -11,11 +11,13 @@
 #
 # ubuntu-based-kiosk.sh, the original single-file installer, still
 # exists and still works, but is no longer the only way to provision a
-# new kiosk. Two things remain there that this tool deliberately doesn't
-# reimplement: Upgrade and Full Reinstall, both coupled to that script's
-# own heredoc self-extraction of main.js/preload.js/etc - a different
-# mechanism than provisioning (which now copies real files from
-# kiosk-app/ and provision/files/, not heredocs) and not yet ported.
+# new kiosk. Upgrade (Advanced -> Upgrade) is now here too, but not a
+# port of the legacy version - that one re-extracted heredocs on every
+# run; kiosk-app/ and provision/files/ are real files in this git
+# checkout, so the modular Upgrade is `git pull` + re-running the same
+# provisioning steps, reused rather than reimplemented (see
+# menus/advanced_upgrade.sh). Full Reinstall remains legacy-only - it
+# has no equivalent here yet.
 #
 # Migrated so far, grouped the same way the legacy menu groups them:
 #   Core Settings: Sites & Page Timing, Display & Interaction, Timezone,
@@ -36,7 +38,9 @@
 #     (menus/advanced_emergency_hotspot.sh), Clone Settings
 #     (menus/clone_settings.sh - export/apply portable settings across
 #     several kiosks; deliberately excludes machine-bound credentials
-#     like Authelia/WireGuard/Asterisk Intercom - see the file header).
+#     like Authelia/WireGuard/Asterisk Intercom - see the file header),
+#     Upgrade (menus/advanced_upgrade.sh - git pull + re-provision, plus
+#     an on-demand Electron version check).
 #
 # Usage (works whether or not a kiosk is already installed):
 #   git clone <repo>
@@ -82,6 +86,11 @@ source "$SCRIPT_DIR/menus/addon_lms_squeezelite.sh"
 source "$SCRIPT_DIR/menus/addon_asterisk_intercom.sh"
 # shellcheck source=menus/advanced_electron.sh
 source "$SCRIPT_DIR/menus/advanced_electron.sh"
+# shellcheck source=menus/advanced_upgrade.sh
+# Depends on action_update_electron above and the provision_* functions
+# sourced later (lib/provision.sh) - safe either way, bash resolves
+# function calls at run time, not source time.
+source "$SCRIPT_DIR/menus/advanced_upgrade.sh"
 # shellcheck source=menus/advanced_factory_reset.sh
 source "$SCRIPT_DIR/menus/advanced_factory_reset.sh"
 # shellcheck source=menus/advanced_virtual_consoles.sh
@@ -164,8 +173,8 @@ addons_menu() {
 }
 
 advanced_menu_builder() {
-    MENU_LABELS=("Diagnostics" "Electron Maintenance" "Factory Reset" "Virtual Consoles" "Emergency Hotspot" "Clone Settings")
-    MENU_HANDLERS=(diagnostics_menu advanced_electron_menu advanced_factory_reset_menu advanced_virtual_consoles_menu advanced_emergency_hotspot_menu clone_settings_menu)
+    MENU_LABELS=("Diagnostics" "Electron Maintenance" "Factory Reset" "Virtual Consoles" "Emergency Hotspot" "Clone Settings" "Upgrade")
+    MENU_HANDLERS=(diagnostics_menu advanced_electron_menu advanced_factory_reset_menu advanced_virtual_consoles_menu advanced_emergency_hotspot_menu clone_settings_menu advanced_upgrade_menu)
 }
 
 advanced_menu() {

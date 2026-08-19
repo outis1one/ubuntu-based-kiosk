@@ -55,10 +55,10 @@ chmod +x ubuntu-based-kiosk.sh && ./ubuntu-based-kiosk.sh
 The installer will guide you through configuration during setup.
 
 > The modular `./install.sh` (see "Modular Management" below) can also
-> provision a kiosk from scratch now, as an alternative to the
-> single-file installer above. `ubuntu-based-kiosk.sh` remains the more
-> battle-tested path and the only one that supports Upgrade/Full
-> Reinstall of an existing install.
+> provision a kiosk from scratch now, and has its own Upgrade, as an
+> alternative to the single-file installer above. `ubuntu-based-kiosk.sh`
+> remains the more battle-tested path and the only one that supports
+> Full Reinstall of an existing install.
 
 ---
 
@@ -1280,13 +1280,18 @@ terminal menu and the web UI, so they can't drift apart).
   time. See "Recent Updates (v2.14.0)" below.
 - `kiosk-app/` — the Electron app source (`main.js`, `preload.js`, the
   dialog HTML files, `package.json`, `start.sh`), copied to the kiosk
-  directory during provisioning. Also the basis for a future clean
-  `git pull`-based Upgrade.
+  directory during provisioning and re-copied during Upgrade.
 - `provision/files/` — every other system template file provisioning
   installs (X11 configs, udev rules, systemd units, the power-button
   and HDMI-mirroring scripts, polkit rules), laid out mirroring their
   real destination path, e.g. `provision/files/etc/X11/xorg.conf.d/
   foo.conf` installs to `/etc/X11/xorg.conf.d/foo.conf`.
+- `menus/advanced_upgrade.sh` — **Upgrade** (Advanced): `git pull` (only
+  as a clean fast-forward) plus re-running the same
+  packages/kiosk-app/display/firewall/power-management provisioning
+  steps, so any code or hardware-config change picked up by the pull
+  actually takes effect. Also offers an on-demand Electron version
+  check. See "Recent Updates (v2.15.0)" below.
 - `install.sh` — entry point for the modular tool, now grouped **Core
   Settings / Addons / Advanced** like the legacy menu. On a machine
   with no kiosk installed yet, it provisions one first (see
@@ -1298,16 +1303,17 @@ terminal menu and the web UI, so they can't drift apart).
   ./install.sh
   ```
 
-**Honest status:** first-time installation is now covered — `install.sh`
-provisions a kiosk from a bare Ubuntu Server box, not just an
-already-installed one — but `ubuntu-based-kiosk.sh` is still ~12,000
-lines and still contains its own unremoved, unmodified copies of every
-menu above, including the legacy three-option (Client/Server/Full)
-Easy Asterisk Intercom — the modular version only replaces the Client
-option, by design. Two pieces remain legacy-only: Upgrade and Full
-Reinstall, both coupled to `ubuntu-based-kiosk.sh`'s own heredoc
-self-extraction of main.js/preload.js/etc — a different mechanism from
-the new provisioning, which copies real files from `kiosk-app/` and
+**Honest status:** first-time installation and Upgrade are now covered —
+`install.sh` provisions a kiosk from a bare Ubuntu Server box, not just
+an already-installed one, and can pull/apply its own updates — but
+`ubuntu-based-kiosk.sh` is still ~12,000 lines and still contains its
+own unremoved, unmodified copies of every menu above, including the
+legacy three-option (Client/Server/Full) Easy Asterisk Intercom — the
+modular version only replaces the Client option, by design. One piece
+remains legacy-only: Full Reinstall, coupled to
+`ubuntu-based-kiosk.sh`'s own heredoc self-extraction of
+main.js/preload.js/etc — a different mechanism from the new
+provisioning, which copies real files from `kiosk-app/` and
 `provision/files/` instead. The legacy Export/Import Settings is also
 staying as-is; Clone Settings is a new, narrower feature alongside it,
 not a replacement for it — see "Recent Updates (v2.13.0)" below for why
@@ -1341,9 +1347,14 @@ full migration pass.
 
 ## Project Status & Future Plans
 
-**Current Version:** 2.14.0
+**Current Version:** 2.15.0
 
-**Recent Updates (v2.14.0):**
+**Recent Updates (v2.15.0):**
+- **New: Upgrade** (Advanced → Upgrade) — not a port of the legacy Upgrade, which re-extracted `main.js`/`preload.js`/etc from its own heredocs on every run. `kiosk-app/` and `provision/files/` are real files in this git checkout now, so the modular Upgrade is `git pull` (after confirming a clean working tree, and only as a fast-forward — never an automatic merge) followed by re-running the same packages/kiosk-app/display/firewall/power-management steps `lib/provision.sh` already has for a fresh install, reused rather than reimplemented. Skips the interactive first-run settings wizard and the "reboot now" prompt.
+- Also offers an on-demand Electron version check regardless of whether there was code to pull (Electron isn't versioned by this repo) — reuses the existing, already-tested `action_update_electron` as-is.
+- Requires a real git checkout (not the no-git ZIP download option) and a clean working tree; a diverged local history fails the pull cleanly with a clear message rather than attempting an automatic merge.
+
+**Previous (v2.14.0):**
 - **`./install.sh` now provisions a kiosk from scratch, not just manages an existing one.** Until now it only worked against an already-installed kiosk — `ubuntu-based-kiosk.sh` was still the only path from a bare Ubuntu Server box to a running one. On a machine with no kiosk-app directory yet, it now installs packages, creates the kiosk user, installs Node.js/Electron, sets up LightDM+Openbox autologin, audio/video/HDMI/power-button hardware handling, and the firewall, then hands off to the same Core Settings menus for initial configuration — matching the legacy script's own install-then-configure flow, on the modular codebase.
 - **New: `lib/provision.sh`**, the provisioning steps — built almost entirely by calling menus already migrated below (`core_settings_menu`, emergency hotspot, virtual consoles) instead of reimplementing that configuration logic a third time. Reuse cut it down to roughly 300 lines against the legacy script's ~4,000-line `first_time_install()`.
 - **New: `lib/electron.sh`** — `electron_install_binary()`, extracted out of `menus/advanced_electron.sh` so fresh provisioning and the existing "Fix blank screen" action share one implementation instead of two copies of the same repair sequence.
