@@ -1,6 +1,6 @@
 # Ubuntu Based Kiosk
 
-**Current Version:** 2.8.0 (check script header for latest version)
+**Current Version:** 2.9.0 (check script header for latest version)
 **Built with Claude Sonnet 4.6 AI assistance**
 **License:** GPL v3 - Keep derivatives open source
 **Repository:** https://github.com/outis1one/ubuntu-based-kiosk/
@@ -1214,6 +1214,13 @@ terminal menu and the web UI, so they can't drift apart).
   Prompted the `save_config` merge fix above.
 - `menus/addon_remote_access.sh` — **Remote Access** (Addons): VNC,
   WireGuard, Tailscale, Netbird. The biggest Addon so far.
+- `menus/addon_lms_squeezelite.sh` — **LMS Server / Squeezelite Player**
+  (Addons): install/reconfigure/uninstall for an LMS (Lyrion/Logitech
+  Media Server) server the kiosk can host, and a Squeezelite player the
+  kiosk can run against any LMS server on the LAN. Squeezelite's own
+  start script and systemd unit go through `$BIN_DIR`/`$SYSTEMD_DIR`
+  like every other addon; LMS's own apt repo/GPG key/ufw rules stay at
+  their real fixed system paths, same as CUPS.
 - `install.sh` — entry point for the modular tool, now grouped **Core
   Settings / Addons / Advanced** like the legacy menu. Run it against an
   *already-installed* kiosk:
@@ -1226,14 +1233,25 @@ terminal menu and the web UI, so they can't drift apart).
 **Honest status:** this does not yet replace first-time installation, or
 most of the old installer. `ubuntu-based-kiosk.sh` is still ~12,000
 lines and still contains its own unremoved, unmodified copies of every
-menu above (plus Upgrade, Reinstall, Uninstall, 2 more Addons, and the
-other 8 Advanced items — none of that has moved yet). Both copies
-coexist deliberately: the old ones stay until enough
-of Core Settings/Addons/Advanced is migrated to
-retire them in one pass, rather than leaving the legacy menu half-wired.
-Migration continues one `menus/*.sh` file at a time; first-time
-installation itself is the last and largest piece to move, if it moves
-at all.
+menu above (plus Upgrade, Reinstall, Uninstall, 1 more Addon — Easy
+Asterisk Intercom — and the other 8 Advanced items — none of that has
+moved yet). Both copies coexist deliberately: the old ones stay until
+enough of Core Settings/Addons/Advanced is migrated to retire them in
+one pass, rather than leaving the legacy menu half-wired. Migration
+continues one `menus/*.sh` file at a time; first-time installation
+itself is the last and largest piece to move, if it moves at all.
+
+**Resolved (v2.9.0):** `is_service_enabled()` — shared by both scripts
+— had a pre-check (`systemctl list-unit-files | grep -q "^${service}\s"`)
+that never actually matched, since every call site passes a bare
+service name while `list-unit-files` lines start with
+`"$service.service"`. The function always fell through to `return 1`
+regardless of the real enabled state — under-reporting "enabled but not
+currently running" as "not installed" everywhere it's used, including
+LMS/Squeezelite's own status detection. Fixed in both `lib/config.sh`
+and `ubuntu-based-kiosk.sh` by dropping the dead pre-check —
+`systemctl is-enabled` already reports "not found" as a failure on its
+own.
 
 **Resolved (v2.7.0):** the config-clobbering bug fixed in `lib/config.sh`
 (v2.6.0 — `save_config` silently deleting fields it doesn't know about,
@@ -1248,9 +1266,14 @@ full migration pass.
 
 ## Project Status & Future Plans
 
-**Current Version:** 2.8.0
+**Current Version:** 2.9.0
 
-**Recent Updates (v2.8.0):**
+**Recent Updates (v2.9.0):**
+- **LMS Server / Squeezelite Player migrated** — install/reconfigure/uninstall for both, in `./install.sh`. Squeezelite's own start script and systemd unit now go through `$BIN_DIR`/`$SYSTEMD_DIR` like every other addon instead of hardcoded `/usr/local/bin`/`/etc/systemd/system`; LMS's own apt repo/GPG key/ufw rules stay at their real fixed system paths, same approach as CUPS.
+- **Bug fix:** the legacy `install_lms()` enabled/started the detected service via `sudo systemctl enable "$service_name" 2>&1 | tee /tmp/lms-enable.log` — piped through `tee`, the statement's exit status reflected `tee` (always 0), not `systemctl enable`, so a real enable/start failure was silently swallowed instead of falling through to a warning. Now uses the shared `enable_and_start_units()` helper.
+- **Bug fix (shared, backported to the legacy script too):** `is_service_enabled()`'s pre-check never matched a bare service name against `list-unit-files`' `"$service.service"` lines, so it always reported "not enabled" regardless of the real state. Dropped the dead pre-check — see "Modular Management" below.
+
+**Previous (v2.8.0):**
 - **Remote Access migrated** — VNC, WireGuard, Tailscale, and Netbird, each with its own install/connect/status/uninstall flow. The biggest Addon so far. Tailscale/Netbird install via the vendors' own `curl | sh` method, preserved as-is.
 - **Important framework-level bug found and fixed:** `run_menu()`'s *handler* call has been crash-guarded since v2.1.0, but its *status function* call was still completely bare. A status function is meant to be read-only display, but a pipeline whose `grep` matches nothing (which `pipefail` turns into a failure even though the actual last command succeeds) would crash the **entire session**, not just fail to show status. Found while building `wireguard_status()` and verifying its exact failure mode rather than assuming it was covered. Fixed once, in the framework, protecting every status function across every menu — present and future. Also audited every existing status function for the same shape and fixed one real instance in `power_schedule_status()`.
 - Deduplicated: promoted `power_schedule.sh`'s `enable_and_start_timers()` to a shared `enable_and_start_units()` in `lib/menu.sh` (works for services now, not just timers) rather than writing the same helper a second time for VNC/WireGuard.

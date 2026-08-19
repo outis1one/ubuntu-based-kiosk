@@ -1,7 +1,36 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk v2.8.0                ###
+###   Ubuntu Based Kiosk v2.9.0                ###
 ################################################################################
+#
+# RELEASE v2.9.0 - LMS Server / Squeezelite Player Migrated;
+#                   is_service_enabled() Dead Pre-Check Fixed
+# - New in ./install.sh: LMS Server / Squeezelite Player
+#   (menus/addon_lms_squeezelite.sh) - install/reconfigure/uninstall for
+#   an LMS (Lyrion/Logitech Media Server) server the kiosk can host, and
+#   a Squeezelite player the kiosk can run against any LMS server on the
+#   LAN. Squeezelite's own start script and systemd unit now go through
+#   $BIN_DIR/$SYSTEMD_DIR (lib/config.sh) instead of hardcoded
+#   /usr/local/bin and /etc/systemd/system, matching every other addon;
+#   LMS's own apt repo/GPG key/ufw rules stay at their real fixed system
+#   paths, same as CUPS.
+# - Fixed a real unguarded-pipeline bug from the legacy install_lms():
+#   `sudo systemctl enable "$service_name" 2>&1 | tee /tmp/lms-enable.log`
+#   made the whole statement's exit status depend on `tee` (always 0)
+#   instead of `systemctl enable`, so a real enable/start failure was
+#   silently swallowed rather than falling through to a warning. Now
+#   uses the shared enable_and_start_units() helper instead.
+# - Fixed is_service_enabled() (shared by both scripts): its pre-check
+#   `systemctl list-unit-files | grep -q "^${service}\s"` never matched,
+#   since every call site passes a bare service name (e.g.
+#   "squeezelite") while list-unit-files lines start with
+#   "squeezelite.service" - so the function always fell through to
+#   `return 1` regardless of the real enabled state. `systemctl
+#   is-enabled` already reports "not found" as a failure on its own, so
+#   the dead pre-check is simply dropped. Backported here since it's the
+#   same shared function in both scripts and the fix is low-risk
+#   (behavior-preserving for every state except the one it was silently
+#   getting wrong).
 #
 # RELEASE v2.8.0 - Remote Access Migrated (VNC/WireGuard/Tailscale/
 #                   Netbird); Framework-Level Status-Function Crash Fixed
@@ -320,7 +349,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="2.8.0"
+SCRIPT_VERSION="2.9.0"
 
 # Resolve the real path to this script file.
 # When piped (curl|bash or wget|bash), BASH_SOURCE[0] is a pipe descriptor,
@@ -578,12 +607,14 @@ is_service_active() {
 
 is_service_enabled() {
     local service="$1"
-    # Check if service file exists first
-    if systemctl list-unit-files 2>/dev/null | grep -q "^${service}\s"; then
-        systemctl is-enabled --quiet "$service" 2>/dev/null
-    else
-        return 1
-    fi
+    # `systemctl is-enabled` already reports "not found" as a failure on
+    # its own - no need for (and no correct way to write, given every
+    # call site here passes a bare service name while list-unit-files
+    # lines start with "$service.service") a pre-check via
+    # list-unit-files. The previous "^${service}\s" pre-check never
+    # matched, so this function always fell through to `return 1`
+    # regardless of the real enabled state.
+    systemctl is-enabled --quiet "$service" 2>/dev/null
 }
 
 get_ip_address() {

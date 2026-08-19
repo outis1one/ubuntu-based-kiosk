@@ -78,6 +78,20 @@ is_service_active() {
     systemctl is-active --quiet "$service" 2>/dev/null
 }
 
+# Whether a service is enabled (would start on boot), regardless of
+# whether it's currently running. The legacy script's version of this
+# pre-checked `systemctl list-unit-files | grep -q "^${service}\s"`
+# before calling is-enabled - but every call site passes a bare service
+# name (e.g. "squeezelite"), while list-unit-files lines start with
+# "squeezelite.service", so that regex never matched and the legacy
+# function always fell through to `return 1` no matter the real state.
+# `systemctl is-enabled` already reports "not found" as a failure on its
+# own, so the pre-check was both broken and unnecessary - dropped here.
+is_service_enabled() {
+    local service="$1"
+    systemctl is-enabled --quiet "$service" 2>/dev/null
+}
+
 # Load every setting config.json has into the bash globals above.
 # Safe to call with no existing config file - leaves script defaults in place.
 load_existing_config() {

@@ -18,7 +18,8 @@
 #     Power/Display/Quiet Hours.
 #   Addons: CUPS Printing (menus/addon_cups.sh), Authelia Auto-Login
 #     (menus/addon_authelia.sh), Remote Access - VNC/WireGuard/
-#     Tailscale/Netbird (menus/addon_remote_access.sh).
+#     Tailscale/Netbird (menus/addon_remote_access.sh), LMS Server /
+#     Squeezelite Player (menus/addon_lms_squeezelite.sh).
 #   Advanced: Diagnostics (menus/diagnostics.sh - system status/logs/
 #     audio/network).
 #
@@ -58,6 +59,8 @@ source "$SCRIPT_DIR/menus/addon_cups.sh"
 source "$SCRIPT_DIR/menus/addon_authelia.sh"
 # shellcheck source=menus/addon_remote_access.sh
 source "$SCRIPT_DIR/menus/addon_remote_access.sh"
+# shellcheck source=menus/addon_lms_squeezelite.sh
+source "$SCRIPT_DIR/menus/addon_lms_squeezelite.sh"
 
 ################################################################################
 # Preflight
@@ -121,8 +124,8 @@ core_settings_menu() {
 }
 
 addons_menu_builder() {
-    MENU_LABELS=("CUPS Printing" "Authelia Auto-Login" "Remote Access")
-    MENU_HANDLERS=(addon_cups_menu addon_authelia_menu remote_access_menu)
+    MENU_LABELS=("CUPS Printing" "Authelia Auto-Login" "Remote Access" "LMS Server / Squeezelite Player")
+    MENU_HANDLERS=(addon_cups_menu addon_authelia_menu remote_access_menu addon_lms_squeezelite_menu)
 }
 
 addons_menu() {
