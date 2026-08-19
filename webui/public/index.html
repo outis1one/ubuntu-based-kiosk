@@ -1,0 +1,139 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kiosk Web UI</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<header>
+  <h1>Kiosk Web UI</h1>
+  <p class="subtitle">Sites, display behavior, and lockout - saved directly to this kiosk's config.json.</p>
+</header>
+
+<main>
+  <section id="msg" class="banner" hidden></section>
+
+  <section class="card">
+    <h2>Sites &amp; Page Timing</h2>
+    <div id="sites-list"></div>
+    <div class="button-row">
+      <button type="button" id="add-site" class="secondary">Add a page</button>
+      <button type="button" id="save-sites">Save Sites &amp; Page Timing</button>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>Display &amp; Interaction</h2>
+    <form id="display-form">
+      <label>
+        Touch gesture mode
+        <select name="swipeMode">
+          <option value="dual">Dual-direction (recommended for touchscreens)</option>
+          <option value="standard">Standard</option>
+        </select>
+      </label>
+
+      <label>
+        Link navigation security
+        <select name="allowNavigation">
+          <option value="restricted">Restricted - only the loaded URL</option>
+          <option value="same-origin">Same-origin - links within the same domain (recommended)</option>
+          <option value="open">Open - any link</option>
+        </select>
+      </label>
+
+      <label class="checkbox"><input type="checkbox" name="enablePauseButton"> Pause button</label>
+      <label class="checkbox"><input type="checkbox" name="enableKeyboardButton"> On-screen keyboard button</label>
+      <label class="checkbox"><input type="checkbox" name="enableNavButton"> Navigation/help button</label>
+
+      <fieldset>
+        <legend>Home page</legend>
+        <label>
+          Home page
+          <select name="homeTabIndex" id="home-tab-select">
+            <option value="-1">Disabled</option>
+          </select>
+        </label>
+        <label>
+          Inactivity timeout (minutes)
+          <input type="number" name="inactivityTimeoutMinutes" min="1" max="240" step="1">
+        </label>
+      </fieldset>
+
+      <button type="submit">Save Display &amp; Interaction</button>
+    </form>
+  </section>
+
+  <section class="card">
+    <h2>Password Protection &amp; Lockout</h2>
+    <form id="lockout-form">
+      <label class="checkbox"><input type="checkbox" name="enablePasswordProtection" id="lockout-enabled"> Enable password protection</label>
+
+      <div id="lockout-fields">
+        <label>
+          <span id="password-label">Set lockout password</span>
+          <input type="password" name="newLockoutPassword" autocomplete="new-password">
+        </label>
+        <label>
+          Confirm password
+          <input type="password" id="lockout-password-confirm" autocomplete="new-password">
+        </label>
+
+        <label>
+          Inactivity lockout timeout (minutes, 0 = boot/wake only)
+          <input type="number" name="lockoutTimeoutMinutes" min="0" max="1440" step="1">
+        </label>
+
+        <label class="checkbox">
+          <input type="checkbox" id="daily-lock-enabled"> Lock at a specific time daily
+        </label>
+        <label>
+          Daily lock time
+          <input type="time" name="lockoutAtTime" id="lockout-at-time" disabled>
+        </label>
+
+        <label class="checkbox"><input type="checkbox" name="requirePasswordOnBoot"> Require password on system boot</label>
+      </div>
+
+      <button type="submit">Save Password Protection &amp; Lockout</button>
+    </form>
+  </section>
+</main>
+
+<template id="site-row-template">
+  <div class="site-row card-inset">
+    <div class="site-row-grid">
+      <label>
+        URL
+        <input type="text" class="site-url" placeholder="example.com or https://example.com">
+      </label>
+      <label>
+        Name (optional)
+        <input type="text" class="site-name" placeholder="Shown instead of the URL">
+      </label>
+      <label>
+        Duration (seconds; -1=hidden, 0=manual, &gt;0=auto-rotate)
+        <input type="number" class="site-duration" min="-1" max="86400" step="1" value="180">
+      </label>
+    </div>
+    <details class="site-auth">
+      <summary>HTTP Basic Auth <span class="auth-state"></span></summary>
+      <label class="checkbox"><input type="checkbox" class="site-auth-enable"> Requires a username/password</label>
+      <label>
+        Username
+        <input type="text" class="site-auth-username">
+      </label>
+      <label>
+        New password <span class="hint">(leave blank to keep the current one)</span>
+        <input type="password" class="site-auth-password" autocomplete="new-password">
+      </label>
+    </details>
+    <button type="button" class="remove-site danger">Remove page</button>
+  </div>
+</template>
+
+<script src="app.js"></script>
+</body>
+</html>

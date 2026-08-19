@@ -64,6 +64,7 @@ clone_detect_addons() {
     command -v tailscale &>/dev/null && addons+=("tailscale")
     command -v netbird &>/dev/null && addons+=("netbird")
     baresip_is_installed 2>/dev/null && addons+=("asterisk_intercom")
+    webui_is_installed 2>/dev/null && addons+=("webui")
 
     if sudo -u "$KIOSK_USER" test -f "$CONFIG_PATH" 2>/dev/null; then
         local authelia_url

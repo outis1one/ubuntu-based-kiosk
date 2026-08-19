@@ -1,7 +1,41 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk v2.15.0               ###
+###   Ubuntu Based Kiosk v2.16.0               ###
 ################################################################################
+#
+# RELEASE v2.16.0 - Web UI: Browser-Based Config Editor (install.sh ->
+#                    Addons -> Web UI)
+# - New: a small Node/Express app (webui/) installable via ./install.sh's
+#   Addons menu, giving a browser-based editor for Sites & Page Timing,
+#   Display & Interaction, and Password Protection & Lockout - the three
+#   Core Settings menus that are pure config.json read/write with no
+#   privileged system mutation involved. Runs as a systemd service under
+#   $KIOSK_USER (the same user Electron runs as), so it never needs sudo
+#   - it can read/write config.json directly with normal filesystem
+#   permissions. webui/lib/config.js re-implements lib/config.sh's exact
+#   schema and merge-on-save contract in JS (kiosk-app/main.js already
+#   reads the same file directly in JS - established precedent, not a
+#   new pattern), so it can never silently clobber fields it doesn't
+#   track (Authelia's credentials, quiet-hours fields, etc) - the same
+#   failure mode previously fixed in lib/config.sh's own history.
+# - No login of its own, by design - Authelia runs elsewhere, and the
+#   expectation is a reverse proxy (e.g. Caddy) with Authelia forward-
+#   auth in front of it, the same way other self-hosted apps get
+#   protected. Direct LAN access with no proxy in front has no
+#   authentication at all - treat it like SSH access to the kiosk.
+# - Deliberately narrow scope for this first pass: WiFi, Timezone,
+#   Power/Display/Quiet Hours, Complete Uninstall, every other addon,
+#   and everything in Advanced remain terminal-only - a network-facing
+#   process shouldn't be handed sudo-level system mutation (netplan,
+#   timedatectl, apt, systemd timers) without a lot more thought than
+#   this pass gives it. A "restart kiosk display" action was left out
+#   for the same reason - would need a narrow polkit grant, follow-up.
+# - Wired into Complete Uninstall (webui_do_uninstall) and Clone Settings
+#   (webui addon-presence detection) the same way every other addon is.
+# - This is the single-kiosk piece of the planned web-based GUI
+#   (mentioned in this repo's "Modular Management" notes for a while) -
+#   a central multi-kiosk fleet dashboard is an intentional follow-up,
+#   not part of this pass.
 #
 # RELEASE v2.15.0 - Upgrade Migrated to install.sh (Advanced -> Upgrade)
 # - New in ./install.sh's Advanced menu: Upgrade. Not a port of this
@@ -546,7 +580,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="2.15.0"
+SCRIPT_VERSION="2.16.0"
 
 # Resolve the real path to this script file.
 # When piped (curl|bash or wget|bash), BASH_SOURCE[0] is a pipe descriptor,

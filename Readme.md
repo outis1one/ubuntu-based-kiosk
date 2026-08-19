@@ -1,6 +1,6 @@
 # Ubuntu Based Kiosk
 
-**Current Version:** 2.13.0 (check script header for latest version)
+**Current Version:** 2.16.0 (check script header for latest version)
 **Built with Claude Sonnet 4.6 AI assistance**
 **License:** GPL v3 - Keep derivatives open source
 **Repository:** https://github.com/outis1one/ubuntu-based-kiosk/
@@ -1291,6 +1291,13 @@ terminal menu and the web UI, so they can't drift apart).
   steps, so any code or hardware-config change picked up by the pull
   actually takes effect. Also offers an on-demand Electron version
   check. See "Recent Updates (v2.15.0)" below.
+- `webui/` + `menus/addon_webui.sh` — **Web UI** (Addons): a small
+  Node/Express app installed as a systemd service under `$KIOSK_USER`,
+  giving a browser-based editor for Sites & Page Timing, Display &
+  Interaction, and Password Protection & Lockout — no login of its own,
+  put it behind your own reverse proxy with Authelia forward-auth if
+  it needs to be reachable beyond a trusted LAN. See "Recent Updates
+  (v2.16.0)" below.
 - `install.sh` — entry point for the modular tool, now grouped **Core
   Settings / Addons / Advanced** like the legacy menu. On a machine
   with no kiosk installed yet, it provisions one first (see
@@ -1346,9 +1353,17 @@ full migration pass.
 
 ## Project Status & Future Plans
 
-**Current Version:** 2.15.0
+**Current Version:** 2.16.0
 
-**Recent Updates (v2.15.0):**
+**Recent Updates (v2.16.0):**
+- **New: Web UI** (Addons → Web UI) — a small Node/Express app (`webui/`) giving a browser-based editor for Sites & Page Timing, Display & Interaction, and Password Protection & Lockout, the three Core Settings menus that are pure `config.json` read/write with no privileged system mutation involved. Runs as a systemd service under `$KIOSK_USER` (the same user Electron runs as), so it never needs `sudo` — it reads/writes `config.json` with normal filesystem permissions.
+- `webui/lib/config.js` re-implements `lib/config.sh`'s exact field list, defaults, and merge-on-save contract in JS — `kiosk-app/main.js` already reads the same `config.json` directly in JS, so this isn't a new pattern — meaning it can never silently clobber fields it doesn't track (Authelia's credentials, the unused quiet-hours fields, etc), the same failure mode previously fixed in `lib/config.sh`'s own history.
+- **No login of its own, by design.** Authelia runs elsewhere; the expectation is a reverse proxy (e.g. Caddy) with Authelia forward-auth in front of it, the same way other self-hosted apps get protected — Authelia integration is explicitly out of scope for this repo. Direct LAN access with no proxy in front has no authentication at all — treat it like SSH access to the kiosk.
+- Deliberately narrow scope for this first pass: WiFi, Timezone, Power/Display/Quiet Hours, Complete Uninstall, every other addon, and everything in Advanced remain terminal-only — a network-facing process shouldn't be handed `sudo`-level system mutation (netplan, `timedatectl`, `apt`, systemd timers) without a lot more thought than this pass gives it. A "restart kiosk display" action was left out for the same reason — would need a narrow polkit grant, a follow-up.
+- Wired into Complete Uninstall (`webui_do_uninstall`) and Clone Settings (addon-presence detection) the same way every other addon is.
+- This is the single-kiosk piece of the web-based GUI mentioned in this doc's "Modular Management" notes for a while — a central multi-kiosk fleet dashboard is an intentional follow-up, not part of this pass.
+
+**Previous (v2.15.0):**
 - **New: Upgrade** (Advanced → Upgrade) — not a port of the legacy Upgrade, which re-extracted `main.js`/`preload.js`/etc from its own heredocs on every run. `kiosk-app/` and `provision/files/` are real files in this git checkout now, so the modular Upgrade is `git pull` (after confirming a clean working tree, and only as a fast-forward — never an automatic merge) followed by re-running the same packages/kiosk-app/display/firewall/power-management steps `lib/provision.sh` already has for a fresh install, reused rather than reimplemented. Skips the interactive first-run settings wizard and the "reboot now" prompt.
 - Also offers an on-demand Electron version check regardless of whether there was code to pull (Electron isn't versioned by this repo) — reuses the existing, already-tested `action_update_electron` as-is.
 - Requires a real git checkout (not the no-git ZIP download option) and a clean working tree; a diverged local history fails the pull cleanly with a clear message rather than attempting an automatic merge.

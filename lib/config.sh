@@ -31,6 +31,8 @@
 : "${NETPLAN_DIR:=/etc/netplan}"
 : "${POLKIT_DIR:=/etc/polkit-1/localauthority/50-local.d}"
 : "${WIREGUARD_DIR:=/etc/wireguard}"
+: "${WEBUI_DIR:=/opt/kiosk-webui}"
+: "${WEBUI_ENV_DIR:=/etc/kiosk-webui}"
 
 # The admin account actually running this tool (as opposed to $KIOSK_USER,
 # the kiosk's own restricted account) - used where an addon needs to grant
