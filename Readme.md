@@ -1,6 +1,6 @@
 # Ubuntu Based Kiosk
 
-**Current Version:** 2.10.0 (check script header for latest version)
+**Current Version:** 2.11.0 (check script header for latest version)
 **Built with Claude Sonnet 4.6 AI assistance**
 **License:** GPL v3 - Keep derivatives open source
 **Repository:** https://github.com/outis1one/ubuntu-based-kiosk/
@@ -1239,6 +1239,18 @@ terminal menu and the web UI, so they can't drift apart).
   during migration, not a straight port — see "Recent Updates (v2.10.0)"
   below for why the legacy Server/Full PBX-install options didn't come
   along.
+- `menus/advanced_electron.sh` — **Electron Maintenance** (Advanced):
+  manual update (with backup + rollback) and "fix blank screen" binary
+  repair, combined into one submenu since both share the same
+  binary-verification logic.
+- `menus/advanced_factory_reset.sh` — **Factory Reset** (Advanced):
+  wipes `config.json` back to defaults; addons are untouched.
+- `menus/advanced_virtual_consoles.sh` — **Virtual Consoles** (Advanced):
+  toggles Ctrl+Alt+F1-F8 terminal login access.
+- `menus/advanced_emergency_hotspot.sh` — **Emergency Hotspot**
+  (Advanced): auto-starts a WiFi hotspot if no internet is detected 60
+  seconds after boot. Its own runtime script/systemd unit go through
+  `$BIN_DIR`/`$SYSTEMD_DIR` like every other addon.
 - `install.sh` — entry point for the modular tool, now grouped **Core
   Settings / Addons / Advanced** like the legacy menu. Run it against an
   *already-installed* kiosk:
@@ -1253,10 +1265,11 @@ most of the old installer. `ubuntu-based-kiosk.sh` is still ~12,000
 lines and still contains its own unremoved, unmodified copies of every
 menu above, including the legacy three-option (Client/Server/Full)
 Easy Asterisk Intercom — the modular version only replaces the Client
-option, by design (plus Upgrade, Reinstall, Uninstall, and the other 8
-Advanced items — none of that has moved yet). Both copies coexist
-deliberately: the old ones stay until enough of Core Settings/Addons/
-Advanced is migrated to retire them in one pass, rather than leaving
+option, by design (plus Upgrade, Reinstall, Complete Uninstall, Export/
+Import Settings, and Fix Squeezelite Audio — none of that has moved
+yet). Both copies coexist deliberately: the old ones stay until enough
+of Core Settings/Addons/Advanced is migrated to retire them in one
+pass, rather than leaving
 the legacy menu half-wired. Migration continues one `menus/*.sh` file
 at a time; first-time installation itself is the last and largest piece
 to move, if it moves at all.
@@ -1286,9 +1299,14 @@ full migration pass.
 
 ## Project Status & Future Plans
 
-**Current Version:** 2.10.0
+**Current Version:** 2.11.0
 
-**Recent Updates (v2.10.0):**
+**Recent Updates (v2.11.0):**
+- **4 more Advanced items migrated**, alongside Diagnostics: **Electron Maintenance** (`menus/advanced_electron.sh` — the legacy "Manual Electron Update" and "Fix Blank Screen" combined into one submenu, since both maintain the same installation and share the binary-repair logic), **Factory Reset** (`menus/advanced_factory_reset.sh` — wipes `config.json` only, addons untouched), **Virtual Consoles** (`menus/advanced_virtual_consoles.sh` — toggles Ctrl+Alt+F1-F8 terminal login), and **Emergency Hotspot** (`menus/advanced_emergency_hotspot.sh` — auto-starts a WiFi hotspot if no internet is detected 60 seconds after boot; its own runtime script and systemd unit now go through `$BIN_DIR`/`$SYSTEMD_DIR` like every other addon's own files).
+- That's 8 of the legacy Advanced menu's 12 entries now covered. Not migrated this round: Export/Import Settings (pending a decision on whether to rebuild it around actual paths instead of a hardcoded per-addon step list, or whether the future web UI replaces the need for it) and Fix Squeezelite Audio (small enough that it may fold into the LMS addon instead of staying standalone — not decided yet).
+- Complete Uninstall (the last of the "destructive trio") is next, composed from each addon's own uninstall action plus core teardown rather than rewriting removal logic a second time. Upgrade and Full Reinstall stay in the legacy script for now — both are coupled to its own heredoc self-extraction of main.js/preload.js/etc, which has no modular equivalent yet.
+
+**Previous (v2.10.0):**
 - **Asterisk Intercom migrated, and redesigned in the process.** The legacy addon offered Client Only (Baresip SIP client), Server Only, and Full (server + client) — the latter two downloaded and ran a third-party installer from a separate "Easy Asterisk" repository to stand up a whole Asterisk PBX. That repository has since gone through a major rework upstream, so the PBX-install path is dropped entirely rather than carrying a dependency on code that's moved on without it. The migrated addon (`menus/addon_asterisk_intercom.sh`) now does only the client/endpoint piece: install Baresip and register this kiosk as one SIP extension against an Asterisk server you already have running elsewhere. It never installs or manages Asterisk itself. The legacy script's own three-option version is untouched, same as every other migrated menu.
 - Dropped the dependency on the (now-reworked) Easy Asterisk repo's GitHub API for version tracking — reads the real installed `baresip` package version via `dpkg` instead.
 - **New capability:** an uninstall option for the Baresip client — the legacy addon never had one.

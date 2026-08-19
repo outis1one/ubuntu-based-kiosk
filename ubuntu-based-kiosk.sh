@@ -1,7 +1,38 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk v2.10.0               ###
+###   Ubuntu Based Kiosk v2.11.0               ###
 ################################################################################
+#
+# RELEASE v2.11.0 - 4 More Advanced Items Migrated (Electron Maintenance,
+#                    Factory Reset, Virtual Consoles, Emergency Hotspot)
+# - New in ./install.sh's Advanced menu, alongside Diagnostics:
+#   - menus/advanced_electron.sh - "Electron Maintenance": the legacy
+#     "Manual Electron Update" and "Fix Blank Screen" combined under one
+#     submenu, since both maintain the same installation and share the
+#     binary-repair logic (electron_install_binary).
+#   - menus/advanced_factory_reset.sh - "Factory Reset": wipes
+#     config.json back to defaults only - addons are untouched.
+#   - menus/advanced_virtual_consoles.sh - "Virtual Consoles": toggles
+#     Ctrl+Alt+F1-F8 terminal login access.
+#   - menus/advanced_emergency_hotspot.sh - "Emergency Hotspot": auto-
+#     starts a WiFi hotspot if no internet is detected 60 seconds after
+#     boot. Its own runtime script and systemd unit now go through
+#     $BIN_DIR/$SYSTEMD_DIR like every other addon's own files, instead
+#     of the legacy's hardcoded /usr/local/bin and /etc/systemd/system.
+# - That leaves Diagnostics' original 4 items plus these 4 covering 8 of
+#   the legacy Advanced menu's 12 entries. Not migrated this round:
+#   Export/Import Settings (kept in the legacy script pending a decision
+#   on whether it's worth rebuilding around actual paths instead of a
+#   hardcoded per-addon step list, or whether the future web UI replaces
+#   the need for it) and Fix Squeezelite Audio (small and specific
+#   enough that it may fold into menus/addon_lms_squeezelite.sh instead
+#   of staying a standalone Advanced entry - not decided yet).
+# - Complete Uninstall (the last of the "destructive trio") is next,
+#   composed from each addon's own uninstall action plus core teardown
+#   rather than rewriting removal logic a second time. Upgrade and Full
+#   Reinstall stay in this script for now: both are fundamentally
+#   coupled to this file's own heredoc self-extraction of main.js/
+#   preload.js/etc, which has no equivalent yet in the modular system.
 #
 # RELEASE v2.10.0 - Asterisk Intercom Migrated, Redesigned as a SIP
 #                    Extension Client (No More PBX Server Install)
@@ -379,7 +410,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="2.10.0"
+SCRIPT_VERSION="2.11.0"
 
 # Resolve the real path to this script file.
 # When piped (curl|bash or wget|bash), BASH_SOURCE[0] is a pipe descriptor,

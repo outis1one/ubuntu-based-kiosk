@@ -22,7 +22,11 @@
 #     Squeezelite Player (menus/addon_lms_squeezelite.sh), Asterisk
 #     Intercom - SIP extension client (menus/addon_asterisk_intercom.sh).
 #   Advanced: Diagnostics (menus/diagnostics.sh - system status/logs/
-#     audio/network).
+#     audio/network), Electron Maintenance (menus/advanced_electron.sh -
+#     manual update, fix blank screen), Factory Reset
+#     (menus/advanced_factory_reset.sh), Virtual Consoles
+#     (menus/advanced_virtual_consoles.sh), Emergency Hotspot
+#     (menus/advanced_emergency_hotspot.sh).
 #
 # Usage (once the kiosk has already been installed):
 #   git clone <repo>
@@ -64,6 +68,14 @@ source "$SCRIPT_DIR/menus/addon_remote_access.sh"
 source "$SCRIPT_DIR/menus/addon_lms_squeezelite.sh"
 # shellcheck source=menus/addon_asterisk_intercom.sh
 source "$SCRIPT_DIR/menus/addon_asterisk_intercom.sh"
+# shellcheck source=menus/advanced_electron.sh
+source "$SCRIPT_DIR/menus/advanced_electron.sh"
+# shellcheck source=menus/advanced_factory_reset.sh
+source "$SCRIPT_DIR/menus/advanced_factory_reset.sh"
+# shellcheck source=menus/advanced_virtual_consoles.sh
+source "$SCRIPT_DIR/menus/advanced_virtual_consoles.sh"
+# shellcheck source=menus/advanced_emergency_hotspot.sh
+source "$SCRIPT_DIR/menus/advanced_emergency_hotspot.sh"
 
 ################################################################################
 # Preflight
@@ -136,8 +148,8 @@ addons_menu() {
 }
 
 advanced_menu_builder() {
-    MENU_LABELS=("Diagnostics")
-    MENU_HANDLERS=(diagnostics_menu)
+    MENU_LABELS=("Diagnostics" "Electron Maintenance" "Factory Reset" "Virtual Consoles" "Emergency Hotspot")
+    MENU_HANDLERS=(diagnostics_menu advanced_electron_menu advanced_factory_reset_menu advanced_virtual_consoles_menu advanced_emergency_hotspot_menu)
 }
 
 advanced_menu() {
