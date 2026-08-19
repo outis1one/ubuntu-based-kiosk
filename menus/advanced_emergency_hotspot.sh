@@ -291,13 +291,16 @@ UNITEOF
 action_disable_emergency_hotspot() {
     echo
     ask_yes_no "Disable emergency hotspot?" "n" || { echo "Cancelled"; pause; return; }
+    emergency_hotspot_do_disable
+    pause
+}
 
+# Shared with Complete Uninstall - same reasoning as cups_do_uninstall.
+emergency_hotspot_do_disable() {
     sudo systemctl stop kiosk-emergency-hotspot.service 2>/dev/null || true
     sudo systemctl disable kiosk-emergency-hotspot.service 2>/dev/null || true
     sudo rm -f "$SYSTEMD_DIR/kiosk-emergency-hotspot.service"
     sudo rm -f "$EMERGENCY_HOTSPOT_SCRIPT"
     sudo systemctl daemon-reload 2>/dev/null || true
     log_success "Emergency hotspot disabled"
-
-    pause
 }

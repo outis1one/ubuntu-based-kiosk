@@ -262,18 +262,34 @@ BARESIPUNIT
 action_uninstall_asterisk_intercom() {
     echo
     ask_yes_no "Remove Asterisk Intercom (Baresip)?" "n" || { echo "Cancelled"; pause; return; }
+    asterisk_intercom_do_uninstall ask
+    pause
+}
+
+# The actual removal, no confirmation prompt - shared with Complete
+# Uninstall so that operation doesn't need to re-implement this teardown
+# a second time. $1: "ask" to prompt about config removal interactively
+# (the normal case), "purge" to remove config without asking (Complete
+# Uninstall).
+asterisk_intercom_do_uninstall() {
+    local data_choice="${1:-ask}"
 
     baresip_systemctl_user stop baresip.service 2>/dev/null || true
     baresip_systemctl_user disable baresip.service 2>/dev/null || true
     sudo rm -f "$BARESIP_USER_SERVICE_DIR/baresip.service"
     sudo apt remove -y baresip 2>/dev/null || true
 
-    if ask_yes_no "Remove saved SIP configuration too?" "n"; then
+    local purge_config=false
+    if [[ "$data_choice" == "purge" ]]; then
+        purge_config=true
+    elif [[ "$data_choice" == "ask" ]] && ask_yes_no "Remove saved SIP configuration too?" "n"; then
+        purge_config=true
+    fi
+
+    if $purge_config; then
         sudo rm -rf "$BARESIP_CONFIG_DIR"
         log_success "Asterisk Intercom removed (configuration deleted)"
     else
         log_success "Asterisk Intercom removed (configuration preserved)"
     fi
-
-    pause
 }

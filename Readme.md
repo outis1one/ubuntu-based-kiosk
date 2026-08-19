@@ -1,6 +1,6 @@
 # Ubuntu Based Kiosk
 
-**Current Version:** 2.11.0 (check script header for latest version)
+**Current Version:** 2.12.0 (check script header for latest version)
 **Built with Claude Sonnet 4.6 AI assistance**
 **License:** GPL v3 - Keep derivatives open source
 **Repository:** https://github.com/outis1one/ubuntu-based-kiosk/
@@ -1251,6 +1251,10 @@ terminal menu and the web UI, so they can't drift apart).
   (Advanced): auto-starts a WiFi hotspot if no internet is detected 60
   seconds after boot. Its own runtime script/systemd unit go through
   `$BIN_DIR`/`$SYSTEMD_DIR` like every other addon.
+- `menus/complete_uninstall.sh` — **Complete Uninstall** (Core
+  Settings): the last of the "destructive trio." Composed from every
+  addon's own `*_do_uninstall` helper instead of re-implementing
+  removal a second time — see "Recent Updates (v2.12.0)" below.
 - `install.sh` — entry point for the modular tool, now grouped **Core
   Settings / Addons / Advanced** like the legacy menu. Run it against an
   *already-installed* kiosk:
@@ -1265,14 +1269,16 @@ most of the old installer. `ubuntu-based-kiosk.sh` is still ~12,000
 lines and still contains its own unremoved, unmodified copies of every
 menu above, including the legacy three-option (Client/Server/Full)
 Easy Asterisk Intercom — the modular version only replaces the Client
-option, by design (plus Upgrade, Reinstall, Complete Uninstall, Export/
-Import Settings, and Fix Squeezelite Audio — none of that has moved
-yet). Both copies coexist deliberately: the old ones stay until enough
-of Core Settings/Addons/Advanced is migrated to retire them in one
-pass, rather than leaving
-the legacy menu half-wired. Migration continues one `menus/*.sh` file
-at a time; first-time installation itself is the last and largest piece
-to move, if it moves at all.
+option, by design (plus Upgrade, Full Reinstall, Export/Import
+Settings, and Fix Squeezelite Audio — none of that has moved yet;
+Complete Uninstall *is* now migrated, but Upgrade and Full Reinstall
+are staying put — both are coupled to this file's own heredoc self-
+extraction of main.js/preload.js/etc, which has no modular equivalent).
+Both copies coexist deliberately: the old ones stay until enough of
+Core Settings/Addons/Advanced is migrated to retire them in one pass,
+rather than leaving the legacy menu half-wired. Migration continues one
+`menus/*.sh` file at a time; first-time installation itself is the last
+and largest piece to move, if it moves at all.
 
 **Resolved (v2.9.0):** `is_service_enabled()` — shared by both scripts
 — had a pre-check (`systemctl list-unit-files | grep -q "^${service}\s"`)
@@ -1299,9 +1305,15 @@ full migration pass.
 
 ## Project Status & Future Plans
 
-**Current Version:** 2.11.0
+**Current Version:** 2.12.0
 
-**Recent Updates (v2.11.0):**
+**Recent Updates (v2.12.0):**
+- **Complete Uninstall migrated** — the last of the "destructive trio." Rather than re-implementing every addon's teardown a second time (the legacy shape — CUPS/VNC/WireGuard/Tailscale/Netbird/LMS/Squeezelite removal all inlined again, independently of each addon's own uninstall action), `menus/complete_uninstall.sh` composes the `*_do_uninstall` helpers each addon already has. Every addon menu with an uninstall action was split into a confirm-and-call wrapper (unchanged from the user's perspective) plus a silent removal helper that both the wrapper and Complete Uninstall call — no duplicated logic anywhere, and if an addon's removal logic changes later, Complete Uninstall picks it up automatically.
+- **Important bug found and fixed while composing these:** several `*_do_uninstall` helpers (CUPS's `apt autoremove`/`apt clean`, VNC/WireGuard/Tailscale/Netbird's `apt remove`) had a bare, unguarded `apt` call. Previously this only risked aborting that one menu action if the package was already gone. Composed together as sequential calls inside Complete Uninstall, the same failure would have silently truncated the *entire* uninstall partway through — e.g. the kiosk user might never get removed because an already-uninstalled VPN client's `apt remove` failed first. Guarded all of them with `|| true`.
+- Non-addon teardown (kiosk user/files, Node.js, LightDM/Openbox, remaining systemd units/scripts, polkit rules, re-enabling virtual consoles, final package cleanup) stays inline in `menus/complete_uninstall.sh`, since no single addon owns those paths — same as the legacy script.
+- Upgrade and Full Reinstall remain in `ubuntu-based-kiosk.sh` only — both are coupled to its own heredoc self-extraction of main.js/preload.js/etc, which has no modular equivalent yet.
+
+**Previous (v2.11.0):**
 - **4 more Advanced items migrated**, alongside Diagnostics: **Electron Maintenance** (`menus/advanced_electron.sh` — the legacy "Manual Electron Update" and "Fix Blank Screen" combined into one submenu, since both maintain the same installation and share the binary-repair logic), **Factory Reset** (`menus/advanced_factory_reset.sh` — wipes `config.json` only, addons untouched), **Virtual Consoles** (`menus/advanced_virtual_consoles.sh` — toggles Ctrl+Alt+F1-F8 terminal login), and **Emergency Hotspot** (`menus/advanced_emergency_hotspot.sh` — auto-starts a WiFi hotspot if no internet is detected 60 seconds after boot; its own runtime script and systemd unit now go through `$BIN_DIR`/`$SYSTEMD_DIR` like every other addon's own files).
 - That's 8 of the legacy Advanced menu's 12 entries now covered. Not migrated this round: Export/Import Settings (pending a decision on whether to rebuild it around actual paths instead of a hardcoded per-addon step list, or whether the future web UI replaces the need for it) and Fix Squeezelite Audio (small enough that it may fold into the LMS addon instead of staying standalone — not decided yet).
 - Complete Uninstall (the last of the "destructive trio") is next, composed from each addon's own uninstall action plus core teardown rather than rewriting removal logic a second time. Upgrade and Full Reinstall stay in the legacy script for now — both are coupled to its own heredoc self-extraction of main.js/preload.js/etc, which has no modular equivalent yet.

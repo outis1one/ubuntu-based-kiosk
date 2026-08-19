@@ -130,11 +130,15 @@ action_vnc_change_password() {
 action_vnc_uninstall() {
     echo
     ask_yes_no "Remove VNC?" "n" || { echo "Cancelled"; return; }
+    vnc_do_uninstall
+}
 
+# Shared with Complete Uninstall - same reasoning as cups_do_uninstall.
+vnc_do_uninstall() {
     sudo systemctl stop x11vnc 2>/dev/null || true
     sudo systemctl disable x11vnc 2>/dev/null || true
     sudo rm -f "$SYSTEMD_DIR/x11vnc.service"
-    sudo apt remove -y x11vnc
+    sudo apt remove -y x11vnc 2>/dev/null || true
     log_success "VNC removed"
 }
 
@@ -227,10 +231,14 @@ action_wireguard_paste_config() {
 action_wireguard_uninstall() {
     echo
     ask_yes_no "Remove WireGuard?" "n" || { echo "Cancelled"; return; }
+    wireguard_do_uninstall
+}
 
+# Shared with Complete Uninstall - same reasoning as cups_do_uninstall.
+wireguard_do_uninstall() {
     sudo systemctl stop 'wg-quick@*' 2>/dev/null || true
     sudo systemctl disable 'wg-quick@*' 2>/dev/null || true
-    sudo apt remove -y wireguard wireguard-tools
+    sudo apt remove -y wireguard wireguard-tools 2>/dev/null || true
     log_success "WireGuard removed"
 }
 
@@ -328,9 +336,13 @@ action_tailscale_show_status() {
 action_tailscale_uninstall() {
     echo
     ask_yes_no "Remove Tailscale?" "n" || { echo "Cancelled"; return; }
+    tailscale_do_uninstall
+}
 
+# Shared with Complete Uninstall - same reasoning as cups_do_uninstall.
+tailscale_do_uninstall() {
     sudo tailscale down 2>/dev/null || true
-    sudo apt remove -y tailscale
+    sudo apt remove -y tailscale 2>/dev/null || true
     log_success "Tailscale removed"
 }
 
@@ -411,8 +423,12 @@ action_netbird_show_status() {
 action_netbird_uninstall() {
     echo
     ask_yes_no "Remove Netbird?" "n" || { echo "Cancelled"; return; }
+    netbird_do_uninstall
+}
 
+# Shared with Complete Uninstall - same reasoning as cups_do_uninstall.
+netbird_do_uninstall() {
     sudo netbird down 2>/dev/null || true
-    sudo apt remove -y netbird
+    sudo apt remove -y netbird 2>/dev/null || true
     log_success "Netbird removed"
 }

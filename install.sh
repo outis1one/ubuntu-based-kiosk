@@ -15,7 +15,11 @@
 # Migrated so far, grouped the same way the legacy menu groups them:
 #   Core Settings: Sites & Page Timing, Display & Interaction, Timezone,
 #     Hidden Site PIN, Password Protection & Lockout, WiFi,
-#     Power/Display/Quiet Hours.
+#     Power/Display/Quiet Hours, Complete Uninstall
+#     (menus/complete_uninstall.sh - composed from every addon's own
+#     uninstall helper rather than re-implementing removal a second
+#     time; Upgrade and Full Reinstall stay in the legacy script, both
+#     coupled to its heredoc self-extraction of main.js/preload.js/etc).
 #   Addons: CUPS Printing (menus/addon_cups.sh), Authelia Auto-Login
 #     (menus/addon_authelia.sh), Remote Access - VNC/WireGuard/
 #     Tailscale/Netbird (menus/addon_remote_access.sh), LMS Server /
@@ -76,6 +80,10 @@ source "$SCRIPT_DIR/menus/advanced_factory_reset.sh"
 source "$SCRIPT_DIR/menus/advanced_virtual_consoles.sh"
 # shellcheck source=menus/advanced_emergency_hotspot.sh
 source "$SCRIPT_DIR/menus/advanced_emergency_hotspot.sh"
+# shellcheck source=menus/complete_uninstall.sh
+# Sourced last: composes the *_do_uninstall/*_do_remove_all/*_do_disable
+# helpers defined in every file above it.
+source "$SCRIPT_DIR/menus/complete_uninstall.sh"
 
 ################################################################################
 # Preflight
@@ -122,6 +130,7 @@ core_settings_menu_builder() {
         "Password Protection & Lockout"
         "WiFi"
         "Power/Display/Quiet Hours"
+        "Complete Uninstall"
     )
     MENU_HANDLERS=(
         sites_menu
@@ -131,6 +140,7 @@ core_settings_menu_builder() {
         lockout_menu
         wifi_menu
         power_schedule_menu
+        complete_uninstall_menu
     )
 }
 

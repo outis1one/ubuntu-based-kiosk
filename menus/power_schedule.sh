@@ -628,7 +628,12 @@ action_disable_electron_reload() {
 action_remove_all_schedules() {
     echo
     ask_yes_no "Remove ALL power/display/quiet/reload schedules?" "n" || { echo "Cancelled"; return; }
+    power_schedule_do_remove_all
+}
 
+# The actual removal, no prompt - shared with Complete Uninstall so that
+# operation doesn't need to re-implement schedule teardown a second time.
+power_schedule_do_remove_all() {
     for timer in kiosk-shutdown kiosk-display-off kiosk-display-on kiosk-quiet-start kiosk-quiet-end kiosk-electron-reload; do
         sudo systemctl stop "${timer}.timer" 2>/dev/null || true
         sudo systemctl disable "${timer}.timer" 2>/dev/null || true

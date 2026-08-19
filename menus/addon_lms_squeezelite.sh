@@ -194,6 +194,16 @@ action_install_lms() {
 action_uninstall_lms() {
     echo
     ask_yes_no "Remove LMS Server?" "n" || { echo "Cancelled"; pause; return; }
+    lms_do_uninstall ask
+    pause
+}
+
+# The actual removal, no confirmation prompt - shared with Complete
+# Uninstall so that operation doesn't need to re-implement LMS teardown a
+# second time. $1: "ask" to prompt about data removal interactively (the
+# normal case), "purge" to remove data without asking (Complete Uninstall).
+lms_do_uninstall() {
+    local data_choice="${1:-ask}"
 
     local service_name
     service_name=$(lms_service_name)
@@ -212,15 +222,20 @@ action_uninstall_lms() {
     sudo rm -f /etc/apt/sources.list.d/lms.list
     sudo rm -f /usr/share/keyrings/lms-keyring.gpg
 
-    if ask_yes_no "Remove LMS data and configuration?" "n"; then
+    local purge_data=false
+    if [[ "$data_choice" == "purge" ]]; then
+        purge_data=true
+    elif [[ "$data_choice" == "ask" ]] && ask_yes_no "Remove LMS data and configuration?" "n"; then
+        purge_data=true
+    fi
+
+    if $purge_data; then
         sudo rm -rf /var/lib/squeezeboxserver
         sudo rm -rf /etc/squeezeboxserver
         log_success "LMS and data removed"
     else
         log_success "LMS removed (data preserved)"
     fi
-
-    pause
 }
 
 ################################################################################
@@ -332,13 +347,16 @@ EOF
 action_uninstall_squeezelite() {
     echo
     ask_yes_no "Remove Squeezelite Player?" "n" || { echo "Cancelled"; pause; return; }
+    squeezelite_do_uninstall
+    pause
+}
 
+# Shared with Complete Uninstall - same reasoning as lms_do_uninstall.
+squeezelite_do_uninstall() {
     sudo systemctl stop squeezelite 2>/dev/null || true
     sudo systemctl disable squeezelite 2>/dev/null || true
     sudo rm -f "$SYSTEMD_DIR/squeezelite.service"
     sudo rm -f "$BIN_DIR/squeezelite-start.sh"
     sudo apt remove -y squeezelite 2>/dev/null || true
     log_success "Squeezelite removed"
-
-    pause
 }

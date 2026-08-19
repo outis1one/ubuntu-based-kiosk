@@ -132,7 +132,12 @@ EOF
 action_cups_uninstall() {
     echo
     ask_yes_no "Completely remove CUPS, including all queues and settings (purge)?" "n" || { echo "Cancelled"; return; }
+    cups_do_uninstall
+}
 
+# The actual removal, no prompt - shared with Complete Uninstall so that
+# operation doesn't need to re-implement CUPS teardown a second time.
+cups_do_uninstall() {
     echo "Performing complete CUPS uninstall..."
 
     sudo systemctl stop cups cups-browsed 2>/dev/null || true
@@ -149,8 +154,8 @@ action_cups_uninstall() {
     sudo rm -rf /etc/cups /var/cache/cups /var/spool/cups /var/log/cups /usr/share/cups
     sudo rm -f "$POLKIT_DIR/kiosk-printing.pkla"
 
-    sudo apt autoremove -y
-    sudo apt clean
+    sudo apt autoremove -y 2>/dev/null || true
+    sudo apt clean 2>/dev/null || true
 
     log_success "CUPS completely removed"
 }

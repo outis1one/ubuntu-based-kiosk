@@ -1,7 +1,47 @@
 #!/bin/bash
 ################################################################################
-###   Ubuntu Based Kiosk v2.11.0               ###
+###   Ubuntu Based Kiosk v2.12.0               ###
 ################################################################################
+#
+# RELEASE v2.12.0 - Complete Uninstall Migrated (Last of the
+#                    "Destructive Trio"); Composed, Not Re-Implemented
+# - New in ./install.sh's Core Settings menu: Complete Uninstall
+#   (menus/complete_uninstall.sh). Rather than re-implementing every
+#   addon's teardown a second time (the shape this function had in the
+#   legacy script - CUPS/VNC/WireGuard/Tailscale/Netbird/LMS/Squeezelite
+#   removal logic all inlined again, independently of the same logic in
+#   each addon's own uninstall action), it composes the *_do_uninstall
+#   helpers each addon already has. If an addon's removal logic changes,
+#   Complete Uninstall picks it up automatically instead of silently
+#   drifting out of sync.
+# - Every addon menu that had an uninstall action (CUPS, VNC, WireGuard,
+#   Tailscale, Netbird, LMS, Squeezelite, Asterisk Intercom) plus
+#   power_schedule's "remove all schedules" and the Emergency Hotspot
+#   disable action were each split into a confirm-and-call wrapper (the
+#   existing interactive action, unchanged from the user's perspective)
+#   and a silent do-the-removal helper that both the wrapper and
+#   Complete Uninstall call - no duplicated removal logic anywhere.
+# - IMPORTANT bug found and fixed while composing these: several
+#   *_do_uninstall helpers (CUPS's `apt autoremove`/`apt clean`, and
+#   VNC/WireGuard/Tailscale/Netbird's `apt remove`) had a bare, unguarded
+#   `apt` call as their second-to-last statement. Previously this only
+#   risked aborting that one menu action if the package was already
+#   gone (silently caught by run_menu's own guard) - a minor UX
+#   blemish. Composed together as bare sequential calls inside Complete
+#   Uninstall, the same failure would have silently truncated the
+#   *entire* uninstall sequence partway through - e.g. the kiosk user
+#   might never get removed because an already-uninstalled VPN client's
+#   `apt remove` failed first. Guarded all of them with `|| true`,
+#   fixing the risk in both the standalone action and the composition.
+# - Non-addon teardown (kiosk user/files, Node.js, LightDM/Openbox,
+#   remaining systemd units/scripts, polkit rules, re-enabling virtual
+#   consoles, final package cleanup) stays inline in
+#   menus/complete_uninstall.sh, same as the legacy script, since no
+#   single addon owns those paths.
+# - Upgrade and Full Reinstall remain in ubuntu-based-kiosk.sh only -
+#   both are fundamentally coupled to this file's own heredoc self-
+#   extraction of main.js/preload.js/etc, which has no equivalent in the
+#   modular system yet. This closes out the "destructive trio."
 #
 # RELEASE v2.11.0 - 4 More Advanced Items Migrated (Electron Maintenance,
 #                    Factory Reset, Virtual Consoles, Emergency Hotspot)
@@ -410,7 +450,7 @@ set -euo pipefail
 ### SECTION 1: CONSTANTS & GLOBALS
 ################################################################################
 
-SCRIPT_VERSION="2.11.0"
+SCRIPT_VERSION="2.12.0"
 
 # Resolve the real path to this script file.
 # When piped (curl|bash or wget|bash), BASH_SOURCE[0] is a pipe descriptor,
