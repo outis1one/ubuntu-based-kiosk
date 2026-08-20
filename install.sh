@@ -32,7 +32,12 @@
 #     (menus/addon_authelia.sh), Remote Access - VNC/WireGuard/
 #     Tailscale/Netbird (menus/addon_remote_access.sh), LMS Server /
 #     Squeezelite Player (menus/addon_lms_squeezelite.sh), Asterisk
-#     Intercom - SIP extension client (menus/addon_asterisk_intercom.sh).
+#     Intercom - SIP extension client (menus/addon_asterisk_intercom.sh),
+#     Web UI (menus/addon_webui.sh - browser-based editor for Sites/
+#     Display/Lockout, the webui/ Node app installed as a systemd
+#     service; no login of its own, put it behind your own reverse proxy
+#     with Authelia forward-auth if it needs to be reachable beyond a
+#     trusted LAN - see the file header).
 #   Advanced: Diagnostics (menus/diagnostics.sh - system status/logs/
 #     audio/network), Electron Maintenance (menus/advanced_electron.sh -
 #     manual update, fix blank screen), Factory Reset
@@ -87,6 +92,8 @@ source "$SCRIPT_DIR/menus/addon_remote_access.sh"
 source "$SCRIPT_DIR/menus/addon_lms_squeezelite.sh"
 # shellcheck source=menus/addon_asterisk_intercom.sh
 source "$SCRIPT_DIR/menus/addon_asterisk_intercom.sh"
+# shellcheck source=menus/addon_webui.sh
+source "$SCRIPT_DIR/menus/addon_webui.sh"
 # shellcheck source=menus/advanced_electron.sh
 source "$SCRIPT_DIR/menus/advanced_electron.sh"
 # shellcheck source=menus/advanced_upgrade.sh
@@ -167,8 +174,8 @@ core_settings_menu() {
 }
 
 addons_menu_builder() {
-    MENU_LABELS=("CUPS Printing" "Authelia Auto-Login" "Remote Access" "LMS Server / Squeezelite Player" "Asterisk Intercom (SIP Extension)")
-    MENU_HANDLERS=(addon_cups_menu addon_authelia_menu remote_access_menu addon_lms_squeezelite_menu addon_asterisk_intercom_menu)
+    MENU_LABELS=("CUPS Printing" "Authelia Auto-Login" "Remote Access" "LMS Server / Squeezelite Player" "Asterisk Intercom (SIP Extension)" "Web UI")
+    MENU_HANDLERS=(addon_cups_menu addon_authelia_menu remote_access_menu addon_lms_squeezelite_menu addon_asterisk_intercom_menu addon_webui_menu)
 }
 
 addons_menu() {

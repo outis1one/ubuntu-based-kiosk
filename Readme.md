@@ -1,6 +1,6 @@
 # Ubuntu Based Kiosk
 
-**Current Version:** 2.13.0 (check script header for latest version)
+**Current Version:** 2.17.0 (check script header for latest version)
 **Built with Claude Sonnet 4.6 AI assistance**
 **License:** GPL v3 - Keep derivatives open source
 **Repository:** https://github.com/outis1one/ubuntu-based-kiosk/
@@ -1291,6 +1291,17 @@ terminal menu and the web UI, so they can't drift apart).
   steps, so any code or hardware-config change picked up by the pull
   actually takes effect. Also offers an on-demand Electron version
   check. See "Recent Updates (v2.15.0)" below.
+- `webui/` + `menus/addon_webui.sh` — **Web UI** (Addons, installed by
+  default during provisioning): a small Node/Express app running as a
+  systemd service under `$KIOSK_USER` with zero ambient `sudo`, giving
+  a browser-based editor for Sites & Page Timing, Display & Interaction,
+  and Password Protection & Lockout, plus install/reconfigure for CUPS,
+  LMS/Squeezelite, and Asterisk Intercom, and Update — each reached
+  through a narrow, allow-listed root helper
+  (`webui_write_helper_script`) rather than any ambient privilege on
+  the service itself. No login of its own, put it behind your own
+  reverse proxy with Authelia forward-auth if it needs to be reachable
+  beyond a trusted LAN. See "Recent Updates (v2.17.0)" below.
 - `install.sh` — entry point for the modular tool, now grouped **Core
   Settings / Addons / Advanced** like the legacy menu. On a machine
   with no kiosk installed yet, it provisions one first (see
@@ -1346,9 +1357,26 @@ full migration pass.
 
 ## Project Status & Future Plans
 
-**Current Version:** 2.15.0
+**Current Version:** 2.17.0
 
-**Recent Updates (v2.15.0):**
+**Recent Updates (v2.17.0):**
+- **Web UI now installs by default** during first-time provisioning (fixed port 8090, no prompt) instead of being opt-in — the Addons menu entry still works standalone for reconfiguring the port or reinstalling it on a kiosk provisioned before this change.
+- **The web UI can now install/reconfigure CUPS Printing, LMS Server, Squeezelite Player, and Asterisk Intercom, and check for updates** — the same four addons plus Update named directly. Every one of these is the exact same interactive `action_*` function the terminal menu already uses (no prompt/mutation refactor of any addon file), driven by piping the right answers on stdin — the same technique this project's own bash tests already use to drive these functions.
+- **Privilege model:** the web service itself still runs as `$KIOSK_USER` with zero ambient `sudo`. A new narrow, allow-listed root helper is the only way it ever gains privilege — reachable only via a single-path passwordless sudo rule (generated and validated with `visudo -c -f` before being installed), and it re-checks its own fixed action allow-list before dispatching anything. Chosen over running the whole service as root after asking directly: since this repo has no login of its own by design, a request that reaches the web UI with no reverse proxy in front is effectively unauthenticated, so the allow-list bounds what that can actually do to five vetted actions, never a root shell.
+- Long-running installs stream live output to the browser via Server-Sent Events, one action at a time — a second request while one is in flight gets a clear `409`, never silently queued or dropped.
+- **Full visual redesign:** a sidebar shell (Sites/Display/Lockout/Addons/Update) replacing the single scrolling page of three cards, both light and dark themes via `prefers-color-scheme`, no external font/CDN dependency.
+- A real bug was found and fixed by actually driving the redesigned UI in a headless browser, not just by reading the code: refreshing an addon's pill/button after a successful install used to rebuild the whole card, which raced (and usually lost to) the success status/log that same job had just written a moment earlier. Fixed to update the pill/buttons in place, leaving the completed job's log exactly as the user left it.
+- Uninstall-via-web is deliberately still not offered, for any addon — flagged as needing its own double-confirmation design, not bundled into this pass. WiFi, Timezone, Power/Display/Quiet Hours, Diagnostics, Remote Access, Authelia, Factory Reset, Virtual Consoles, Emergency Hotspot, Clone Settings, and the fleet/multi-kiosk dashboard all remain out of scope for the web UI too — each a named, sequenced follow-up, not an oversight.
+
+**Previous (v2.16.0):**
+- **New: Web UI** (Addons → Web UI) — a small Node/Express app (`webui/`) giving a browser-based editor for Sites & Page Timing, Display & Interaction, and Password Protection & Lockout, the three Core Settings menus that are pure `config.json` read/write with no privileged system mutation involved. Runs as a systemd service under `$KIOSK_USER` (the same user Electron runs as), so it never needs `sudo` — it reads/writes `config.json` with normal filesystem permissions.
+- `webui/lib/config.js` re-implements `lib/config.sh`'s exact field list, defaults, and merge-on-save contract in JS — `kiosk-app/main.js` already reads the same `config.json` directly in JS, so this isn't a new pattern — meaning it can never silently clobber fields it doesn't track (Authelia's credentials, the unused quiet-hours fields, etc), the same failure mode previously fixed in `lib/config.sh`'s own history.
+- **No login of its own, by design.** Authelia runs elsewhere; the expectation is a reverse proxy (e.g. Caddy) with Authelia forward-auth in front of it, the same way other self-hosted apps get protected — Authelia integration is explicitly out of scope for this repo. Direct LAN access with no proxy in front has no authentication at all — treat it like SSH access to the kiosk.
+- Deliberately narrow scope for this first pass: WiFi, Timezone, Power/Display/Quiet Hours, Complete Uninstall, every other addon, and everything in Advanced remain terminal-only — a network-facing process shouldn't be handed `sudo`-level system mutation (netplan, `timedatectl`, `apt`, systemd timers) without a lot more thought than this pass gives it. A "restart kiosk display" action was left out for the same reason — would need a narrow polkit grant, a follow-up.
+- Wired into Complete Uninstall (`webui_do_uninstall`) and Clone Settings (addon-presence detection) the same way every other addon is.
+- This is the single-kiosk piece of the web-based GUI mentioned in this doc's "Modular Management" notes for a while — a central multi-kiosk fleet dashboard is an intentional follow-up, not part of this pass.
+
+**Previous (v2.15.0):**
 - **New: Upgrade** (Advanced → Upgrade) — not a port of the legacy Upgrade, which re-extracted `main.js`/`preload.js`/etc from its own heredocs on every run. `kiosk-app/` and `provision/files/` are real files in this git checkout now, so the modular Upgrade is `git pull` (after confirming a clean working tree, and only as a fast-forward — never an automatic merge) followed by re-running the same packages/kiosk-app/display/firewall/power-management steps `lib/provision.sh` already has for a fresh install, reused rather than reimplemented. Skips the interactive first-run settings wizard and the "reboot now" prompt.
 - Also offers an on-demand Electron version check regardless of whether there was code to pull (Electron isn't versioned by this repo) — reuses the existing, already-tested `action_update_electron` as-is.
 - Requires a real git checkout (not the no-git ZIP download option) and a clean working tree; a diverged local history fails the pull cleanly with a clear message rather than attempting an automatic merge.

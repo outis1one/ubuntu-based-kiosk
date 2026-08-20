@@ -38,7 +38,8 @@
 # which is more risk than this pass should take on.
 #
 # Depends on: lib/menu.sh, lib/config.sh, lib/electron.sh being sourced
-# first, and every menus/*.sh this calls into for configuration.
+# first, and every menus/*.sh this calls into for configuration
+# (including menus/addon_webui.sh, for provision_configure_webui below).
 ################################################################################
 
 PROVISION_FILES="$SCRIPT_DIR/provision/files"
@@ -54,7 +55,7 @@ provision_install_file() {
 }
 
 provision_install_packages() {
-    echo "[1/9] Installing packages..."
+    echo "[1/10] Installing packages..."
     sudo apt update
     sudo apt install -y \
       xorg openbox lightdm unclutter screen curl git build-essential \
@@ -79,7 +80,7 @@ provision_install_packages() {
 }
 
 provision_create_kiosk_user() {
-    echo "[2/9] Creating kiosk user..."
+    echo "[2/10] Creating kiosk user..."
     if ! id "$KIOSK_USER" &>/dev/null; then
         sudo useradd -m -s /bin/bash -G audio,video,input,plugdev,netdev "$KIOSK_USER"
         echo "$KIOSK_USER:kiosk" | sudo chpasswd
@@ -98,7 +99,7 @@ provision_create_kiosk_user() {
 }
 
 provision_install_nodejs() {
-    echo "[3/9] Installing Node.js..."
+    echo "[3/10] Installing Node.js..."
     if ! command -v node &>/dev/null; then
         curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
         sudo apt install -y nodejs
@@ -107,7 +108,7 @@ provision_install_nodejs() {
 }
 
 provision_install_app() {
-    echo "[4/9] Installing kiosk app..."
+    echo "[4/10] Installing kiosk app..."
     sudo cp "$KIOSK_APP_SRC"/*.js "$KIOSK_APP_SRC"/*.html "$KIOSK_APP_SRC/package.json" "$KIOSK_APP_SRC/start.sh" "$KIOSK_DIR/"
     sudo chown "$KIOSK_USER:$KIOSK_USER" "$KIOSK_DIR"/*.js "$KIOSK_DIR"/*.html "$KIOSK_DIR/package.json" "$KIOSK_DIR/start.sh"
     sudo chmod +x "$KIOSK_DIR/start.sh"
@@ -150,7 +151,7 @@ EOF
 }
 
 provision_configure_display() {
-    echo "[5/9] Configuring display (LightDM/Openbox/touch/video)..."
+    echo "[5/10] Configuring display (LightDM/Openbox/touch/video)..."
 
     sudo -u "$KIOSK_USER" mkdir -p "$KIOSK_HOME/.config/openbox" "$KIOSK_HOME/.config/pulse"
     sudo mkdir -p /etc/X11/xorg.conf.d
@@ -183,7 +184,7 @@ provision_configure_display() {
 }
 
 provision_configure_firewall() {
-    echo "[6/9] Configuring firewall..."
+    echo "[6/10] Configuring firewall..."
     sudo ufw --force enable
     sudo ufw default deny incoming
     sudo ufw default allow outgoing
@@ -192,7 +193,7 @@ provision_configure_firewall() {
 }
 
 provision_configure_power_management() {
-    echo "[7/9] Configuring power management..."
+    echo "[7/10] Configuring power management..."
     sudo mkdir -p /etc/polkit-1/localauthority/50-local.d
     provision_install_file "etc/polkit-1/localauthority/50-local.d/kiosk-power.pkla" /etc/polkit-1/localauthority/50-local.d/kiosk-power.pkla
 
@@ -226,11 +227,43 @@ provision_configure_power_management() {
     fi
 }
 
+# Installed by default now, not opt-in - reuses menus/addon_webui.sh's
+# own install helpers directly rather than duplicating them, with a
+# fixed default port and no prompt (first-time install already has
+# plenty). See that file's header for the privilege model (a narrow
+# allow-listed root helper, not the service itself running as root) and
+# why this exists at all: browser-based config editing, and - via that
+# helper - install/reconfigure for CUPS/LMS/Squeezelite/Asterisk
+# Intercom and Update, none of which are reimplemented here.
+provision_configure_webui() {
+    echo "[8/10] Installing Web UI..."
+    if ! webui_install_app_files; then
+        log_warning "Web UI install failed - configure later: Addons -> Web UI"
+        return 0
+    fi
+
+    local port="8090"
+    webui_write_env_file "$port"
+    webui_write_unit_file
+    webui_write_helper_script
+    if ! webui_write_sudoers_file; then
+        log_warning "Web UI installed but its addon-install/Update helper could not be granted permission - configure later: Addons -> Web UI"
+        return 0
+    fi
+
+    if enable_and_start_units kiosk-webui; then
+        sudo ufw allow "${port}/tcp" comment 'Kiosk Web UI' 2>/dev/null || true
+        log_success "Web UI installed: http://$(get_ip_address):${port}"
+    else
+        log_warning "Web UI installed but failed to start - check: sudo journalctl -u kiosk-webui -n 50"
+    fi
+}
+
 # Configuration from here on is NOT reimplemented - it's the exact same
 # Core Settings / Advanced menus this tool already uses to manage a
 # kiosk after install, called directly instead of duplicated.
 provision_configure_kiosk_settings() {
-    echo "[8/9] Configuring kiosk settings..."
+    echo "[9/10] Configuring kiosk settings..."
     echo "Core Settings is next - sites, timezone, touch/navigation,"
     echo "password protection, WiFi, and schedules. Skip and configure"
     echo "later via ./install.sh if you'd rather do this after reboot."
@@ -256,7 +289,7 @@ provision_configure_kiosk_settings() {
 }
 
 provision_finish() {
-    echo "[9/9] Done."
+    echo "[10/10] Done."
     echo
     log_success "Core installation complete!"
     echo
@@ -289,6 +322,9 @@ run_first_time_install() {
     echo "  - Hardware video acceleration"
     echo "  - Audio support (PipeWire)"
     echo "  - Time synchronization (NTP)"
+    echo "  - Web UI (browser-based Sites/Display/Lockout editor, plus"
+    echo "    addon install/reconfigure and Update - no login of its own,"
+    echo "    see Addons -> Web UI)"
     echo
     echo "OPTIONAL (configure after install, via Addons):"
     echo "  - Lyrion Music Server (LMS) / Squeezelite"
@@ -317,6 +353,7 @@ run_first_time_install() {
     provision_configure_display
     provision_configure_firewall
     provision_configure_power_management
+    provision_configure_webui
     provision_configure_kiosk_settings
     provision_finish
     return 0

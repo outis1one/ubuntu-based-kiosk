@@ -1,0 +1,240 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kiosk Web UI</title>
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+<div class="shell">
+  <nav class="sidebar">
+    <div class="brand">
+      <div class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="13" rx="2"/><path d="M8 21h8M12 17v4"/></svg>
+      </div>
+      <div class="brand-text">
+        <strong>Kiosk Web UI</strong>
+        <span id="brand-sub">this kiosk</span>
+      </div>
+    </div>
+
+    <div class="nav">
+      <button class="nav-item active" data-page="sites">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="2"/><path d="M3 9h18M9 21V9"/></svg>
+        Sites &amp; Timing
+      </button>
+      <button class="nav-item" data-page="display">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="14" rx="2"/><path d="M8 21h8M12 18v3"/></svg>
+        Display
+      </button>
+      <button class="nav-item" data-page="lockout">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="10" width="16" height="10" rx="2"/><path d="M8 10V7a4 4 0 0 1 8 0v3"/></svg>
+        Lockout
+      </button>
+      <button class="nav-item" data-page="addons">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 3 7l9 5 9-5-9-5Z"/><path d="m3 12 9 5 9-5M3 17l9 5 9-5"/></svg>
+        Addons
+      </button>
+      <button class="nav-item" data-page="update">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/></svg>
+        Update
+      </button>
+    </div>
+
+    <div class="sidebar-footer">No login of its own - front this with your own reverse proxy + Authelia if it needs to be reachable beyond a trusted LAN.</div>
+  </nav>
+
+  <main class="main">
+    <div id="msg" class="banner" hidden></div>
+
+    <!-- Sites & Page Timing -->
+    <section class="page active" id="page-sites">
+      <div class="page-header">
+        <h1>Sites &amp; Page Timing</h1>
+        <p>The pages this kiosk rotates through, and how long each stays on screen.</p>
+      </div>
+      <div class="card">
+        <div id="sites-list"></div>
+        <div class="button-row">
+          <button type="button" id="add-site" class="secondary">Add a page</button>
+          <button type="button" id="save-sites">Save Sites &amp; Page Timing</button>
+        </div>
+      </div>
+    </section>
+
+    <!-- Display & Interaction -->
+    <section class="page" id="page-display">
+      <div class="page-header">
+        <h1>Display &amp; Interaction</h1>
+        <p>Touch gestures, link navigation, on-screen buttons, and the home page.</p>
+      </div>
+      <div class="card">
+        <form id="display-form">
+          <label>
+            Touch gesture mode
+            <select name="swipeMode">
+              <option value="dual">Dual-direction (recommended for touchscreens)</option>
+              <option value="standard">Standard</option>
+            </select>
+          </label>
+
+          <label>
+            Link navigation security
+            <select name="allowNavigation">
+              <option value="restricted">Restricted - only the loaded URL</option>
+              <option value="same-origin">Same-origin - links within the same domain (recommended)</option>
+              <option value="open">Open - any link</option>
+            </select>
+          </label>
+
+          <label class="checkbox"><input type="checkbox" name="enablePauseButton"> Pause button</label>
+          <label class="checkbox"><input type="checkbox" name="enableKeyboardButton"> On-screen keyboard button</label>
+          <label class="checkbox"><input type="checkbox" name="enableNavButton"> Navigation/help button</label>
+
+          <fieldset>
+            <legend>Home page</legend>
+            <label>
+              Home page
+              <select name="homeTabIndex" id="home-tab-select">
+                <option value="-1">Disabled</option>
+              </select>
+            </label>
+            <label>
+              Inactivity timeout (minutes)
+              <input type="number" name="inactivityTimeoutMinutes" min="1" max="240" step="1">
+            </label>
+          </fieldset>
+
+          <div class="button-row"><button type="submit">Save Display &amp; Interaction</button></div>
+        </form>
+      </div>
+    </section>
+
+    <!-- Password Protection & Lockout -->
+    <section class="page" id="page-lockout">
+      <div class="page-header">
+        <h1>Password Protection &amp; Lockout</h1>
+        <p>Blank the screen after inactivity and require a password to unlock.</p>
+      </div>
+      <div class="card">
+        <form id="lockout-form">
+          <label class="checkbox"><input type="checkbox" name="enablePasswordProtection" id="lockout-enabled"> Enable password protection</label>
+
+          <div id="lockout-fields">
+            <label>
+              <span id="password-label">Set lockout password</span>
+              <input type="password" name="newLockoutPassword" autocomplete="new-password">
+            </label>
+            <label>
+              Confirm password
+              <input type="password" id="lockout-password-confirm" autocomplete="new-password">
+            </label>
+
+            <label>
+              Inactivity lockout timeout (minutes, 0 = boot/wake only)
+              <input type="number" name="lockoutTimeoutMinutes" min="0" max="1440" step="1">
+            </label>
+
+            <label class="checkbox"><input type="checkbox" id="daily-lock-enabled"> Lock at a specific time daily</label>
+            <label>
+              Daily lock time
+              <input type="time" name="lockoutAtTime" id="lockout-at-time" disabled>
+            </label>
+
+            <label class="checkbox"><input type="checkbox" name="requirePasswordOnBoot"> Require password on system boot</label>
+          </div>
+
+          <div class="button-row"><button type="submit">Save Password Protection &amp; Lockout</button></div>
+        </form>
+      </div>
+    </section>
+
+    <!-- Addons -->
+    <section class="page" id="page-addons">
+      <div class="page-header">
+        <h1>Addons</h1>
+        <p>Install and configure the same addons the terminal menu offers. Uninstall isn't available here yet.</p>
+      </div>
+      <div id="addons-list"></div>
+    </section>
+
+    <!-- Update -->
+    <section class="page" id="page-update">
+      <div class="page-header">
+        <h1>Update</h1>
+        <p>Pull the latest code from git and re-apply setup (packages, app files, hardware config).</p>
+      </div>
+      <div class="card">
+        <div class="button-row"><button type="button" id="run-upgrade">Check for and apply updates</button></div>
+        <div class="job-panel" id="job-panel-upgrade">
+          <div class="job-panel-header">
+            <span>Update</span>
+            <span class="job-status" id="job-status-upgrade"></span>
+          </div>
+          <pre class="job-log" id="job-log-upgrade"></pre>
+        </div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<template id="site-row-template">
+  <div class="site-row card-inset">
+    <div class="site-row-grid">
+      <label>
+        URL
+        <input type="text" class="site-url" placeholder="example.com or https://example.com">
+      </label>
+      <label>
+        Name (optional)
+        <input type="text" class="site-name" placeholder="Shown instead of the URL">
+      </label>
+      <label>
+        Duration (seconds; -1=hidden, 0=manual, &gt;0=auto-rotate)
+        <input type="number" class="site-duration" min="-1" max="86400" step="1" value="180">
+      </label>
+    </div>
+    <details class="site-auth">
+      <summary>HTTP Basic Auth <span class="auth-state"></span></summary>
+      <label class="checkbox"><input type="checkbox" class="site-auth-enable"> Requires a username/password</label>
+      <label>
+        Username
+        <input type="text" class="site-auth-username">
+      </label>
+      <label>
+        New password <span class="hint">(leave blank to keep the current one)</span>
+        <input type="password" class="site-auth-password" autocomplete="new-password">
+      </label>
+    </details>
+    <button type="button" class="remove-site danger">Remove page</button>
+  </div>
+</template>
+
+<template id="addon-card-template">
+  <div class="card addon-card">
+    <div class="addon-card-top">
+      <div class="addon-title">
+        <div class="addon-icon"></div>
+        <div>
+          <div class="addon-name"></div>
+          <div class="addon-desc"></div>
+        </div>
+      </div>
+      <span class="pill unknown">checking&hellip;</span>
+    </div>
+    <div class="button-row addon-actions"></div>
+    <form class="addon-form"></form>
+    <div class="job-panel">
+      <div class="job-panel-header">
+        <span>Log</span>
+        <span class="job-status"></span>
+      </div>
+      <pre class="job-log"></pre>
+    </div>
+  </div>
+</template>
+
+<script src="app.js"></script>
+</body>
+</html>

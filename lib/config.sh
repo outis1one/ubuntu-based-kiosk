@@ -31,6 +31,15 @@
 : "${NETPLAN_DIR:=/etc/netplan}"
 : "${POLKIT_DIR:=/etc/polkit-1/localauthority/50-local.d}"
 : "${WIREGUARD_DIR:=/etc/wireguard}"
+: "${WEBUI_DIR:=/opt/kiosk-webui}"
+: "${WEBUI_ENV_DIR:=/etc/kiosk-webui}"
+: "${SUDOERS_D_DIR:=/etc/sudoers.d}"
+# The one root-owned script the Web UI's addon-install/Update actions are
+# allowed to invoke via passwordless sudo (menus/addon_webui.sh writes it
+# and the matching /etc/sudoers.d/kiosk-webui rule - see that file's
+# header). Under $BIN_DIR since that's already the convention for every
+# other addon's own scripts.
+: "${WEBUI_HELPER_PATH:=$BIN_DIR/kiosk-webui-helper}"
 
 # The admin account actually running this tool (as opposed to $KIOSK_USER,
 # the kiosk's own restricted account) - used where an addon needs to grant

@@ -7,7 +7,8 @@
 # (cups_do_uninstall, vnc_do_uninstall, wireguard_do_uninstall,
 # tailscale_do_uninstall, netbird_do_uninstall, lms_do_uninstall,
 # squeezelite_do_uninstall, asterisk_intercom_do_uninstall,
-# power_schedule_do_remove_all, emergency_hotspot_do_disable) instead of
+# webui_do_uninstall, power_schedule_do_remove_all,
+# emergency_hotspot_do_disable) instead of
 # re-implementing removal logic for each addon a second time here - if an
 # addon's uninstall logic changes, this picks it up automatically. Only
 # the pieces no single addon owns - the kiosk user/files, Node.js/
@@ -57,6 +58,7 @@ action_complete_uninstall() {
     echo "  • Squeezelite and LMS (Lyrion Music Server)"
     echo "  • Remote access (VNC, WireGuard, Tailscale, Netbird)"
     echo "  • Asterisk Intercom (Baresip)"
+    echo "  • Web UI"
     echo "  • LightDM and Openbox"
     echo "  • All kiosk schedules and services"
     echo "  • Emergency hotspot configuration"
@@ -86,6 +88,7 @@ action_complete_uninstall() {
     lms_do_uninstall purge
     squeezelite_do_uninstall
     asterisk_intercom_do_uninstall purge
+    webui_do_uninstall
 
     echo "[3/12] Removing schedules and emergency hotspot..."
     power_schedule_do_remove_all
