@@ -1492,17 +1492,37 @@ async function createWindow(){
     }
     
     if(!view||!view.webContents)return;
-    
+
     const safeKey=JSON.stringify(key).slice(1,-1);
-    
+
+    // Sets the value through the native <input>/<textarea> value setter
+    // instead of the instance property. Frameworks like React override the
+    // instance setter to track the "last known value"; setting el.value
+    // directly also updates that tracker, so the framework never sees a
+    // real change and its own controlled state stays empty. On the next
+    // re-render (focusing a different field, or any unrelated state change
+    // such as toggling a checkbox) it redraws the input from that stale
+    // empty state, which is why typed text appears to vanish. Going through
+    // the native setter keeps the tracker out of sync so the dispatched
+    // "input" event actually reaches the framework's handler.
+    const setNativeValue=`
+      function __kioskSetValue(el,value){
+        const proto=el.tagName==="TEXTAREA"?window.HTMLTextAreaElement.prototype:window.HTMLInputElement.prototype;
+        const setter=Object.getOwnPropertyDescriptor(proto,"value").set;
+        setter.call(el,value);
+      }
+    `;
+
     if(key==='Backspace'){
       view.webContents.executeJavaScript(`
         (function(){
+          ${setNativeValue}
           const el=document.activeElement;
           if(el&&(el.tagName==="INPUT"||el.tagName==="TEXTAREA")){
             const s=el.selectionStart||0;
             if(s>0){
-              el.value=el.value.substring(0,s-1)+el.value.substring(el.selectionEnd||s);
+              const newValue=el.value.substring(0,s-1)+el.value.substring(el.selectionEnd||s);
+              __kioskSetValue(el,newValue);
               el.selectionStart=el.selectionEnd=s-1;
               el.dispatchEvent(new Event("input",{bubbles:true}));
             }
@@ -1512,11 +1532,13 @@ async function createWindow(){
     }else if(key==='Enter'){
       view.webContents.executeJavaScript(`
         (function(){
+          ${setNativeValue}
           const el=document.activeElement;
           if(el){
             if(el.tagName==="TEXTAREA"){
               const s=el.selectionStart||0;
-              el.value=el.value.substring(0,s)+"\\n"+el.value.substring(el.selectionEnd||s);
+              const newValue=el.value.substring(0,s)+"\\n"+el.value.substring(el.selectionEnd||s);
+              __kioskSetValue(el,newValue);
               el.selectionStart=el.selectionEnd=s+1;
               el.dispatchEvent(new Event("input",{bubbles:true}));
             }else if(el.tagName==="INPUT"){
@@ -1528,13 +1550,30 @@ async function createWindow(){
           }
         })();
       `).catch(()=>{});
+    }else if(key==='Tab'){
+      view.webContents.executeJavaScript(`
+        (function(){
+          const selector='input:not([disabled]):not([type="hidden"]), textarea:not([disabled]), select:not([disabled]), button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])';
+          const focusable=Array.prototype.filter.call(
+            document.querySelectorAll(selector),
+            el=>el.offsetParent!==null
+          );
+          if(focusable.length>0){
+            const idx=focusable.indexOf(document.activeElement);
+            const next=idx>=0?focusable[(idx+1)%focusable.length]:focusable[0];
+            next.focus();
+          }
+        })();
+      `).catch(()=>{});
     }else if(key===' '){
       view.webContents.executeJavaScript(`
         (function(){
+          ${setNativeValue}
           const el=document.activeElement;
           if(el&&(el.tagName==="INPUT"||el.tagName==="TEXTAREA")){
             const s=el.selectionStart||0;
-            el.value=el.value.substring(0,s)+" "+el.value.substring(el.selectionEnd||s);
+            const newValue=el.value.substring(0,s)+" "+el.value.substring(el.selectionEnd||s);
+            __kioskSetValue(el,newValue);
             el.selectionStart=el.selectionEnd=s+1;
             el.dispatchEvent(new Event("input",{bubbles:true}));
           }
@@ -1546,12 +1585,14 @@ async function createWindow(){
     }else{
       view.webContents.executeJavaScript(`
         (function(){
+          ${setNativeValue}
           const text="${safeKey}";
           const el=document.activeElement;
           if(el&&(el.tagName==="INPUT"||el.tagName==="TEXTAREA")){
             const s=el.selectionStart||0;
             const e=el.selectionEnd||s;
-            el.value=el.value.substring(0,s)+text+el.value.substring(e);
+            const newValue=el.value.substring(0,s)+text+el.value.substring(e);
+            __kioskSetValue(el,newValue);
             el.selectionStart=el.selectionEnd=s+text.length;
             el.dispatchEvent(new Event("input",{bubbles:true}));
             el.dispatchEvent(new Event("change",{bubbles:true}));
