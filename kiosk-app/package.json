@@ -5,6 +5,7 @@
   "dependencies": {
     "electron": "^44.0.0",
     "docx-preview": "^0.4.1",
-    "jszip": "^3.10.1"
+    "jszip": "^3.10.1",
+    "pdfjs-dist": "^6.3.289"
   }
 }

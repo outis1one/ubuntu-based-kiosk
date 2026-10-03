@@ -2,7 +2,7 @@
 //
 // A site whose URL is a local folder (file:///home/kiosk/photos, entered
 // in the Sites menu or Web UI as /home/kiosk/photos/) is shown as a
-// full-screen slideshow of the images and Word documents (.docx) in it,
+// full-screen slideshow of the images, Word documents (.docx) and PDFs in it,
 // instead of Chromium's directory listing. main.js swaps the folder URL
 // for slideshow.html via resolveSiteUrl(), then attach() hands the page
 // its item list - the page itself has no filesystem access
@@ -12,12 +12,12 @@
 // Images load directly by file:// URL. A document's bytes are fetched on
 // demand: the page sets its title to TITLE_REQUEST + the document's URL,
 // and attach() answers via kioskSlideshow.docData() - but only for a
-// .docx in that slideshow's own current item list, so a page can't use
+// document (.docx/.pdf) in that slideshow's own current item list, so a page can't use
 // this to read anything else on disk.
 //
 // Optional slideshow.json in the folder (all keys optional):
 //   { "interval": 10,        seconds per image (default 10, minimum 2)
-//     "docInterval": 20,     seconds per document (default 2x interval,
+//     "docInterval": 20,     seconds per document - .docx or PDF (default 2x interval,
 //                            minimum 5); a document longer than the
 //                            screen scrolls slowly top to bottom in it
 //     "shuffle": false,      random order instead of by file name
@@ -32,7 +32,7 @@ const { fileURLToPath, pathToFileURL } = require('url');
 
 const SLIDESHOW_PAGE = path.join(__dirname, 'slideshow.html');
 const IMAGE_EXT = new Set(['.jpg', '.jpeg', '.png', '.gif', '.webp', '.bmp', '.svg', '.avif']);
-const DOC_EXT = new Set(['.docx']);
+const DOC_TYPES = { '.docx': 'docx', '.pdf': 'pdf' };
 const REFRESH_MS = 60000;
 const MAX_DOC_BYTES = 50 * 1024 * 1024;
 const TITLE_REQUEST = 'kiosk-slideshow-need:';
@@ -101,10 +101,10 @@ function listItems(dir, recursive, depth = 0) {
             if (recursive && depth < 8) out.push(...listItems(full, recursive, depth + 1));
         } else if (IMAGE_EXT.has(ext)) {
             out.push({ path: full, type: 'image' });
-        } else if (DOC_EXT.has(ext)) {
+        } else if (DOC_TYPES[ext]) {
             let mtime = 0;
             try { mtime = fs.statSync(full).mtimeMs; } catch (err) { /* listed but gone */ }
-            out.push({ path: full, type: 'docx', mtime });
+            out.push({ path: full, type: DOC_TYPES[ext], mtime });
         }
     }
     return out;
@@ -157,7 +157,7 @@ function attach(webContents) {
     webContents.on('page-title-updated', (event, title) => {
         if (!title.startsWith(TITLE_REQUEST) || !onSlideshow() || !current) return;
         const url = title.slice(TITLE_REQUEST.length);
-        if (!current.items.some((it) => it.type === 'docx' && it.url === url)) return;
+        if (!current.items.some((it) => it.type !== 'image' && it.url === url)) return;
         const doc = readDoc(url);
         webContents.executeJavaScript(
             `window.kioskSlideshow&&window.kioskSlideshow.docData(${JSON.stringify(url)},${JSON.stringify(doc)})`,

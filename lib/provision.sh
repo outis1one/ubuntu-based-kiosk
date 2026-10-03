@@ -122,8 +122,9 @@ provision_install_nodejs() {
 
 provision_install_app() {
     echo "[4/10] Installing kiosk app..."
-    sudo cp "$KIOSK_APP_SRC"/*.js "$KIOSK_APP_SRC"/*.html "$KIOSK_APP_SRC/package.json" "$KIOSK_APP_SRC/start.sh" "$KIOSK_DIR/"
-    sudo chown "$KIOSK_USER:$KIOSK_USER" "$KIOSK_DIR"/*.js "$KIOSK_DIR"/*.html "$KIOSK_DIR/package.json" "$KIOSK_DIR/start.sh"
+    # *.mjs: pdf-render.mjs (pdf.js only ships as a JavaScript module).
+    sudo cp "$KIOSK_APP_SRC"/*.js "$KIOSK_APP_SRC"/*.mjs "$KIOSK_APP_SRC"/*.html "$KIOSK_APP_SRC/package.json" "$KIOSK_APP_SRC/start.sh" "$KIOSK_DIR/"
+    sudo chown "$KIOSK_USER:$KIOSK_USER" "$KIOSK_DIR"/*.js "$KIOSK_DIR"/*.mjs "$KIOSK_DIR"/*.html "$KIOSK_DIR/package.json" "$KIOSK_DIR/start.sh"
     sudo chmod +x "$KIOSK_DIR/start.sh"
 
     if offline_mode_active; then

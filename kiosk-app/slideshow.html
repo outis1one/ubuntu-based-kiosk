@@ -24,6 +24,7 @@
 <script src="node_modules/jszip/dist/jszip.min.js"></script>
 <script src="node_modules/docx-preview/dist/docx-preview.min.js"></script>
 <script src="docx-render.js"></script>
+<script type="module" src="pdf-render.mjs"></script>
 </head>
 <body>
 <div class="slide" id="a"></div>
@@ -91,7 +92,7 @@
   async function prepare(layer, item) {
     layer.innerHTML = '';
     layer.scrollTop = 0;
-    layer.classList.toggle('doc', item.type === 'docx');
+    layer.classList.toggle('doc', item.type !== 'image');
     if (item.type === 'image') {
       const img = new Image();
       img.style.objectFit = state.options.fit;
@@ -101,6 +102,14 @@
         img.src = item.url;
       });
       layer.appendChild(img);
+      return;
+    }
+    if (item.type === 'pdf') {
+      if (!window.KioskPdf) throw new Error('PDF renderer missing');
+      const bytes = await getDocBytes(item);
+      const box = document.createElement('div');
+      layer.appendChild(box);
+      await KioskPdf.render(bytes, box, window.innerWidth, window.innerHeight);
       return;
     }
     if (!KioskDocx.available()) throw new Error('Word document viewer missing');
@@ -161,10 +170,11 @@
     // Free the old slide (a rendered document can be large) once faded out.
     setTimeout(() => { if (!old.classList.contains('show')) old.innerHTML = ''; },
       state.options.transition * 1000 + 100);
-    const seconds = item.type === 'docx' ? state.options.docInterval : state.options.interval;
-    if (item.type === 'docx') autoScroll(back, seconds);
+    const isDoc = item.type !== 'image';
+    const seconds = isDoc ? state.options.docInterval : state.options.interval;
+    if (isDoc) autoScroll(back, seconds);
     // A lone document still cycles, so its scroll starts over from the top.
-    if (order.length > 1 || item.type === 'docx') timer = setTimeout(next, seconds * 1000);
+    if (order.length > 1 || isDoc) timer = setTimeout(next, seconds * 1000);
   }
 
   window.kioskSlideshow = {
@@ -182,7 +192,7 @@
       if (!s.items.length) {
         order = [];
         generation++;
-        showMessage(s.exists ? `No images or documents in ${s.dir}` : `Folder not found: ${s.dir}`);
+        showMessage(s.exists ? `No images, documents or PDFs in ${s.dir}` : `Folder not found: ${s.dir}`);
         return;
       }
       if (sameItems && !first) return;
@@ -195,8 +205,8 @@
         pos = keep;
         clearTimeout(timer);
         const it = order[pos];
-        const seconds = it.type === 'docx' ? s.options.docInterval : s.options.interval;
-        if (order.length > 1 || it.type === 'docx') timer = setTimeout(next, seconds * 1000);
+        const seconds = it.type !== 'image' ? s.options.docInterval : s.options.interval;
+        if (order.length > 1 || it.type !== 'image') timer = setTimeout(next, seconds * 1000);
       } else {
         pos = -1;
         next();

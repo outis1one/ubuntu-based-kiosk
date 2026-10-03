@@ -198,14 +198,14 @@ The kiosk machine still needs a working internet connection (ethernet, or WiFi c
   HTML pages, PDFs (built-in viewer), images, and Word documents (below). Works offline. The file
   must be readable by the `kiosk` user.
 - **Slideshow** - Enter a folder instead (e.g. `/home/kiosk/photos/`) and
-  its images (jpg, png, gif, webp, bmp, svg, avif) and Word documents
-  (`.docx`) play full-screen in file-name order with a crossfade - images
-  10 seconds each, documents 20. A one-page document is shown whole; a
-  longer one fills the width and scrolls slowly top to bottom during its
-  time. Files added, removed or changed are picked up within a minute, no
+  its images (jpg, png, gif, webp, bmp, svg, avif), Word documents
+  (`.docx`) and PDFs play full-screen in file-name order with a crossfade -
+  images 10 seconds each, documents and PDFs 20. A one-page document or
+  PDF is shown whole; a longer one fills the width and scrolls slowly top
+  to bottom during its time (PDFs: first 30 pages). Files added, removed or changed are picked up within a minute, no
   restart needed. Optional `slideshow.json` in the folder:
   `{"interval": 10, "docInterval": 20, "shuffle": false, "fit": "contain", "transition": 1, "recursive": false}`
-  (`docInterval`: seconds per document; `fit`: `contain` shows the whole
+  (`docInterval`: seconds per document/PDF; `fit`: `contain` shows the whole
   image, `cover` fills the screen and crops; `recursive` includes
   subfolders).
 - **Word documents** - A `.docx` path (e.g. `/home/kiosk/docs/menu.docx`)
@@ -1477,7 +1477,7 @@ full migration pass.
 - **All-in-one install ISO** (`iso/build-iso.sh`, or Actions → Build kiosk ISO): Ubuntu Server 26.04 plus the kiosk in one USB stick — the Ubuntu install, then `install.sh` automatically on first boot. Interactive, unattended, or fully automatic. See "All-in-One Install ISO" above.
 - **Offline installs** (`--offline`): the ISO carries every package (including CUPS printing and all printer drivers), Node.js 22, and prebuilt Electron/Web UI modules, so a kiosk installs with no internet. With internet it still installs current versions online. Addons → CUPS Printing (menu or Web UI) installs from the bundle by itself when offline.
 - **Local files as sites:** an absolute path (`/home/kiosk/docs/menu.pdf`) shows a local page, PDF or image; a folder (`/home/kiosk/photos/`) plays as a full-screen **image slideshow** that picks up added/removed images within a minute. Works in both the Sites menu and the Web UI.
-- **Word documents as sites:** a `.docx` path renders in the kiosk via docx-preview (~1 MB of JavaScript, bundled offline), updating when the file changes. Slideshow folders can mix `.docx` documents in with images.
+- **Word documents as sites:** a `.docx` path renders in the kiosk via docx-preview (~1 MB of JavaScript, bundled offline), updating when the file changes. Slideshow folders can mix `.docx` documents and PDFs (rendered with pdf.js) in with images.
 - **Electron upgrade:** v42.x → v44.x (42 leaves Electron's support window when 45 ships). Existing kiosks move to it via Advanced → Upgrade.
 - **Fix:** the CUPS menu could report an installed CUPS as "not installed" (`dpkg -l | grep -q` failing under `set -o pipefail`).
 
