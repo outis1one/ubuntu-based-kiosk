@@ -19,6 +19,9 @@
 #   KIOSK_UNATTENDED=1   take every prompt's default, skip the Core
 #                        Settings menu, reboot into the kiosk when done.
 #   KIOSK_UNATTENDED=0   (default) normal interactive install.sh on tty1.
+#   KIOSK_OFFLINE_WAIT=N on an ISO built with --offline: seconds to wait
+#                        for internet before installing from the bundled
+#                        packages instead (default 90).
 ################################################################################
 
 set -uo pipefail
@@ -31,13 +34,23 @@ SUDOERS_DROPIN=/etc/sudoers.d/90-kiosk-firstboot
 APT_DROPIN=/etc/apt/apt.conf.d/90-kiosk-firstboot
 REPO_SRC=/opt/ubuntu-based-kiosk
 LOG="$STATE_DIR/install.log"
+OFFLINE_BUNDLE=/opt/kiosk-offline
+OFFLINE_APT=/usr/local/sbin/kiosk-offline-apt
+OFFLINE_FLAG="$STATE_DIR/offline-mode"
 
 KIOSK_UNATTENDED=0
+KIOSK_OFFLINE_WAIT=90
 # shellcheck source=/dev/null
 [[ -f "$CONF" ]] && source "$CONF"
 
 cleanup() {
     rm -f "$SUDOERS_DROPIN" "$APT_DROPIN"
+    # Offline mode was only for this install - hand apt back to the real
+    # archive so normal updates work once the kiosk is online.
+    if [[ -f "$OFFLINE_FLAG" ]]; then
+        "$OFFLINE_APT" off >/dev/null 2>&1 || true
+        rm -f "$OFFLINE_FLAG"
+    fi
     if [[ -f "$DONE_MARKER" ]]; then
         rm -f "$PENDING"
     fi
@@ -86,6 +99,8 @@ offer_retry() {
     done
 }
 
+# Returns 0 once online, 2 to install from the offline bundle instead
+# (only when there is one), 1 to give up.
 wait_for_internet() {
     local waited=0
     until curl -fsS --max-time 10 -o /dev/null https://deb.nodesource.com/ 2>/dev/null \
@@ -93,9 +108,17 @@ wait_for_internet() {
         if (( waited == 0 )); then
             echo "Waiting for an internet connection (needed for packages,"
             echo "Node.js and Electron)..."
+            if [[ -f "$OFFLINE_BUNDLE/apt/Packages" ]]; then
+                echo "This disk has the offline bundle: installing from it instead"
+                echo "if there's still no internet after ${KIOSK_OFFLINE_WAIT}s."
+            fi
         fi
         sleep 10
         waited=$((waited + 10))
+        if [[ -f "$OFFLINE_BUNDLE/apt/Packages" ]] && (( waited >= KIOSK_OFFLINE_WAIT )); then
+            echo "No internet after ${waited}s - installing from the offline bundle on this disk."
+            return 2
+        fi
         if (( waited % 120 == 0 )); then
             echo "Still no internet after ${waited}s. Network status:"
             networkctl list --no-pager 2>/dev/null || ip -brief addr
@@ -153,7 +176,22 @@ fi
 mkdir -p "$STATE_DIR"
 printf 'DPkg::Lock::Timeout "900";\n' > "$APT_DROPIN"
 
-wait_for_internet || { release_tty; exit 1; }
+wait_for_internet
+case $? in
+    0) ;;
+    2)
+        # install.sh notices this by itself (lib/config.sh's
+        # offline_mode_active) and unpacks prebuilt node_modules instead
+        # of running npm; cleanup() switches it back off.
+        touch "$OFFLINE_FLAG"
+        if ! "$OFFLINE_APT" on; then
+            echo "ERROR: couldn't switch apt to the offline bundle."
+            release_tty
+            exit 1
+        fi
+        ;;
+    *) release_tty; exit 1 ;;
+esac
 
 # install.sh's own preflight needs jq; Advanced -> Upgrade needs git.
 echo "Installing installer prerequisites (jq, git)..."

@@ -14,6 +14,13 @@
 # Depends on: lib/menu.sh, lib/config.sh being sourced first.
 ################################################################################
 
+# Also read by iso/offline/build-bundle.sh to bundle these for offline installs.
+CUPS_APT_PACKAGES=(
+    cups cups-client cups-filters printer-driver-all
+    printer-driver-cups-pdf hplip printer-driver-gutenprint
+    foomatic-db-compressed-ppds openprinting-ppds
+)
+
 cups_is_installed() {
     dpkg -l 2>/dev/null | grep -q "^ii\s\+cups\s"
 }
@@ -62,9 +69,7 @@ action_install_cups() {
         log_error "apt update failed - check network/package sources and try again"
         return 1
     fi
-    if ! sudo apt install -y cups cups-client cups-filters printer-driver-all \
-        printer-driver-cups-pdf hplip printer-driver-gutenprint \
-        foomatic-db-compressed-ppds openprinting-ppds; then
+    if ! sudo apt install -y "${CUPS_APT_PACKAGES[@]}"; then
         log_error "CUPS package installation failed"
         return 1
     fi

@@ -94,7 +94,45 @@ Useful options (`iso/build-iso.sh --help` for all):
 | `--auto-network` / `--auto-storage` | Skip the network screen (DHCP on ethernet) / wipe the largest disk without asking. |
 | `--no-confirm` | Skip the "Continue with autoinstall?" prompt at boot. |
 | `--fully-automatic` | All of the above (needs `--username`): boot it and walk away. **Wipes a disk with no questions — label the USB stick.** |
+| `--offline` | Bundle everything the kiosk install downloads, so it works with **no internet** (see below). |
 | `--iso PATH` | Use an ISO you already have instead of downloading. |
+
+### Offline installs (`--offline`)
+
+```bash
+sudo apt install apt-utils python3 gnupg ubuntu-keyring   # once, on top of the tools above
+iso/build-iso.sh --offline
+# -> iso/build/ubuntu-26.04.x-kiosk-offline-amd64.iso (~3.2 GB)
+```
+
+This adds a ~420 MB bundle to the ISO:
+- Every Ubuntu package the kiosk install and the **CUPS printing addon**
+  need (all printer drivers included), with their dependencies, as a local
+  package repository.
+- Node.js 22 (NodeSource).
+- Prebuilt Electron and Web UI modules.
+
+On first boot it still installs online when there's internet. With none,
+it waits 90 seconds and then installs entirely from the bundle. The bundle
+stays on the kiosk at `/opt/kiosk-offline`, so CUPS can be added later
+with no internet too:
+
+```bash
+sudo kiosk-offline-apt on      # apt uses the bundle only
+./install.sh                   # Addons -> CUPS Printing
+sudo kiosk-offline-apt off     # back to normal updates
+```
+
+Notes:
+- Build it on an **amd64** Ubuntu/Debian machine, or let the GitHub
+  workflow do it (its `offline` box is ticked by default). Rebuilds are
+  quick because downloads are cached in `iso/build/offline-cache`.
+- Bundled versions are whatever was current when the ISO was built.
+  Once the kiosk is online, normal updates and Advanced → Upgrade bring it
+  current.
+- Addons that download their own software (LMS/Squeezelite, Tailscale,
+  Netbird, Asterisk Intercom, VNC) still need internet.
+- `sudo rm -rf /opt/kiosk-offline` frees the space if you don't need it.
 
 **No Linux machine handy?** Build it on GitHub instead: **Actions → Build
 kiosk ISO → Run workflow**, pick a mode, and download the ISO from the run's
@@ -107,9 +145,10 @@ because its inputs show up in the run log.
 Notes:
 - The ISO carries a copy of this checkout's current commit (uncommitted
   changes are not included).
-- The kiosk machine still needs internet on first boot (packages, Node.js,
-  Electron). If there's none, the console waits for it and offers a shell to
-  fix networking (`/etc/netplan/*.yaml`, then `sudo netplan apply`).
+- Without `--offline`, the kiosk machine needs internet on first boot
+  (packages, Node.js, Electron). If there's none, the console waits for it
+  and offers a shell to fix networking (`/etc/netplan/*.yaml`, then
+  `sudo netplan apply`).
 - A failed or interrupted first-boot install runs again on the next boot, or
   now with `sudo systemctl start kiosk-firstboot`. Its log is
   `/var/lib/kiosk-firstboot/install.log`.
@@ -120,7 +159,7 @@ Notes:
 
 If the kiosk machine can't reach GitHub directly (no browser, restrictive proxy, or you just prefer to grab the script on another computer and carry it over via USB), download it ahead of time instead of using the `curl`/`wget` one-liner above.
 
-> **Note:** This only avoids needing internet access *to fetch the script*. The installer itself still requires the kiosk machine to have internet access while it runs — it uses `apt` to install packages, pulls Node.js from NodeSource, and runs `npm install` to fetch Electron (~120MB). There is currently no fully air-gapped/offline package bundle.
+> **Note:** This only avoids needing internet access *to fetch the script*. For a truly offline install, use the [All-in-One Install ISO](#all-in-one-install-iso-ubuntu-server-2604--kiosk) built with `--offline` instead. The installer itself still requires the kiosk machine to have internet access while it runs — it uses `apt` to install packages, pulls Node.js from NodeSource, and runs `npm install` to fetch Electron (~120MB). There is currently no fully air-gapped/offline package bundle.
 
 **On a machine with internet access:**
 

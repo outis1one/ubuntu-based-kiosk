@@ -26,6 +26,8 @@
 #
 # Requirements (on the build machine, any recent Ubuntu/Debian):
 #   sudo apt install xorriso curl git openssl
+# plus, for --offline (amd64 build machine only):
+#   sudo apt install apt-utils python3 gnupg ubuntu-keyring
 #
 # Usage:
 #   iso/build-iso.sh [options]
@@ -65,6 +67,15 @@
 #   --repo-url URL        git remote recorded in the copied repo, used by
 #                         Advanced -> Upgrade (default: this checkout's
 #                         origin, else the upstream GitHub repo).
+#   --offline             Also bundle everything install.sh downloads (~420 MB:
+#                         every apt package incl. the CUPS printing addon,
+#                         Node.js, prebuilt Electron/Web UI node_modules), so
+#                         first boot can install the kiosk with NO internet.
+#                         With internet it still installs online as usual;
+#                         offline it waits 90s, then uses the bundle. The
+#                         bundle stays on the kiosk at /opt/kiosk-offline
+#                         (see iso/firstboot/kiosk-offline-apt for using it
+#                         later, e.g. adding CUPS while offline).
 #
 # The repo copied onto the ISO is a clone of this checkout's current HEAD
 # (committed changes only - uncommitted edits are NOT included).
@@ -91,6 +102,7 @@ AUTO_STORAGE=0
 AUTO_NETWORK=0
 NO_CONFIRM=0
 UNATTENDED=0
+OFFLINE=0
 REPO_URL=""
 
 # Usernames the Ubuntu installer rejects (system users/groups) - copied
@@ -136,6 +148,7 @@ while [[ $# -gt 0 ]]; do
         --unattended) UNATTENDED=1; shift ;;
         --fully-automatic) AUTO_STORAGE=1; AUTO_NETWORK=1; NO_CONFIRM=1; UNATTENDED=1; shift ;;
         --repo-url) REPO_URL="$2"; shift 2 ;;
+        --offline) OFFLINE=1; shift ;;
         -h|--help) usage 0 ;;
         *) echo "Unknown option: $1" >&2; usage 1 ;;
     esac
@@ -212,8 +225,9 @@ fi
 
 if [[ -z "$OUTPUT" ]]; then
     src_base="$(basename "$SRC_ISO" .iso)"
-    OUTPUT="$BUILD_DIR/${src_base/-live-server/-kiosk}.iso"
-    [[ "$OUTPUT" != "$BUILD_DIR/$src_base.iso" ]] || OUTPUT="$BUILD_DIR/${src_base}-kiosk.iso"
+    kind="kiosk"; (( OFFLINE )) && kind="kiosk-offline"
+    OUTPUT="$BUILD_DIR/${src_base/-live-server/-$kind}.iso"
+    [[ "$OUTPUT" != "$BUILD_DIR/$src_base.iso" ]] || OUTPUT="$BUILD_DIR/${src_base}-$kind.iso"
 fi
 
 ################################################################################
@@ -244,11 +258,17 @@ git -C "$stage_repo" config "branch.$BRANCH.merge" "refs/heads/$BRANCH"
 
 install -m 755 "$SCRIPT_DIR/firstboot/kiosk-firstboot" "$WORK/kiosk/firstboot/"
 install -m 644 "$SCRIPT_DIR/firstboot/kiosk-firstboot.service" "$WORK/kiosk/firstboot/"
+install -m 755 "$SCRIPT_DIR/firstboot/kiosk-offline-apt" "$WORK/kiosk/firstboot/"
 cat > "$WORK/kiosk/firstboot/kiosk-firstboot.conf" <<EOF
 # Read by /usr/local/sbin/kiosk-firstboot. Written by iso/build-iso.sh.
 # 1 = take every install.sh default and reboot into the kiosk; 0 = interactive.
 KIOSK_UNATTENDED=$UNATTENDED
 EOF
+
+if (( OFFLINE )); then
+    info "Building offline bundle (packages, Node.js, Electron)..."
+    "$SCRIPT_DIR/offline/build-bundle.sh" "$WORK/kiosk/offline" "$SRC_ISO" "$stage_repo" "$BUILD_DIR/offline-cache"
+fi
 
 ################################################################################
 # autoinstall.yaml
@@ -305,9 +325,14 @@ interactive=()
     - install -m 755 /cdrom/kiosk/firstboot/kiosk-firstboot /target/usr/local/sbin/kiosk-firstboot
     - install -m 644 /cdrom/kiosk/firstboot/kiosk-firstboot.service /target/etc/systemd/system/kiosk-firstboot.service
     - install -m 644 /cdrom/kiosk/firstboot/kiosk-firstboot.conf /target/etc/kiosk-firstboot.conf
+    - install -m 755 /cdrom/kiosk/firstboot/kiosk-offline-apt /target/usr/local/sbin/kiosk-offline-apt
     - touch /target/var/lib/kiosk-firstboot/pending
     - curtin in-target --target=/target -- systemctl enable kiosk-firstboot.service
 EOF
+    if (( OFFLINE )); then
+        echo "    - cp -a /cdrom/kiosk/offline /target/opt/kiosk-offline"
+        echo "    - chmod -R u+w,a+rX /target/opt/kiosk-offline"
+    fi
 } > "$WORK/autoinstall.yaml"
 
 ################################################################################
@@ -345,6 +370,7 @@ echo
 echo "Installer asks for : ${interactive[*]:-nothing}$( (( NO_CONFIRM )) || echo " (plus a 'Continue with autoinstall?' confirmation)")"
 echo "Admin user         : ${ADMIN_USER:-chosen during install}"
 echo "First boot         : $( (( UNATTENDED )) && echo "unattended install.sh, then reboots into the kiosk" || echo "interactive install.sh on the console")"
+echo "Offline bundle     : $( (( OFFLINE )) && echo "yes - installs with no internet (used after 90s offline)" || echo "no - first boot needs internet (add --offline to bundle everything)")"
 echo
 echo "Write it to a USB stick (replace /dev/sdX - this erases it):"
 echo "  sudo dd if='$OUTPUT' of=/dev/sdX bs=4M status=progress oflag=sync"

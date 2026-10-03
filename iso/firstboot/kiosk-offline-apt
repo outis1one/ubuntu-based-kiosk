@@ -1,0 +1,63 @@
+#!/bin/bash
+################################################################################
+# kiosk-offline-apt - point apt at the offline install bundle, or back.
+#
+#   sudo kiosk-offline-apt on       apt uses ONLY /opt/kiosk-offline/apt
+#   sudo kiosk-offline-apt off      back to the normal Ubuntu archive
+#   kiosk-offline-apt status
+#
+# Installed by the custom ISO (iso/build-iso.sh); the bundle itself is
+# only there on ISOs built with --offline. kiosk-firstboot turns this on
+# by itself when first boot finds no internet, and back off afterwards.
+# By hand it's for installing things later with no internet - e.g. the
+# CUPS addon: `sudo kiosk-offline-apt on`, ./install.sh -> Addons -> CUPS,
+# then `sudo kiosk-offline-apt off`. While it's on, install.sh also
+# unpacks the bundle's prebuilt node_modules instead of running npm
+# (lib/config.sh's offline_mode_active checks for the file this writes).
+#
+# "Only" matters: with the normal archive still listed, apt would pick
+# newer versions from it that it then can't download.
+################################################################################
+
+set -euo pipefail
+
+BUNDLE_DIR=/opt/kiosk-offline
+APT_CONF=/etc/apt/apt.conf.d/90-kiosk-offline
+
+case "${1:-status}" in
+    on)
+        [[ $EUID -eq 0 ]] || { echo "Run with sudo" >&2; exit 1; }
+        if [[ ! -f "$BUNDLE_DIR/apt/Packages" ]]; then
+            echo "No offline bundle at $BUNDLE_DIR (ISO not built with --offline)" >&2
+            exit 1
+        fi
+        mkdir -p "$BUNDLE_DIR/sources.d"
+        echo "deb [trusted=yes] file:$BUNDLE_DIR/apt ./" > "$BUNDLE_DIR/offline.list"
+        cat > "$APT_CONF" <<EOF
+// Written by kiosk-offline-apt - remove with: sudo kiosk-offline-apt off
+Dir::Etc::SourceList "$BUNDLE_DIR/offline.list";
+Dir::Etc::SourceParts "$BUNDLE_DIR/sources.d";
+Acquire::Languages "none";
+EOF
+        apt-get update -q >/dev/null
+        echo "apt now installs from the offline bundle only ($BUNDLE_DIR)."
+        ;;
+    off)
+        [[ $EUID -eq 0 ]] || { echo "Run with sudo" >&2; exit 1; }
+        rm -f "$APT_CONF"
+        echo "apt is back on the normal Ubuntu sources."
+        echo "Run 'sudo apt update' once there's internet."
+        ;;
+    status)
+        if [[ -f "$APT_CONF" ]]; then
+            echo "on (apt uses $BUNDLE_DIR/apt only)"
+        else
+            echo "off"
+        fi
+        [[ -f "$BUNDLE_DIR/bundle-info.txt" ]] && sed -n '1,3p;5,6p' "$BUNDLE_DIR/bundle-info.txt"
+        ;;
+    *)
+        echo "Usage: kiosk-offline-apt on|off|status" >&2
+        exit 2
+        ;;
+esac

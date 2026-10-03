@@ -41,6 +41,16 @@
 # other addon's own scripts.
 : "${WEBUI_HELPER_PATH:=$BIN_DIR/kiosk-webui-helper}"
 
+# Offline install bundle - only present on systems installed from an ISO
+# built with `iso/build-iso.sh --offline`: a local apt repository (every
+# package provisioning and the CUPS addon install) plus prebuilt
+# node_modules for the kiosk app and Web UI. Offline mode is switched on
+# by /usr/local/sbin/kiosk-offline-apt (which writes $KIOSK_OFFLINE_APT_CONF
+# pointing apt at that repository only) - the first-boot service does that
+# automatically when there's no internet; by hand: `sudo kiosk-offline-apt on`.
+: "${KIOSK_OFFLINE_DIR:=/opt/kiosk-offline}"
+: "${KIOSK_OFFLINE_APT_CONF:=/etc/apt/apt.conf.d/90-kiosk-offline}"
+
 # The admin account actually running this tool (as opposed to $KIOSK_USER,
 # the kiosk's own restricted account) - used where an addon needs to grant
 # *this* user a group membership (e.g. lpadmin for CUPS).
@@ -73,6 +83,26 @@ REQUIRE_PASSWORD_ON_BOOT="false"
 AUTHELIA_URL=""
 AUTHELIA_USERNAME=""
 AUTHELIA_ENCRYPTED_PASSWORD=""
+
+offline_mode_active() {
+    [[ -f "$KIOSK_OFFLINE_APT_CONF" && -d "$KIOSK_OFFLINE_DIR/apt" ]]
+}
+
+# offline_install_node_modules NAME DEST_DIR
+# Unpacks the bundle's prebuilt node_modules for NAME (kiosk-app, webui)
+# into DEST_DIR as $KIOSK_USER, in place of `npm install` - which can't
+# reach the npm registry (or Electron's GitHub download) offline.
+offline_install_node_modules() {
+    local name="$1" dest="$2"
+    local tarball="$KIOSK_OFFLINE_DIR/npm/${name}-node_modules.tar.gz"
+    if [[ ! -f "$tarball" ]]; then
+        log_error "Offline bundle has no prebuilt modules for $name ($tarball)"
+        return 1
+    fi
+    echo "Offline mode: unpacking prebuilt $name modules from $KIOSK_OFFLINE_DIR..."
+    sudo -u "$KIOSK_USER" rm -rf "$dest/node_modules"
+    sudo -u "$KIOSK_USER" tar -xzf "$tarball" -C "$dest"
+}
 
 kiosk_user_exists() {
     id "$KIOSK_USER" &>/dev/null
