@@ -1,0 +1,104 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Slideshow</title>
+<!-- Shown for a site that's a local folder - see slideshow.js. The image
+     list arrives from main.js via window.kioskSlideshow.update(). -->
+<style>
+  html, body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none; }
+  .slide {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: contain; opacity: 0; transition-property: opacity;
+  }
+  .slide.show { opacity: 1; }
+  #msg {
+    position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: #888; font: 24px sans-serif; text-align: center; padding: 2em; box-sizing: border-box;
+  }
+</style>
+</head>
+<body>
+<img class="slide" id="a" alt="">
+<img class="slide" id="b" alt="">
+<div id="msg">Loading slideshow…</div>
+<script>
+(() => {
+  const layers = [document.getElementById('a'), document.getElementById('b')];
+  const msg = document.getElementById('msg');
+  let front = 0;
+  let order = [];
+  let pos = -1;
+  let timer = null;
+  let state = null;
+
+  function shuffled(list) {
+    const a = list.slice();
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+
+  function showMessage(text) {
+    msg.textContent = text;
+    msg.style.display = 'flex';
+    layers.forEach((l) => { l.classList.remove('show'); l.removeAttribute('src'); });
+  }
+
+  // Load the next image into the hidden layer, then crossfade to it.
+  // Unreadable/corrupt images are skipped rather than stalling the show.
+  function next(attempts = 0) {
+    clearTimeout(timer);
+    if (!order.length) return;
+    if (attempts >= order.length) { showMessage('None of the images in this folder could be shown.'); return; }
+    pos = (pos + 1) % order.length;
+    if (pos === 0 && state.options.shuffle && order.length > 1) order = shuffled(state.images);
+    const back = layers[1 - front];
+    back.onload = () => {
+      msg.style.display = 'none';
+      back.classList.add('show');
+      layers[front].classList.remove('show');
+      front = 1 - front;
+      if (order.length > 1) timer = setTimeout(next, state.options.interval * 1000);
+    };
+    back.onerror = () => next(attempts + 1);
+    back.src = order[pos];
+  }
+
+  window.kioskSlideshow = {
+    update(s) {
+      const first = !state;
+      const sameImages = state && JSON.stringify(state.images) === JSON.stringify(s.images);
+      const current = order[pos];
+      state = s;
+      layers.forEach((l) => {
+        l.style.objectFit = s.options.fit;
+        l.style.transitionDuration = s.options.transition + 's';
+      });
+      if (!s.images.length) {
+        order = [];
+        clearTimeout(timer);
+        showMessage(s.exists ? `No images in ${s.dir}` : `Folder not found: ${s.dir}`);
+        return;
+      }
+      if (sameImages && !first) return;
+      // Folder changed: keep showing the current picture if it's still
+      // there and carry on from it, otherwise restart from the top.
+      order = s.options.shuffle ? shuffled(s.images) : s.images.slice();
+      const keep = current ? order.indexOf(current) : -1;
+      if (keep >= 0 && !first) {
+        pos = keep;
+        clearTimeout(timer);
+        if (order.length > 1) timer = setTimeout(next, s.options.interval * 1000);
+      } else {
+        pos = -1;
+        next();
+      }
+    },
+  };
+})();
+</script>
+</body>
+</html>

@@ -69,13 +69,16 @@ boot of the installed system it runs `./install.sh` automatically on the
 console.
 
 ```bash
-sudo apt install xorriso curl git openssl
 git clone https://github.com/outis1one/ubuntu-based-kiosk.git
 cd ubuntu-based-kiosk
 iso/build-iso.sh            # downloads + verifies the latest 26.04.x server ISO
 # -> iso/build/ubuntu-26.04.x-kiosk-amd64.iso
 sudo dd if=iso/build/ubuntu-26.04.*-kiosk-amd64.iso of=/dev/sdX bs=4M status=progress oflag=sync
 ```
+
+The script checks for its build tools (`xorriso`, `curl`, `git`, `openssl`)
+and offers to install any that are missing with `sudo apt install`. Pass
+`--install-deps` to install them without asking.
 
 By default the installer only asks for **network** (WiFi works here),
 **disk**, and your **admin username/password** — language, keyboard and the
@@ -94,7 +97,40 @@ Useful options (`iso/build-iso.sh --help` for all):
 | `--auto-network` / `--auto-storage` | Skip the network screen (DHCP on ethernet) / wipe the largest disk without asking. |
 | `--no-confirm` | Skip the "Continue with autoinstall?" prompt at boot. |
 | `--fully-automatic` | All of the above (needs `--username`): boot it and walk away. **Wipes a disk with no questions — label the USB stick.** |
+| `--offline` | Bundle everything the kiosk install downloads, so it works with **no internet** (see below). |
 | `--iso PATH` | Use an ISO you already have instead of downloading. |
+
+### Offline installs (`--offline`)
+
+```bash
+iso/build-iso.sh --offline   # also offers to install apt-utils, python3, gnupg, ubuntu-keyring
+# -> iso/build/ubuntu-26.04.x-kiosk-offline-amd64.iso (~3.2 GB)
+```
+
+This adds a ~420 MB bundle to the ISO:
+- Every Ubuntu package the kiosk install and the **CUPS printing addon**
+  need (all printer drivers included), with their dependencies, as a local
+  package repository.
+- Node.js 22 (NodeSource).
+- Prebuilt Electron and Web UI modules.
+
+On first boot it still installs online when there's internet. With none,
+it waits 90 seconds and then installs entirely from the bundle. The bundle
+stays on the kiosk at `/opt/kiosk-offline`, so **Addons → CUPS Printing**
+(in `./install.sh` or the Web UI) works with no internet too: when it can't
+reach the Ubuntu archive, it installs from the bundle by itself and then
+switches apt back to normal.
+
+Notes:
+- Build it on an **amd64** Ubuntu/Debian machine, or let the GitHub
+  workflow do it (its `offline` box is ticked by default). Rebuilds are
+  quick because downloads are cached in `iso/build/offline-cache`.
+- Bundled versions are whatever was current when the ISO was built.
+  Once the kiosk is online, normal updates and Advanced → Upgrade bring it
+  current.
+- Addons that download their own software (LMS/Squeezelite, Tailscale,
+  Netbird, Asterisk Intercom, VNC) still need internet.
+- `sudo rm -rf /opt/kiosk-offline` frees the space if you don't need it.
 
 **No Linux machine handy?** Build it on GitHub instead: **Actions → Build
 kiosk ISO → Run workflow**, pick a mode, and download the ISO from the run's
@@ -107,9 +143,10 @@ because its inputs show up in the run log.
 Notes:
 - The ISO carries a copy of this checkout's current commit (uncommitted
   changes are not included).
-- The kiosk machine still needs internet on first boot (packages, Node.js,
-  Electron). If there's none, the console waits for it and offers a shell to
-  fix networking (`/etc/netplan/*.yaml`, then `sudo netplan apply`).
+- Without `--offline`, the kiosk machine needs internet on first boot
+  (packages, Node.js, Electron). If there's none, the console waits for it
+  and offers a shell to fix networking (`/etc/netplan/*.yaml`, then
+  `sudo netplan apply`).
 - A failed or interrupted first-boot install runs again on the next boot, or
   now with `sudo systemctl start kiosk-firstboot`. Its log is
   `/var/lib/kiosk-firstboot/install.log`.
@@ -120,7 +157,7 @@ Notes:
 
 If the kiosk machine can't reach GitHub directly (no browser, restrictive proxy, or you just prefer to grab the script on another computer and carry it over via USB), download it ahead of time instead of using the `curl`/`wget` one-liner above.
 
-> **Note:** This only avoids needing internet access *to fetch the script*. The installer itself still requires the kiosk machine to have internet access while it runs — it uses `apt` to install packages, pulls Node.js from NodeSource, and runs `npm install` to fetch Electron (~120MB). There is currently no fully air-gapped/offline package bundle.
+> **Note:** This only avoids needing internet access *to fetch the script*. The installer itself still requires the kiosk machine to have internet access while it runs — it uses `apt` to install packages, pulls Node.js from NodeSource, and runs `npm install` to fetch Electron (~120MB). For a truly offline install, use the [All-in-One Install ISO](#all-in-one-install-iso-ubuntu-server-2604--kiosk) built with `--offline` instead.
 
 **On a machine with internet access:**
 
@@ -156,6 +193,18 @@ The kiosk machine still needs a working internet connection (ethernet, or WiFi c
 - **Home URL** - Auto-return after inactivity on manual or hidden sites
 - **Pause functionality** - Temporarily pause rotation (configurable per-site)
 - **Navigation menu** - Quick access to all sites via key icon (top-left hot corner)
+- **Local files** - Enter an absolute path (e.g. `/home/kiosk/docs/menu.pdf`)
+  instead of a web address and it's shown from the kiosk's own disk:
+  HTML pages, PDFs (built-in viewer), and images. Works offline. The file
+  must be readable by the `kiosk` user.
+- **Image slideshow** - Enter a folder instead (e.g. `/home/kiosk/photos/`)
+  and its images (jpg, png, gif, webp, bmp, svg, avif) play full-screen in
+  file-name order with a crossfade, 10 seconds each. Images added to or
+  removed from the folder are picked up within a minute, no restart
+  needed. Optional `slideshow.json` in the folder:
+  `{"interval": 10, "shuffle": false, "fit": "contain", "transition": 1, "recursive": false}`
+  (`fit`: `contain` shows the whole image, `cover` fills the screen and
+  crops; `recursive` includes subfolders).
 
 ### Touch Controls
 - **2-finger horizontal swipe** - Switch between sites
@@ -355,7 +404,7 @@ Both can be used at the same time — they serve different purposes:
 ## What This Script Installs
 
 ### Core Components
-- **Electron** v42.x (Chromium-based app framework)
+- **Electron** v44.x (Chromium-based app framework)
 - **Node.js** v20.x with npm
 - **Openbox** - Lightweight window manager
 - **LightDM** - Display manager with autologin
@@ -1412,9 +1461,16 @@ full migration pass.
 
 ## Project Status & Future Plans
 
-**Current Version:** 2.17.0
+**Current Version:** 2.18.0
 
-**Recent Updates (v2.17.0):**
+**Recent Updates (v2.18.0):**
+- **All-in-one install ISO** (`iso/build-iso.sh`, or Actions → Build kiosk ISO): Ubuntu Server 26.04 plus the kiosk in one USB stick — the Ubuntu install, then `install.sh` automatically on first boot. Interactive, unattended, or fully automatic. See "All-in-One Install ISO" above.
+- **Offline installs** (`--offline`): the ISO carries every package (including CUPS printing and all printer drivers), Node.js 22, and prebuilt Electron/Web UI modules, so a kiosk installs with no internet. With internet it still installs current versions online. Addons → CUPS Printing (menu or Web UI) installs from the bundle by itself when offline.
+- **Local files as sites:** an absolute path (`/home/kiosk/docs/menu.pdf`) shows a local page, PDF or image; a folder (`/home/kiosk/photos/`) plays as a full-screen **image slideshow** that picks up added/removed images within a minute. Works in both the Sites menu and the Web UI.
+- **Electron upgrade:** v42.x → v44.x (42 leaves Electron's support window when 45 ships). Existing kiosks move to it via Advanced → Upgrade.
+- **Fix:** the CUPS menu could report an installed CUPS as "not installed" (`dpkg -l | grep -q` failing under `set -o pipefail`).
+
+**Previous (v2.17.0):**
 - **Web UI now installs by default** during first-time provisioning (fixed port 8090, no prompt) instead of being opt-in — the Addons menu entry still works standalone for reconfiguring the port or reinstalling it on a kiosk provisioned before this change.
 - **The web UI can now install/reconfigure CUPS Printing, LMS Server, Squeezelite Player, and Asterisk Intercom, and check for updates** — the same four addons plus Update named directly. Every one of these is the exact same interactive `action_*` function the terminal menu already uses (no prompt/mutation refactor of any addon file), driven by piping the right answers on stdin — the same technique this project's own bash tests already use to drive these functions.
 - **Privilege model:** the web service itself still runs as `$KIOSK_USER` with zero ambient `sudo`. A new narrow, allow-listed root helper is the only way it ever gains privilege — reachable only via a single-path passwordless sudo rule (generated and validated with `visudo -c -f` before being installed), and it re-checks its own fixed action allow-list before dispatching anything. Chosen over running the whole service as root after asking directly: since this repo has no login of its own by design, a request that reaches the web UI with no reverse proxy in front is effectively unauthenticated, so the allow-list bounds what that can actually do to five vetted actions, never a root shell.

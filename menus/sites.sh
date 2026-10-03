@@ -18,11 +18,23 @@ SITE_EDIT_IDX=""
 ################################################################################
 
 # Normalize whatever the user typed into a URL, same rules the old
-# installer used: bare host -> https://, bare IP -> http://.
+# installer used: bare host -> https://, bare IP -> http://. Plus local
+# files on the kiosk itself (pages, PDFs, images): an absolute path ->
+# file://, percent-encoded the same way webui/server.js's parseUrl does.
 sites_parse_url() {
     local raw="$1"
-    if [[ "$raw" =~ ^https?:// ]]; then
+    if [[ "$raw" =~ ^(https?|file):// ]]; then
         echo "$raw"
+    elif [[ "$raw" == /* ]]; then
+        local LC_ALL=C out="" c i
+        for (( i = 0; i < ${#raw}; i++ )); do
+            c="${raw:i:1}"
+            case "$c" in
+                [A-Za-z0-9._~/!\'\(\)*-]) out+="$c" ;;
+                *) out+="$(printf '%%%02X' "'$c")" ;;
+            esac
+        done
+        echo "file://$out"
     elif [[ "$raw" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+ ]]; then
         echo "http://${raw}"
     else
@@ -124,6 +136,9 @@ action_add_page() {
     echo "    0  = manual only (swipe/nav menu to reach it)"
     echo "   -1  = hidden (PIN-gated, F10 or 3-finger swipe)"
     echo
+    echo "URL: a web address, or a path on this kiosk - a file (page, PDF,"
+    echo "image) like /home/kiosk/docs/menu.pdf, or a folder of images ending"
+    echo "in / like /home/kiosk/photos/ for a slideshow."
 
     local raw_url url dur name needs_auth user pass
     read -r -p "URL: " raw_url

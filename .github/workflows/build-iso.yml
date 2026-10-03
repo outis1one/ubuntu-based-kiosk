@@ -39,6 +39,13 @@ on:
         description: Optional SSH public key for the admin user (ssh-ed25519 AAAA...)
         type: string
         default: ""
+      offline:
+        description: >-
+          Bundle everything install.sh downloads (~420 MB: all packages incl.
+          CUPS printing, Node.js, Electron) so the kiosk installs with no
+          internet on first boot.
+        type: boolean
+        default: true
       retention_days:
         description: Days to keep the ISO artifact
         type: number
@@ -57,11 +64,12 @@ jobs:
       - name: Install build tools
         run: |
           sudo apt-get update -q
-          sudo apt-get install -y -q xorriso
+          sudo apt-get install -y -q xorriso apt-utils ubuntu-keyring
 
       - name: Build ISO
         env:
           MODE: ${{ inputs.mode }}
+          OFFLINE: ${{ inputs.offline }}
           ADMIN_USERNAME: ${{ inputs.username }}
           ADMIN_HOSTNAME: ${{ inputs.hostname }}
           SSH_PUBLIC_KEY: ${{ inputs.ssh_public_key }}
@@ -84,19 +92,22 @@ jobs:
             printf '%s\n' "$SSH_PUBLIC_KEY" > "$RUNNER_TEMP/ssh_key.pub"
             args+=(--ssh-key "$RUNNER_TEMP/ssh_key.pub")
           fi
+          [[ "$OFFLINE" == "true" ]] && args+=(--offline)
           iso/build-iso.sh "${args[@]}"
           # Name the file after the Ubuntu point release the script picked.
           src="$(find iso/build/cache -name "*.iso" -print -quit)"
-          name="$(basename "$src" .iso | sed 's/-live-server/-kiosk/')-${MODE}-${GITHUB_SHA::7}.iso"
+          kind="kiosk"; [[ "$OFFLINE" == "true" ]] && kind="kiosk-offline"
+          name="$(basename "$src" .iso | sed "s/-live-server/-$kind/")-${MODE}-${GITHUB_SHA::7}.iso"
           mv "$RUNNER_TEMP/iso/ubuntu-kiosk-amd64.iso" "$RUNNER_TEMP/iso/$name"
           # Free the ~3 GB source ISO before the upload step needs scratch space.
-          rm -rf iso/build/cache
+          rm -rf iso/build/cache iso/build/offline-cache
           (cd "$RUNNER_TEMP/iso" && sha256sum "$name" > "$name.sha256")
           echo "ISO_NAME=$name" >> "$GITHUB_ENV"
           {
             echo "### $name"
             echo
             echo "- Mode: \`$MODE\`"
+            echo "- Offline bundle: $([[ "$OFFLINE" == "true" ]] && echo "yes - installs with no internet" || echo "no - kiosk needs internet on first boot")"
             echo "- Admin user: ${ADMIN_USERNAME:-chosen during install}"
             echo "- Built from: \`${GITHUB_REF_NAME}\` @ \`${GITHUB_SHA::7}\`"
             echo "- SHA-256: \`$(cut -d' ' -f1 "$RUNNER_TEMP/iso/$name.sha256")\`"

@@ -80,6 +80,8 @@ async function main() {
                     { url: 'example.com', duration: 30, name: 'bare host' },
                     { url: '192.168.1.50', duration: 30, name: 'bare ip' },
                     { url: 'https://already.example.com', duration: 30, name: 'already a url' },
+                    { url: '/home/kiosk/docs/menu #2.pdf', duration: 30, name: 'local path' },
+                    { url: 'file:///srv/kiosk/index.html', duration: 30, name: 'already a file url' },
                 ],
             }),
         });
@@ -88,6 +90,8 @@ async function main() {
         assert.strictEqual(body.tabs[0].url, 'https://example.com');
         assert.strictEqual(body.tabs[1].url, 'http://192.168.1.50');
         assert.strictEqual(body.tabs[2].url, 'https://already.example.com');
+        assert.strictEqual(body.tabs[3].url, 'file:///home/kiosk/docs/menu%20%232.pdf');
+        assert.strictEqual(body.tabs[4].url, 'file:///srv/kiosk/index.html');
     });
 
     await check('PUT rejects homeTabIndex out of range', async () => {

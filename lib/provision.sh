@@ -54,23 +54,31 @@ provision_install_file() {
     sudo install -D -m "$mode" "$PROVISION_FILES/$src_rel" "$dest"
 }
 
+# Package lists live in variables, not inline, so iso/offline/build-bundle.sh
+# (the offline install ISO) can read the exact same lists to bundle - add a
+# package here and the offline bundle picks it up on its next build.
+PROVISION_APT_PACKAGES=(
+    xorg openbox lightdm unclutter screen curl git build-essential
+    ca-certificates gnupg lsb-release jq ufw x11-xserver-utils xinput
+    vainfo mesa-utils libgl1-mesa-dri libglx-mesa0 mesa-vulkan-drivers
+    libva2 libva-drm2 libva-x11-2 mesa-va-drivers
+    libegl-mesa0 libegl1-mesa-dev libgles2-mesa-dev
+    pipewire pipewire-pulse pipewire-alsa wireplumber pipewire-audio-client-libraries alsa-utils libnotify-bin
+    gstreamer1.0-pipewire libspa-0.2-bluetooth
+    systemd-timesyncd acpid xbindkeys xdotool python3-evdev unzip
+    net-tools ncdu evtest
+)
+PROVISION_INTEL_APT_PACKAGES=(
+    intel-gpu-tools xserver-xorg-video-intel i965-va-driver intel-media-va-driver
+)
+
 provision_install_packages() {
     echo "[1/10] Installing packages..."
     sudo apt update
-    sudo apt install -y \
-      xorg openbox lightdm unclutter screen curl git build-essential \
-      ca-certificates gnupg lsb-release jq ufw x11-xserver-utils xinput \
-      vainfo mesa-utils libgl1-mesa-dri libglx-mesa0 mesa-vulkan-drivers \
-      libva2 libva-drm2 libva-x11-2 mesa-va-drivers \
-      libegl-mesa0 libegl1-mesa-dev libgles2-mesa-dev \
-      pipewire pipewire-pulse pipewire-alsa wireplumber pipewire-audio-client-libraries alsa-utils libnotify-bin \
-      gstreamer1.0-pipewire libspa-0.2-bluetooth \
-      systemd-timesyncd acpid xbindkeys xdotool python3-evdev unzip \
-      net-tools ncdu evtest
+    sudo apt install -y "${PROVISION_APT_PACKAGES[@]}"
 
     if lspci | grep -i "VGA.*Intel" >/dev/null 2>&1; then
-        sudo apt install -y intel-gpu-tools xserver-xorg-video-intel \
-          i965-va-driver intel-media-va-driver
+        sudo apt install -y "${PROVISION_INTEL_APT_PACKAGES[@]}"
         provision_install_file "etc/X11/xorg.conf.d/20-intel.conf" /etc/X11/xorg.conf.d/20-intel.conf
     fi
 
@@ -101,8 +109,13 @@ provision_create_kiosk_user() {
 provision_install_nodejs() {
     echo "[3/10] Installing Node.js..."
     if ! command -v node &>/dev/null; then
-        curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
-        sudo apt install -y nodejs
+        if offline_mode_active; then
+            # The bundle carries NodeSource's own nodejs package.
+            sudo apt install -y nodejs
+        else
+            curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+            sudo apt install -y nodejs
+        fi
     fi
     echo "Node.js: $(node -v)"
 }
@@ -113,16 +126,20 @@ provision_install_app() {
     sudo chown "$KIOSK_USER:$KIOSK_USER" "$KIOSK_DIR"/*.js "$KIOSK_DIR"/*.html "$KIOSK_DIR/package.json" "$KIOSK_DIR/start.sh"
     sudo chmod +x "$KIOSK_DIR/start.sh"
 
-    echo "Installing npm dependencies (Electron ~120MB - may take several minutes)..."
-    sudo -u "$KIOSK_USER" bash -lc "
-        npm config set fetch-timeout 600000
-        npm config set fetch-retries 5
-        npm config set fetch-retry-mintimeout 30000
-        npm config set fetch-retry-maxtimeout 300000
-    "
-    if ! sudo -u "$KIOSK_USER" bash -lc "cd '$KIOSK_DIR' && npm install --unsafe-perm"; then
-        log_error "npm install failed"
-        return 1
+    if offline_mode_active; then
+        offline_install_node_modules kiosk-app "$KIOSK_DIR"
+    else
+        echo "Installing npm dependencies (Electron ~120MB - may take several minutes)..."
+        sudo -u "$KIOSK_USER" bash -lc "
+            npm config set fetch-timeout 600000
+            npm config set fetch-retries 5
+            npm config set fetch-retry-mintimeout 30000
+            npm config set fetch-retry-maxtimeout 300000
+        "
+        if ! sudo -u "$KIOSK_USER" bash -lc "cd '$KIOSK_DIR' && npm install --unsafe-perm"; then
+            log_error "npm install failed"
+            return 1
+        fi
     fi
 
     electron_install_binary

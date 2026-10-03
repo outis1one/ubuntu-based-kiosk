@@ -4,6 +4,8 @@ const fs=require('fs');
 const path=require('path');
 const os=require('os');
 const crypto=require('crypto');
+// Sites that are a local folder show as an image slideshow (slideshow.js).
+const slideshow=require('./slideshow');
 
 // Suppress EPIPE errors (happen when no terminal attached)
 process.stdout.on('error',(e)=>{if(e.code!=='EPIPE')throw e;});
@@ -782,7 +784,7 @@ function attachView(i){
   
   const tabIdx=viewIndexToTabIndex(i);
   if(tabIdx>=0&&tabs[tabIdx]){
-    const configuredUrl=tabs[tabIdx].url;
+    const configuredUrl=slideshow.resolveSiteUrl(tabs[tabIdx].url);
     const currentUrl=views[i].webContents.getURL();
 
     if(currentUrl&&!currentUrl.startsWith(configuredUrl)){
@@ -1334,6 +1336,7 @@ async function createWindow(){
         url=u.toString();
       }catch(e){}
     }
+    url=slideshow.resolveSiteUrl(url);
     
     const initialOrigin=new URL(t.url).origin;
     
@@ -1367,6 +1370,7 @@ async function createWindow(){
     });
     
     view.webContents.setAudioMuted(false);
+    slideshow.attach(view.webContents);
     view.webContents.loadURL(url);
     
     view.webContents.on('did-finish-load',()=>{

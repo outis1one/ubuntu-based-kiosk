@@ -113,7 +113,9 @@ webui_install_app_files() {
         return 1
     fi
     sudo chown -R "$KIOSK_USER:$KIOSK_USER" "$WEBUI_DIR"
-    if ! sudo -u "$KIOSK_USER" bash -lc "cd '$WEBUI_DIR' && npm install --omit=dev --unsafe-perm"; then
+    if offline_mode_active; then
+        offline_install_node_modules webui "$WEBUI_DIR" || return 1
+    elif ! sudo -u "$KIOSK_USER" bash -lc "cd '$WEBUI_DIR' && npm install --omit=dev --unsafe-perm"; then
         log_error "npm install failed"
         return 1
     fi

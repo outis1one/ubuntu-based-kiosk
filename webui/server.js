@@ -35,9 +35,11 @@ const NAV_MODES = ['restricted', 'same-origin', 'open'];
 const TIME_RE = /^([01]\d|2[0-3]):[0-5]\d$/;
 
 // Same normalization rule as menus/sites.sh's sites_parse_url(): bare
-// host -> https://, bare IPv4 -> http://, else passed through as-is.
+// host -> https://, bare IPv4 -> http://, absolute path -> file:// (local
+// pages/PDFs/images on the kiosk itself), else passed through as-is.
 function parseUrl(raw) {
-    if (/^https?:\/\//.test(raw)) return raw;
+    if (/^(https?|file):\/\//.test(raw)) return raw;
+    if (raw.startsWith('/')) return `file://${raw.split('/').map(encodeURIComponent).join('/')}`;
     if (/^\d+\.\d+\.\d+\.\d+/.test(raw)) return `http://${raw}`;
     return `https://${raw}`;
 }

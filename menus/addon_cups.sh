@@ -14,8 +14,19 @@
 # Depends on: lib/menu.sh, lib/config.sh being sourced first.
 ################################################################################
 
+# Also read by iso/offline/build-bundle.sh to bundle these for offline installs.
+CUPS_APT_PACKAGES=(
+    cups cups-client cups-filters printer-driver-all
+    printer-driver-cups-pdf hplip printer-driver-gutenprint
+    foomatic-db-compressed-ppds openprinting-ppds
+)
+
 cups_is_installed() {
-    dpkg -l 2>/dev/null | grep -q "^ii\s\+cups\s"
+    # Not `dpkg -l | grep -q`: grep -q exits at the first match, dpkg
+    # takes SIGPIPE writing the rest of its long list, and under
+    # install.sh's `set -o pipefail` that made this report "not
+    # installed" for an installed CUPS.
+    [[ "$(dpkg-query -W -f='${db:Status-Abbrev}' cups 2>/dev/null)" == "ii "* ]]
 }
 
 cups_is_active() {
@@ -53,21 +64,23 @@ addon_cups_menu() {
 # Actions
 ################################################################################
 
+cups_apt_install() {
+    if ! sudo apt update; then
+        log_error "apt update failed - check network/package sources and try again"
+        return 1
+    fi
+    if ! sudo apt install -y "${CUPS_APT_PACKAGES[@]}"; then
+        log_error "CUPS package installation failed"
+        return 1
+    fi
+}
+
 action_install_cups() {
     echo
     ask_yes_no "Install CUPS printing?" "n" || { echo "Cancelled"; return; }
 
     echo "Installing CUPS from scratch..."
-    if ! sudo apt update; then
-        log_error "apt update failed - check network/package sources and try again"
-        return 1
-    fi
-    if ! sudo apt install -y cups cups-client cups-filters printer-driver-all \
-        printer-driver-cups-pdf hplip printer-driver-gutenprint \
-        foomatic-db-compressed-ppds openprinting-ppds; then
-        log_error "CUPS package installation failed"
-        return 1
-    fi
+    run_with_offline_fallback cups_apt_install || return 1
 
     sudo systemctl enable cups 2>/dev/null || true
     sudo systemctl start cups 2>/dev/null || true
