@@ -3,34 +3,49 @@
 <head>
 <meta charset="utf-8">
 <title>Slideshow</title>
-<!-- Shown for a site that's a local folder - see slideshow.js. The image
-     list arrives from main.js via window.kioskSlideshow.update(). -->
+<!-- Shown for a site that's a local folder - see slideshow.js. The item
+     list arrives from main.js via window.kioskSlideshow.update(); a Word
+     document's bytes are requested by setting the page title (see
+     TITLE_REQUEST in slideshow.js) and arrive via kioskSlideshow.docData(). -->
 <style>
   html, body { margin: 0; height: 100%; background: #000; overflow: hidden; cursor: none; }
   .slide {
-    position: absolute; inset: 0; width: 100%; height: 100%;
-    object-fit: contain; opacity: 0; transition-property: opacity;
+    position: absolute; inset: 0; overflow: hidden;
+    opacity: 0; transition-property: opacity;
   }
   .slide.show { opacity: 1; }
+  .slide img { width: 100%; height: 100%; object-fit: contain; display: block; }
+  .slide.doc { background: #666; }
   #msg {
     position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
     color: #888; font: 24px sans-serif; text-align: center; padding: 2em; box-sizing: border-box;
   }
 </style>
+<script src="node_modules/jszip/dist/jszip.min.js"></script>
+<script src="node_modules/docx-preview/dist/docx-preview.min.js"></script>
+<script src="docx-render.js"></script>
 </head>
 <body>
-<img class="slide" id="a" alt="">
-<img class="slide" id="b" alt="">
+<div class="slide" id="a"></div>
+<div class="slide" id="b"></div>
 <div id="msg">Loading slideshow…</div>
 <script>
 (() => {
+  const TITLE = 'Slideshow';
+  const TITLE_REQUEST = 'kiosk-slideshow-need:';
   const layers = [document.getElementById('a'), document.getElementById('b')];
   const msg = document.getElementById('msg');
   let front = 0;
   let order = [];
   let pos = -1;
   let timer = null;
+  let scrollAnim = null;
   let state = null;
+  let generation = 0;                  // bumps on every (re)start, cancels stale work
+  const docCache = new Map();          // url -> { mtime, bytes }
+  const pendingDocs = new Map();       // url -> { resolve, reject, timeout }
+
+  const keyOf = (it) => it && `${it.type}:${it.url}:${it.mtime || ''}`;
 
   function shuffled(list) {
     const a = list.slice();
@@ -41,61 +56,165 @@
     return a;
   }
 
-  function showMessage(text) {
-    msg.textContent = text;
-    msg.style.display = 'flex';
-    layers.forEach((l) => { l.classList.remove('show'); l.removeAttribute('src'); });
+  function stopTimers() {
+    clearTimeout(timer);
+    cancelAnimationFrame(scrollAnim);
+    scrollAnim = null;
   }
 
-  // Load the next image into the hidden layer, then crossfade to it.
-  // Unreadable/corrupt images are skipped rather than stalling the show.
-  function next(attempts = 0) {
-    clearTimeout(timer);
-    if (!order.length) return;
-    if (attempts >= order.length) { showMessage('None of the images in this folder could be shown.'); return; }
-    pos = (pos + 1) % order.length;
-    if (pos === 0 && state.options.shuffle && order.length > 1) order = shuffled(state.images);
-    const back = layers[1 - front];
-    back.onload = () => {
-      msg.style.display = 'none';
-      back.classList.add('show');
-      layers[front].classList.remove('show');
-      front = 1 - front;
-      if (order.length > 1) timer = setTimeout(next, state.options.interval * 1000);
+  function showMessage(text) {
+    stopTimers();
+    msg.textContent = text;
+    msg.style.display = 'flex';
+    layers.forEach((l) => { l.classList.remove('show'); l.innerHTML = ''; });
+  }
+
+  // Ask main.js for a document's bytes (see slideshow.js); cached by mtime
+  // so a document is only re-read when it changed on disk.
+  function getDocBytes(item) {
+    const hit = docCache.get(item.url);
+    if (hit && hit.mtime === item.mtime) return Promise.resolve(hit.bytes);
+    return new Promise((resolve, reject) => {
+      const timeout = setTimeout(() => {
+        pendingDocs.delete(item.url);
+        document.title = TITLE;
+        reject(new Error('timed out reading the file'));
+      }, 20000);
+      pendingDocs.set(item.url, { resolve, reject, timeout, mtime: item.mtime });
+      // main.js notices title *changes*; every answer (or timeout) puts it
+      // back to TITLE, so each request is a change.
+      document.title = TITLE_REQUEST + item.url;
+    });
+  }
+
+  // Fill `layer` with `item`, resolving once it's ready to fade in.
+  async function prepare(layer, item) {
+    layer.innerHTML = '';
+    layer.scrollTop = 0;
+    layer.classList.toggle('doc', item.type === 'docx');
+    if (item.type === 'image') {
+      const img = new Image();
+      img.style.objectFit = state.options.fit;
+      await new Promise((resolve, reject) => {
+        img.onload = resolve;
+        img.onerror = () => reject(new Error('unreadable image'));
+        img.src = item.url;
+      });
+      layer.appendChild(img);
+      return;
+    }
+    if (!KioskDocx.available()) throw new Error('Word document viewer missing');
+    const bytes = await getDocBytes(item);
+    const zoomEl = document.createElement('div');
+    layer.appendChild(zoomEl);
+    const cls = await KioskDocx.render(bytes, zoomEl);
+    // One page: show all of it at once. Longer: fit the width and let
+    // autoScroll() move through it.
+    if (KioskDocx.isSinglePage(zoomEl, cls)) {
+      KioskDocx.fitPage(zoomEl, cls, window.innerWidth, window.innerHeight);
+      zoomEl.style.display = 'flex';
+      zoomEl.style.justifyContent = 'center';
+    } else {
+      KioskDocx.fit(zoomEl, cls, window.innerWidth);
+    }
+  }
+
+  // A document taller than the screen scrolls smoothly top to bottom
+  // during its time on screen: holds at the top for the first 15%,
+  // reaches the bottom at 85%, then holds.
+  function autoScroll(layer, seconds) {
+    const distance = layer.scrollHeight - layer.clientHeight;
+    if (distance <= 4) return;
+    const start = performance.now();
+    const total = seconds * 1000;
+    const step = (now) => {
+      const t = Math.min(Math.max(((now - start) / total - 0.15) / 0.7, 0), 1);
+      const eased = t < 0.5 ? 2 * t * t : 1 - Math.pow(-2 * t + 2, 2) / 2;
+      layer.scrollTop = distance * eased;
+      if (t < 1) scrollAnim = requestAnimationFrame(step);
     };
-    back.onerror = () => next(attempts + 1);
-    back.src = order[pos];
+    scrollAnim = requestAnimationFrame(step);
+  }
+
+  async function next(attempts = 0) {
+    stopTimers();
+    if (!order.length) return;
+    if (attempts >= order.length) { showMessage('None of the files in this folder could be shown.'); return; }
+    const gen = generation;
+    pos = (pos + 1) % order.length;
+    if (pos === 0 && state.options.shuffle && order.length > 1) order = shuffled(order);
+    const item = order[pos];
+    const back = layers[1 - front];
+    try {
+      await prepare(back, item);
+    } catch (e) {
+      console.warn('[SLIDESHOW] Skipping', item.url, '-', e.message || e);
+      if (gen === generation) next(attempts + 1);
+      return;
+    }
+    if (gen !== generation) return;   // folder changed while loading
+    msg.style.display = 'none';
+    const old = layers[front];
+    back.classList.add('show');
+    old.classList.remove('show');
+    front = 1 - front;
+    // Free the old slide (a rendered document can be large) once faded out.
+    setTimeout(() => { if (!old.classList.contains('show')) old.innerHTML = ''; },
+      state.options.transition * 1000 + 100);
+    const seconds = item.type === 'docx' ? state.options.docInterval : state.options.interval;
+    if (item.type === 'docx') autoScroll(back, seconds);
+    // A lone document still cycles, so its scroll starts over from the top.
+    if (order.length > 1 || item.type === 'docx') timer = setTimeout(next, seconds * 1000);
   }
 
   window.kioskSlideshow = {
     update(s) {
       const first = !state;
-      const sameImages = state && JSON.stringify(state.images) === JSON.stringify(s.images);
-      const current = order[pos];
+      const sameItems = state && JSON.stringify(state.items) === JSON.stringify(s.items);
+      const currentKey = keyOf(order[pos]);
       state = s;
-      layers.forEach((l) => {
-        l.style.objectFit = s.options.fit;
-        l.style.transitionDuration = s.options.transition + 's';
-      });
-      if (!s.images.length) {
+      layers.forEach((l) => { l.style.transitionDuration = s.options.transition + 's'; });
+      layers.forEach((l) => l.querySelectorAll('img').forEach((img) => { img.style.objectFit = s.options.fit; }));
+      // Drop cached documents that left the folder.
+      for (const url of docCache.keys()) {
+        if (!s.items.some((it) => it.url === url)) docCache.delete(url);
+      }
+      if (!s.items.length) {
         order = [];
-        clearTimeout(timer);
-        showMessage(s.exists ? `No images in ${s.dir}` : `Folder not found: ${s.dir}`);
+        generation++;
+        showMessage(s.exists ? `No images or documents in ${s.dir}` : `Folder not found: ${s.dir}`);
         return;
       }
-      if (sameImages && !first) return;
-      // Folder changed: keep showing the current picture if it's still
-      // there and carry on from it, otherwise restart from the top.
-      order = s.options.shuffle ? shuffled(s.images) : s.images.slice();
-      const keep = current ? order.indexOf(current) : -1;
+      if (sameItems && !first) return;
+      // Folder changed: keep showing the current item if it's still there
+      // unchanged and carry on from it, otherwise restart from the top.
+      generation++;
+      order = s.options.shuffle ? shuffled(s.items) : s.items.slice();
+      const keep = currentKey ? order.findIndex((it) => keyOf(it) === currentKey) : -1;
       if (keep >= 0 && !first) {
         pos = keep;
         clearTimeout(timer);
-        if (order.length > 1) timer = setTimeout(next, s.options.interval * 1000);
+        const it = order[pos];
+        const seconds = it.type === 'docx' ? s.options.docInterval : s.options.interval;
+        if (order.length > 1 || it.type === 'docx') timer = setTimeout(next, seconds * 1000);
       } else {
         pos = -1;
         next();
       }
+    },
+
+    docData(url, d) {
+      const p = pendingDocs.get(url);
+      if (!p) return;
+      pendingDocs.delete(url);
+      clearTimeout(p.timeout);
+      document.title = TITLE;
+      if (d.error) { p.reject(new Error(d.error)); return; }
+      const bytes = KioskDocx.base64ToBytes(d.data);
+      docCache.set(url, { mtime: p.mtime, bytes });
+      // Keep at most 10 documents' bytes around.
+      while (docCache.size > 10) docCache.delete(docCache.keys().next().value);
+      p.resolve(bytes);
     },
   };
 })();
