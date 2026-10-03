@@ -118,6 +118,16 @@ ask_yes_no() {
     local default="${2:-n}"
     local answer
 
+    # Unattended first-boot install (iso/ - KIOSK_UNATTENDED=1 in
+    # /etc/kiosk-firstboot.conf): nobody is at the keyboard, so take the
+    # default every prompt already offers and echo it so the log still
+    # shows what was decided.
+    if [[ "${KIOSK_UNATTENDED:-0}" == "1" ]]; then
+        echo "$prompt (y/n) [$default]: $default (unattended)"
+        validate_yes_no "$default"
+        return
+    fi
+
     while true; do
         read -r -p "$prompt (y/n) [$default]: " answer
         answer="${answer:-$default}"

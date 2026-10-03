@@ -268,7 +268,11 @@ provision_configure_kiosk_settings() {
     echo "password protection, WiFi, and schedules. Skip and configure"
     echo "later via ./install.sh if you'd rather do this after reboot."
     echo
-    if ask_yes_no "Configure Core Settings now?" "y"; then
+    if [[ "${KIOSK_UNATTENDED:-0}" == "1" ]]; then
+        # The menu itself is interactive - no default to take. Sites etc
+        # are set afterwards via the Web UI or ./install.sh instead.
+        log_info "Unattended install - skipping Core Settings (configure later via the Web UI or ./install.sh)"
+    elif ask_yes_no "Configure Core Settings now?" "y"; then
         core_settings_menu
     fi
 
@@ -297,6 +301,13 @@ provision_finish() {
     echo "(CUPS, LMS/Squeezelite, Remote Access, Authelia, Asterisk Intercom),"
     echo "or Advanced options."
     echo
+    # Lets a caller (iso/firstboot/kiosk-firstboot) tell a finished
+    # install apart from an interrupted one - is_kiosk_installed is
+    # already true from step 4 on, and the reboot below can kill the
+    # caller before it sees this function return.
+    if [[ -n "${KIOSK_PROVISION_DONE_MARKER:-}" ]]; then
+        sudo install -D -m 644 /dev/null "$KIOSK_PROVISION_DONE_MARKER"
+    fi
     if ask_yes_no "Reboot now to start the kiosk?" "y"; then
         echo "Rebooting in 3 seconds..."
         sleep 3

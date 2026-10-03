@@ -1,0 +1,121 @@
+# Builds the all-in-one Ubuntu Server 26.04 + kiosk install ISO
+# (iso/build-iso.sh) on demand: Actions tab -> "Build kiosk ISO" ->
+# Run workflow. The ISO (~2.8 GB) is attached to the run as a downloadable
+# artifact for a few days - see the run's Summary page.
+#
+# Pre-setting the admin account (needed for "fully-automatic") uses the
+# repository secret KIOSK_ADMIN_PASSWORD (Settings -> Secrets and
+# variables -> Actions) - never a workflow input, since inputs are shown
+# in the run log. Only a SHA-512 hash of it goes on the ISO, but anyone
+# who downloads the ISO can read that hash, so treat the artifact as
+# private and use a password you'll change after install.
+name: Build kiosk ISO
+
+on:
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: >-
+          interactive: installer asks network/disk/user, kiosk install.sh
+          runs with prompts on first boot. unattended-kiosk: same installer,
+          kiosk installs with defaults and reboots into the kiosk.
+          fully-automatic: no questions at all - WIPES THE LARGEST DISK
+          (needs username + KIOSK_ADMIN_PASSWORD secret).
+        type: choice
+        default: interactive
+        options:
+          - interactive
+          - unattended-kiosk
+          - fully-automatic
+      username:
+        description: Admin username to pre-set (blank = asked during install). Needs the KIOSK_ADMIN_PASSWORD secret. Not "kiosk"/"admin".
+        type: string
+        default: ""
+      hostname:
+        description: Hostname (only used when username is set)
+        type: string
+        default: kiosk
+      ssh_public_key:
+        description: Optional SSH public key for the admin user (ssh-ed25519 AAAA...)
+        type: string
+        default: ""
+      retention_days:
+        description: Days to keep the ISO artifact
+        type: number
+        default: 3
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install build tools
+        run: |
+          sudo apt-get update -q
+          sudo apt-get install -y -q xorriso
+
+      - name: Build ISO
+        env:
+          MODE: ${{ inputs.mode }}
+          ADMIN_USERNAME: ${{ inputs.username }}
+          ADMIN_HOSTNAME: ${{ inputs.hostname }}
+          SSH_PUBLIC_KEY: ${{ inputs.ssh_public_key }}
+          KIOSK_ADMIN_PASSWORD: ${{ secrets.KIOSK_ADMIN_PASSWORD }}
+        run: |
+          mkdir -p "$RUNNER_TEMP/iso"
+          args=(--output "$RUNNER_TEMP/iso/ubuntu-kiosk-amd64.iso")
+          case "$MODE" in
+            unattended-kiosk) args+=(--unattended) ;;
+            fully-automatic) args+=(--fully-automatic) ;;
+          esac
+          if [[ -n "$ADMIN_USERNAME" ]]; then
+            if [[ -z "$KIOSK_ADMIN_PASSWORD" ]]; then
+              echo "::error::username given but the KIOSK_ADMIN_PASSWORD repository secret isn't set"
+              exit 1
+            fi
+            args+=(--username "$ADMIN_USERNAME" --hostname "$ADMIN_HOSTNAME")
+          fi
+          if [[ -n "$SSH_PUBLIC_KEY" ]]; then
+            printf '%s\n' "$SSH_PUBLIC_KEY" > "$RUNNER_TEMP/ssh_key.pub"
+            args+=(--ssh-key "$RUNNER_TEMP/ssh_key.pub")
+          fi
+          iso/build-iso.sh "${args[@]}"
+          # Name the file after the Ubuntu point release the script picked.
+          src="$(find iso/build/cache -name "*.iso" -print -quit)"
+          name="$(basename "$src" .iso | sed 's/-live-server/-kiosk/')-${MODE}-${GITHUB_SHA::7}.iso"
+          mv "$RUNNER_TEMP/iso/ubuntu-kiosk-amd64.iso" "$RUNNER_TEMP/iso/$name"
+          # Free the ~3 GB source ISO before the upload step needs scratch space.
+          rm -rf iso/build/cache
+          (cd "$RUNNER_TEMP/iso" && sha256sum "$name" > "$name.sha256")
+          echo "ISO_NAME=$name" >> "$GITHUB_ENV"
+          {
+            echo "### $name"
+            echo
+            echo "- Mode: \`$MODE\`"
+            echo "- Admin user: ${ADMIN_USERNAME:-chosen during install}"
+            echo "- Built from: \`${GITHUB_REF_NAME}\` @ \`${GITHUB_SHA::7}\`"
+            echo "- SHA-256: \`$(cut -d' ' -f1 "$RUNNER_TEMP/iso/$name.sha256")\`"
+            echo
+            echo "Download it from **Artifacts** below (GitHub zips it; unzip, then write the .iso to a USB stick)."
+            if [[ "$MODE" == "fully-automatic" ]]; then
+              echo
+              echo "> **Warning:** this ISO wipes the target machine's largest disk without asking."
+            fi
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload ISO
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ISO_NAME }}
+          path: |
+            ${{ runner.temp }}/iso/${{ env.ISO_NAME }}
+            ${{ runner.temp }}/iso/${{ env.ISO_NAME }}.sha256
+          # An ISO is already compressed - zipping it again only costs time.
+          compression-level: 0
+          retention-days: ${{ inputs.retention_days }}
+          if-no-files-found: error
