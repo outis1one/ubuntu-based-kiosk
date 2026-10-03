@@ -24,7 +24,9 @@
 # (menu title, plus the `autoinstall` kernel argument with --no-confirm);
 # boot records (BIOS + UEFI) are replayed from the original as-is.
 #
-# Requirements (on the build machine, any recent Ubuntu/Debian):
+# Requirements (on the build machine, any recent Ubuntu/Debian): the
+# script checks for its build tools and offers to install whatever's
+# missing with apt (or pass --install-deps to just do it). By hand:
 #   sudo apt install xorriso curl git openssl
 # plus, for --offline (amd64 build machine only):
 #   sudo apt install apt-utils python3 gnupg ubuntu-keyring
@@ -33,6 +35,7 @@
 #   iso/build-iso.sh [options]
 #
 #   --iso PATH            Use this Ubuntu Server ISO instead of downloading.
+#   --install-deps        Install missing build tools with apt without asking.
 #   --release VER         Ubuntu release to download (default: 26.04 - picks
 #                         the newest 26.04.x live-server-amd64 point release).
 #   --output PATH         Output ISO (default: iso/build/ubuntu-<ver>-kiosk-amd64.iso)
@@ -74,8 +77,8 @@
 #                         With internet it still installs online as usual;
 #                         offline it waits 90s, then uses the bundle. The
 #                         bundle stays on the kiosk at /opt/kiosk-offline
-#                         (see iso/firstboot/kiosk-offline-apt for using it
-#                         later, e.g. adding CUPS while offline).
+#                         - Addons -> CUPS Printing then installs from it too
+#                         whenever the kiosk is offline.
 #
 # The repo copied onto the ISO is a clone of this checkout's current HEAD
 # (committed changes only - uncommitted edits are NOT included).
@@ -103,6 +106,7 @@ AUTO_NETWORK=0
 NO_CONFIRM=0
 UNATTENDED=0
 OFFLINE=0
+INSTALL_DEPS=0
 REPO_URL=""
 
 # Usernames the Ubuntu installer rejects (system users/groups) - copied
@@ -149,6 +153,7 @@ while [[ $# -gt 0 ]]; do
         --fully-automatic) AUTO_STORAGE=1; AUTO_NETWORK=1; NO_CONFIRM=1; UNATTENDED=1; shift ;;
         --repo-url) REPO_URL="$2"; shift 2 ;;
         --offline) OFFLINE=1; shift ;;
+        --install-deps) INSTALL_DEPS=1; shift ;;
         -h|--help) usage 0 ;;
         *) echo "Unknown option: $1" >&2; usage 1 ;;
     esac
@@ -158,9 +163,34 @@ done
 # Validate
 ################################################################################
 
-for cmd in xorriso curl git openssl sha256sum; do
-    command -v "$cmd" &>/dev/null || die "'$cmd' not found - install it: sudo apt install xorriso curl git openssl"
+# Build tools: command -> the apt package that provides it.
+declare -A DEP_PKG=([xorriso]=xorriso [curl]=curl [git]=git [openssl]=openssl [sha256sum]=coreutils)
+if (( OFFLINE )); then
+    DEP_PKG+=([apt-ftparchive]=apt-utils [python3]=python3 [gpg]=gnupg [dpkg-deb]=dpkg)
+fi
+missing_pkgs=()
+for cmd in "${!DEP_PKG[@]}"; do
+    command -v "$cmd" &>/dev/null || missing_pkgs+=("${DEP_PKG[$cmd]}")
 done
+if (( OFFLINE )) && [[ ! -r /usr/share/keyrings/ubuntu-archive-keyring.gpg ]]; then
+    missing_pkgs+=(ubuntu-keyring)
+fi
+if (( ${#missing_pkgs[@]} )); then
+    mapfile -t missing_pkgs < <(printf '%s\n' "${missing_pkgs[@]}" | sort -u)
+    echo "Missing build tools: ${missing_pkgs[*]}"
+    command -v apt-get &>/dev/null \
+        || die "install them with your package manager and re-run (this script expects Ubuntu/Debian)"
+    if (( ! INSTALL_DEPS )); then
+        [[ -t 0 ]] || die "install them first: sudo apt install ${missing_pkgs[*]}   (or re-run with --install-deps)"
+        read -r -p "Install them now with 'sudo apt install'? [Y/n] " reply
+        [[ "${reply,,}" =~ ^(|y|yes)$ ]] || die "install them first: sudo apt install ${missing_pkgs[*]}"
+    fi
+    sudo apt-get update -q
+    sudo apt-get install -y "${missing_pkgs[@]}" || die "couldn't install: ${missing_pkgs[*]}"
+fi
+if (( OFFLINE )) && [[ "$(dpkg --print-architecture 2>/dev/null)" != "amd64" ]]; then
+    die "--offline must be built on an amd64 (64-bit Intel/AMD) machine - it runs the bundled Node.js to build the kiosk's modules"
+fi
 
 if [[ -n "$ADMIN_USER" ]]; then
     [[ "$ADMIN_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "invalid username: $ADMIN_USER"

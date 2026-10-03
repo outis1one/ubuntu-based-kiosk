@@ -8,10 +8,10 @@
 #
 # Installed by the custom ISO (iso/build-iso.sh); the bundle itself is
 # only there on ISOs built with --offline. kiosk-firstboot turns this on
-# by itself when first boot finds no internet, and back off afterwards.
-# By hand it's for installing things later with no internet - e.g. the
-# CUPS addon: `sudo kiosk-offline-apt on`, ./install.sh -> Addons -> CUPS,
-# then `sudo kiosk-offline-apt off`. While it's on, install.sh also
+# by itself when first boot finds no internet, and back off afterwards;
+# so does the CUPS addon install (lib/config.sh's
+# run_with_offline_fallback). By hand it's for installing anything else
+# from the bundle with no internet. While it's on, install.sh also
 # unpacks the bundle's prebuilt node_modules instead of running npm
 # (lib/config.sh's offline_mode_active checks for the file this writes).
 #

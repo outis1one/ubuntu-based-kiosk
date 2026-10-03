@@ -18,11 +18,23 @@ SITE_EDIT_IDX=""
 ################################################################################
 
 # Normalize whatever the user typed into a URL, same rules the old
-# installer used: bare host -> https://, bare IP -> http://.
+# installer used: bare host -> https://, bare IP -> http://. Plus local
+# files on the kiosk itself (pages, PDFs, images): an absolute path ->
+# file://, percent-encoded the same way webui/server.js's parseUrl does.
 sites_parse_url() {
     local raw="$1"
-    if [[ "$raw" =~ ^https?:// ]]; then
+    if [[ "$raw" =~ ^(https?|file):// ]]; then
         echo "$raw"
+    elif [[ "$raw" == /* ]]; then
+        local LC_ALL=C out="" c i
+        for (( i = 0; i < ${#raw}; i++ )); do
+            c="${raw:i:1}"
+            case "$c" in
+                [A-Za-z0-9._~/!\'\(\)*-]) out+="$c" ;;
+                *) out+="$(printf '%%%02X' "'$c")" ;;
+            esac
+        done
+        echo "file://$out"
     elif [[ "$raw" =~ ^[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+ ]]; then
         echo "http://${raw}"
     else

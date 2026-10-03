@@ -69,13 +69,16 @@ boot of the installed system it runs `./install.sh` automatically on the
 console.
 
 ```bash
-sudo apt install xorriso curl git openssl
 git clone https://github.com/outis1one/ubuntu-based-kiosk.git
 cd ubuntu-based-kiosk
 iso/build-iso.sh            # downloads + verifies the latest 26.04.x server ISO
 # -> iso/build/ubuntu-26.04.x-kiosk-amd64.iso
 sudo dd if=iso/build/ubuntu-26.04.*-kiosk-amd64.iso of=/dev/sdX bs=4M status=progress oflag=sync
 ```
+
+The script checks for its build tools (`xorriso`, `curl`, `git`, `openssl`)
+and offers to install any that are missing with `sudo apt install`. Pass
+`--install-deps` to install them without asking.
 
 By default the installer only asks for **network** (WiFi works here),
 **disk**, and your **admin username/password** — language, keyboard and the
@@ -100,8 +103,7 @@ Useful options (`iso/build-iso.sh --help` for all):
 ### Offline installs (`--offline`)
 
 ```bash
-sudo apt install apt-utils python3 gnupg ubuntu-keyring   # once, on top of the tools above
-iso/build-iso.sh --offline
+iso/build-iso.sh --offline   # also offers to install apt-utils, python3, gnupg, ubuntu-keyring
 # -> iso/build/ubuntu-26.04.x-kiosk-offline-amd64.iso (~3.2 GB)
 ```
 
@@ -114,14 +116,10 @@ This adds a ~420 MB bundle to the ISO:
 
 On first boot it still installs online when there's internet. With none,
 it waits 90 seconds and then installs entirely from the bundle. The bundle
-stays on the kiosk at `/opt/kiosk-offline`, so CUPS can be added later
-with no internet too:
-
-```bash
-sudo kiosk-offline-apt on      # apt uses the bundle only
-./install.sh                   # Addons -> CUPS Printing
-sudo kiosk-offline-apt off     # back to normal updates
-```
+stays on the kiosk at `/opt/kiosk-offline`, so **Addons → CUPS Printing**
+(in `./install.sh` or the Web UI) works with no internet too: when it can't
+reach the Ubuntu archive, it installs from the bundle by itself and then
+switches apt back to normal.
 
 Notes:
 - Build it on an **amd64** Ubuntu/Debian machine, or let the GitHub
@@ -195,6 +193,10 @@ The kiosk machine still needs a working internet connection (ethernet, or WiFi c
 - **Home URL** - Auto-return after inactivity on manual or hidden sites
 - **Pause functionality** - Temporarily pause rotation (configurable per-site)
 - **Navigation menu** - Quick access to all sites via key icon (top-left hot corner)
+- **Local files** - Enter an absolute path (e.g. `/home/kiosk/docs/menu.pdf`)
+  instead of a web address and it's shown from the kiosk's own disk:
+  HTML pages, PDFs (built-in viewer), and images. Works offline. The file
+  must be readable by the `kiosk` user.
 
 ### Touch Controls
 - **2-finger horizontal swipe** - Switch between sites

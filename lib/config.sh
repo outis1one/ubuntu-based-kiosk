@@ -104,6 +104,36 @@ offline_install_node_modules() {
     sudo -u "$KIOSK_USER" tar -xzf "$tarball" -C "$dest"
 }
 
+# Quick reachability check for the package mirrors install.sh needs.
+have_internet() {
+    curl -fsS --max-time 8 -o /dev/null http://archive.ubuntu.com/ubuntu/ 2>/dev/null \
+        || curl -fsS --max-time 8 -o /dev/null https://deb.nodesource.com/ 2>/dev/null
+}
+
+# run_with_offline_fallback CMD [ARGS...]
+# Runs CMD normally - but on a kiosk installed from an --offline ISO with
+# no internet right now, first points apt at the bundle on this disk
+# (kiosk-offline-apt on) and switches it back afterwards, whatever CMD
+# returns. Lets apt-based installs (e.g. the CUPS addon) work from the
+# normal menus and the Web UI with no extra steps. Everywhere else
+# (manual installs, or online) it just runs CMD.
+run_with_offline_fallback() {
+    local restore=0 rc=0
+    if ! offline_mode_active && [[ -f "$KIOSK_OFFLINE_DIR/apt/Packages" ]] && ! have_internet; then
+        log_info "No internet - installing from the offline bundle on this disk ($(sed -n 's/^Built: *//p' "$KIOSK_OFFLINE_DIR/bundle-info.txt" 2>/dev/null))"
+        if sudo kiosk-offline-apt on >/dev/null; then
+            restore=1
+        else
+            log_warning "Couldn't switch apt to the offline bundle - trying normally"
+        fi
+    fi
+    "$@" || rc=$?
+    if (( restore )); then
+        sudo kiosk-offline-apt off >/dev/null || true
+    fi
+    return "$rc"
+}
+
 kiosk_user_exists() {
     id "$KIOSK_USER" &>/dev/null
 }
