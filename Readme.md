@@ -159,7 +159,7 @@ Notes:
 
 If the kiosk machine can't reach GitHub directly (no browser, restrictive proxy, or you just prefer to grab the script on another computer and carry it over via USB), download it ahead of time instead of using the `curl`/`wget` one-liner above.
 
-> **Note:** This only avoids needing internet access *to fetch the script*. For a truly offline install, use the [All-in-One Install ISO](#all-in-one-install-iso-ubuntu-server-2604--kiosk) built with `--offline` instead. The installer itself still requires the kiosk machine to have internet access while it runs — it uses `apt` to install packages, pulls Node.js from NodeSource, and runs `npm install` to fetch Electron (~120MB). There is currently no fully air-gapped/offline package bundle.
+> **Note:** This only avoids needing internet access *to fetch the script*. The installer itself still requires the kiosk machine to have internet access while it runs — it uses `apt` to install packages, pulls Node.js from NodeSource, and runs `npm install` to fetch Electron (~120MB). There is currently no fully air-gapped/offline package bundle. For a truly offline install, use the [All-in-One Install ISO](#all-in-one-install-iso-ubuntu-server-2604--kiosk) built with `--offline` instead.
 
 **On a machine with internet access:**
 
