@@ -90,6 +90,23 @@ NO_CONFIRM=0
 UNATTENDED=0
 REPO_URL=""
 
+# Usernames the Ubuntu installer rejects (system users/groups) - copied
+# from subiquity's reserved-usernames so a bad --username fails here
+# instead of at boot with "Username is reserved by the system".
+RESERVED_USERNAMES="
+    root daemon bin sys sync games man lp mail news uucp proxy www-data
+    backup list irc gnats nobody adm tty disk kmem dialout fax voice cdrom
+    floppy tape sudo audio dip operator src shadow utmp video sasl plugdev
+    staff users nogroup netplan ftn mysql tac-plus alias qmail qmaild
+    qmails qmailr qmailq qmaill qmailp asterisk vpopmail vchkpw slurm
+    hacluster haclient grsec-tpe grsec-sock-all grsec-sock-clt
+    grsec-sock-srv grsec-proc ceph opensrf libvirt-qemu admin Debian-exim
+    bind crontab cupsys dcc dhcp dictd dnsmasq dovecot fetchmail firebird
+    ftp fuse gdm haldaemon hplilp identd input jwhois klog kvm lpadmin maas
+    messagebus mythtv netdev powerdev radvd render saned sbuild scanner sgx
+    slocate ssh sshd ssl-cert sslwrap statd syslog telnetd tftpd
+"
+
 die() { echo "ERROR: $*" >&2; exit 1; }
 info() { echo "==> $*"; }
 
@@ -133,6 +150,8 @@ if [[ -n "$ADMIN_USER" ]]; then
     [[ "$ADMIN_USER" =~ ^[a-z_][a-z0-9_-]{0,31}$ ]] || die "invalid username: $ADMIN_USER"
     [[ "$ADMIN_USER" != "kiosk" && "$ADMIN_USER" != "root" ]] \
         || die "username '$ADMIN_USER' is reserved (install.sh creates its own 'kiosk' user)"
+    [[ " $(echo $RESERVED_USERNAMES) " != *" $ADMIN_USER "* ]] \
+        || die "username '$ADMIN_USER' is reserved by Ubuntu (a system user/group) - pick another"
     if [[ -z "$ADMIN_PASS" ]]; then
         read -r -s -p "Password for $ADMIN_USER: " ADMIN_PASS; echo
         read -r -s -p "Confirm password: " pass2; echo
