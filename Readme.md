@@ -96,6 +96,14 @@ Useful options (`iso/build-iso.sh --help` for all):
 | `--fully-automatic` | All of the above (needs `--username`): boot it and walk away. **Wipes a disk with no questions — label the USB stick.** |
 | `--iso PATH` | Use an ISO you already have instead of downloading. |
 
+**No Linux machine handy?** Build it on GitHub instead: **Actions → Build
+kiosk ISO → Run workflow**, pick a mode, and download the ISO from the run's
+**Artifacts** once it finishes (about 10 minutes; kept for 3 days by default).
+To pre-set the admin account (required for `fully-automatic`), first add a
+repository secret named `KIOSK_ADMIN_PASSWORD` (Settings → Secrets and
+variables → Actions). Passwords are never typed into the workflow form,
+because its inputs show up in the run log.
+
 Notes:
 - The ISO carries a copy of this checkout's current commit (uncommitted
   changes are not included).

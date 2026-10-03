@@ -40,7 +40,10 @@
 #                         ./install.sh as - must not be "kiosk"). Giving this
 #                         makes the installer's identity screen automatic.
 #   --password PASS       Admin password (prompted for if --username is given
-#                         without it). Stored only as a SHA-512 crypt hash.
+#                         without it, or read from $KIOSK_ADMIN_PASSWORD -
+#                         better than this flag on shared machines/CI, where
+#                         command lines are visible). Stored on the ISO only
+#                         as a SHA-512 crypt hash.
 #   --hostname NAME       Hostname (default: kiosk).
 #   --realname NAME       Full name for the admin account (default: Kiosk Admin).
 #   --ssh-key FILE        Add this public key file to the admin user's
@@ -78,7 +81,7 @@ SRC_ISO=""
 RELEASE="26.04"
 OUTPUT=""
 ADMIN_USER=""
-ADMIN_PASS=""
+ADMIN_PASS="${KIOSK_ADMIN_PASSWORD:-}"
 HOSTNAME_="kiosk"
 REALNAME="Kiosk Admin"
 SSH_KEY_FILE=""
@@ -153,6 +156,7 @@ if [[ -n "$ADMIN_USER" ]]; then
     [[ " $(echo $RESERVED_USERNAMES) " != *" $ADMIN_USER "* ]] \
         || die "username '$ADMIN_USER' is reserved by Ubuntu (a system user/group) - pick another"
     if [[ -z "$ADMIN_PASS" ]]; then
+        [[ -t 0 ]] || die "--username needs a password: pass --password or set KIOSK_ADMIN_PASSWORD"
         read -r -s -p "Password for $ADMIN_USER: " ADMIN_PASS; echo
         read -r -s -p "Confirm password: " pass2; echo
         [[ "$ADMIN_PASS" == "$pass2" ]] || die "passwords don't match"
@@ -216,15 +220,27 @@ fi
 # Stage the repo + first-boot files that go on the ISO under /kiosk
 ################################################################################
 
-info "Staging repo ($(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD) @ $(git -C "$REPO_ROOT" rev-parse --short HEAD))..."
+# Branch the copied repo is on - what Advanced -> Upgrade pulls. CI
+# checkouts (actions/checkout) are a detached HEAD, so fall back to the
+# branch CI says it built, then main.
+BRANCH="$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD)"
+[[ "$BRANCH" != "HEAD" ]] || BRANCH="${GITHUB_REF_NAME:-main}"
+COMMIT="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+
+info "Staging repo ($BRANCH @ ${COMMIT:0:7})..."
 if [[ -n "$(git -C "$REPO_ROOT" status --porcelain)" ]]; then
     echo "    WARNING: uncommitted changes in $REPO_ROOT are NOT included - commit them first if you need them."
 fi
 mkdir -p "$WORK/kiosk/firstboot"
-git clone --quiet --depth 1 --no-local \
-    --branch "$(git -C "$REPO_ROOT" rev-parse --abbrev-ref HEAD)" \
-    "file://$REPO_ROOT" "$WORK/kiosk/ubuntu-based-kiosk"
-git -C "$WORK/kiosk/ubuntu-based-kiosk" remote set-url origin "$REPO_URL"
+# init + fetch by commit rather than `git clone --branch`, which can't
+# clone a detached HEAD.
+stage_repo="$WORK/kiosk/ubuntu-based-kiosk"
+git init --quiet "$stage_repo"
+git -C "$stage_repo" fetch --quiet --depth 1 "file://$REPO_ROOT" "$COMMIT"
+git -C "$stage_repo" checkout --quiet -B "$BRANCH" FETCH_HEAD
+git -C "$stage_repo" remote add origin "$REPO_URL"
+git -C "$stage_repo" config "branch.$BRANCH.remote" origin
+git -C "$stage_repo" config "branch.$BRANCH.merge" "refs/heads/$BRANCH"
 
 install -m 755 "$SCRIPT_DIR/firstboot/kiosk-firstboot" "$WORK/kiosk/firstboot/"
 install -m 644 "$SCRIPT_DIR/firstboot/kiosk-firstboot.service" "$WORK/kiosk/firstboot/"
