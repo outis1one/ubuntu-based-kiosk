@@ -1,0 +1,33 @@
+# Installed by the custom ISO (iso/build-iso.sh) and enabled from its
+# autoinstall late-commands. Runs install.sh once, on tty1, the first
+# time the freshly installed system boots - takes tty1 over from getty
+# so an interactive install has a keyboard and screen, then hands tty1
+# back. /var/lib/kiosk-firstboot/pending is removed once the install
+# finishes, so this is a no-op on every boot after that; an interrupted
+# or failed install leaves it in place and simply runs again next boot.
+[Unit]
+Description=Ubuntu Based Kiosk first-boot install
+After=network-online.target systemd-user-sessions.service cloud-final.service plymouth-quit-wait.service
+Wants=network-online.target
+Before=getty@tty1.service
+Conflicts=getty@tty1.service
+ConditionPathExists=/var/lib/kiosk-firstboot/pending
+
+[Service]
+Type=oneshot
+ExecStart=/usr/local/sbin/kiosk-firstboot
+# Belt and braces for the temporary sudoers/apt drop-ins when install.sh
+# reboots out from under the script (its own EXIT trap normally does this).
+ExecStopPost=/usr/local/sbin/kiosk-firstboot --cleanup
+StandardInput=tty-force
+StandardOutput=tty
+StandardError=tty
+TTYPath=/dev/tty1
+TTYReset=yes
+TTYVHangup=yes
+TimeoutStartSec=infinity
+TimeoutStopSec=30
+KillMode=mixed
+
+[Install]
+WantedBy=multi-user.target

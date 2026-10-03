@@ -61,6 +61,53 @@ The installer will guide you through configuration during setup.
 
 ---
 
+## All-in-One Install ISO (Ubuntu Server 26.04 + Kiosk)
+
+Instead of installing Ubuntu Server and then running the script, build a
+single ISO that does both: it installs Ubuntu Server 26.04, and on the first
+boot of the installed system it runs `./install.sh` automatically on the
+console.
+
+```bash
+sudo apt install xorriso curl git openssl
+git clone https://github.com/outis1one/ubuntu-based-kiosk.git
+cd ubuntu-based-kiosk
+iso/build-iso.sh            # downloads + verifies the latest 26.04.x server ISO
+# -> iso/build/ubuntu-26.04.x-kiosk-amd64.iso
+sudo dd if=iso/build/ubuntu-26.04.*-kiosk-amd64.iso of=/dev/sdX bs=4M status=progress oflag=sync
+```
+
+By default the installer only asks for **network** (WiFi works here),
+**disk**, and your **admin username/password** — language, keyboard and the
+SSH server are answered for you. On first boot, `install.sh` runs
+interactively on the screen, exactly like a manual install. The repo ends up
+at `~/ubuntu-based-kiosk` for the admin user, so `./install.sh` and
+Advanced → Upgrade work afterwards as usual.
+
+Useful options (`iso/build-iso.sh --help` for all):
+
+| Option | Effect |
+|---|---|
+| `--unattended` | First-boot install takes every default with no prompts (skips the Core Settings menu) and reboots into the kiosk. Set sites afterwards in the Web UI (`http://<ip>:8090`) or `./install.sh`. |
+| `--username NAME [--password PASS]` | Pre-set the admin account (password is prompted for if omitted; only a hash goes on the ISO). Not `kiosk`. |
+| `--hostname`, `--ssh-key FILE`, `--locale`, `--keyboard` | Pre-set those. |
+| `--auto-network` / `--auto-storage` | Skip the network screen (DHCP on ethernet) / wipe the largest disk without asking. |
+| `--no-confirm` | Skip the "Continue with autoinstall?" prompt at boot. |
+| `--fully-automatic` | All of the above (needs `--username`): boot it and walk away. **Wipes a disk with no questions — label the USB stick.** |
+| `--iso PATH` | Use an ISO you already have instead of downloading. |
+
+Notes:
+- The ISO carries a copy of this checkout's current commit (uncommitted
+  changes are not included).
+- The kiosk machine still needs internet on first boot (packages, Node.js,
+  Electron). If there's none, the console waits for it and offers a shell to
+  fix networking (`/etc/netplan/*.yaml`, then `sudo netplan apply`).
+- A failed or interrupted first-boot install runs again on the next boot, or
+  now with `sudo systemctl start kiosk-firstboot`. Its log is
+  `/var/lib/kiosk-firstboot/install.log`.
+
+---
+
 ## Offline / Air-Gapped Download
 
 If the kiosk machine can't reach GitHub directly (no browser, restrictive proxy, or you just prefer to grab the script on another computer and carry it over via USB), download it ahead of time instead of using the `curl`/`wget` one-liner above.

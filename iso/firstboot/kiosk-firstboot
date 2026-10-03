@@ -1,0 +1,226 @@
+#!/bin/bash
+################################################################################
+# kiosk-firstboot - runs ubuntu-based-kiosk's ./install.sh on the first
+# boot of a system installed from the custom ISO (iso/build-iso.sh).
+#
+# install.sh refuses to run as root and expects a regular sudo user, so
+# this runs it as the admin account the Ubuntu installer created (the
+# first regular user, uid 1000), from a copy of the repo in that user's
+# home - the same layout as a manual `git clone && ./install.sh`, so
+# re-running ./install.sh later and Advanced -> Upgrade both work as
+# usual afterwards.
+#
+# For the duration of the install only, that user gets passwordless sudo
+# (nobody has typed a password yet, and in unattended mode nobody will);
+# the drop-in is removed on every exit path, including the reboot at the
+# end of install.sh (see ExecStopPost in kiosk-firstboot.service).
+#
+# Settings come from /etc/kiosk-firstboot.conf, written at ISO build time:
+#   KIOSK_UNATTENDED=1   take every prompt's default, skip the Core
+#                        Settings menu, reboot into the kiosk when done.
+#   KIOSK_UNATTENDED=0   (default) normal interactive install.sh on tty1.
+################################################################################
+
+set -uo pipefail
+
+CONF=/etc/kiosk-firstboot.conf
+STATE_DIR=/var/lib/kiosk-firstboot
+PENDING="$STATE_DIR/pending"
+DONE_MARKER="$STATE_DIR/done"
+SUDOERS_DROPIN=/etc/sudoers.d/90-kiosk-firstboot
+APT_DROPIN=/etc/apt/apt.conf.d/90-kiosk-firstboot
+REPO_SRC=/opt/ubuntu-based-kiosk
+LOG="$STATE_DIR/install.log"
+
+KIOSK_UNATTENDED=0
+# shellcheck source=/dev/null
+[[ -f "$CONF" ]] && source "$CONF"
+
+cleanup() {
+    rm -f "$SUDOERS_DROPIN" "$APT_DROPIN"
+    if [[ -f "$DONE_MARKER" ]]; then
+        rm -f "$PENDING"
+    fi
+}
+
+if [[ "${1:-}" == "--cleanup" ]]; then
+    cleanup
+    exit 0
+fi
+
+# Hand tty1 back to a normal login prompt (the unit Conflicts= with
+# getty@tty1 so it can own the console; systemd won't restart it alone).
+release_tty() {
+    systemctl --no-block start getty@tty1.service 2>/dev/null || true
+}
+
+trap cleanup EXIT
+trap 'exit 130' INT TERM HUP
+
+banner() {
+    clear
+    echo "════════════════════════════════════════════════════════════"
+    echo "   Ubuntu Based Kiosk - First Boot Setup"
+    echo "════════════════════════════════════════════════════════════"
+    echo
+}
+
+# Interactive-mode escape hatch when something needs a human: retry,
+# drop to a shell as the admin user to fix it, or give up until next boot.
+# Returns 0 to retry, 1 to give up.
+offer_retry() {
+    local choice
+    while true; do
+        echo
+        echo "  [R] Retry   [S] Shell (as $ADMIN_USER, exit to come back)   [Q] Quit to login prompt"
+        read -r -p "Choice [R]: " choice
+        case "${choice,,}" in
+            ""|r) return 0 ;;
+            s) runuser -l "$ADMIN_USER" ;;
+            q)
+                echo "Setup will run again on next boot, or run it now with:"
+                echo "  sudo systemctl start kiosk-firstboot"
+                return 1
+                ;;
+        esac
+    done
+}
+
+wait_for_internet() {
+    local waited=0
+    until curl -fsS --max-time 10 -o /dev/null https://deb.nodesource.com/ 2>/dev/null \
+       || curl -fsS --max-time 10 -o /dev/null http://archive.ubuntu.com/ubuntu/ 2>/dev/null; do
+        if (( waited == 0 )); then
+            echo "Waiting for an internet connection (needed for packages,"
+            echo "Node.js and Electron)..."
+        fi
+        sleep 10
+        waited=$((waited + 10))
+        if (( waited % 120 == 0 )); then
+            echo "Still no internet after ${waited}s. Network status:"
+            networkctl list --no-pager 2>/dev/null || ip -brief addr
+            if [[ "$KIOSK_UNATTENDED" != "1" ]]; then
+                echo "WiFi or static IP? Use the Shell option and edit /etc/netplan/*.yaml, then 'sudo netplan apply'."
+                offer_retry || return 1
+            fi
+        fi
+    done
+    echo "Internet connection OK."
+}
+
+################################################################################
+
+# Keep kernel/systemd chatter off the screen the installer is drawing on.
+dmesg -n 1 2>/dev/null || true
+chvt 1 2>/dev/null || true
+export TERM=linux
+
+ADMIN_USER="$(getent passwd 1000 | cut -d: -f1)"
+banner
+if [[ -z "$ADMIN_USER" ]]; then
+    echo "ERROR: no regular user (uid 1000) found - can't run install.sh."
+    echo "Create one, then: sudo systemctl start kiosk-firstboot"
+    release_tty
+    exit 1
+fi
+if [[ "$ADMIN_USER" == "kiosk" ]]; then
+    echo "ERROR: the admin account is named 'kiosk', which install.sh reserves"
+    echo "for the kiosk's own restricted user. Reinstall with a different username."
+    release_tty
+    exit 1
+fi
+ADMIN_HOME="$(getent passwd "$ADMIN_USER" | cut -d: -f6)"
+REPO_DEST="$ADMIN_HOME/ubuntu-based-kiosk"
+
+if [[ ! -d "$REPO_DEST" ]]; then
+    cp -a "$REPO_SRC" "$REPO_DEST"
+    chmod -R u+w "$REPO_DEST"
+    chown -R "$ADMIN_USER:$ADMIN_USER" "$REPO_DEST"
+fi
+
+echo "Admin user : $ADMIN_USER"
+echo "Installer  : $REPO_DEST/install.sh"
+echo "Mode       : $([[ "$KIOSK_UNATTENDED" == "1" ]] && echo "unattended (defaults, reboots when done)" || echo "interactive")"
+echo "Log        : $LOG"
+echo
+
+# cloud-init and the first apt/unattended-upgrades run on a fresh system
+# both want the dpkg lock; let them finish rather than racing them.
+if command -v cloud-init &>/dev/null; then
+    echo "Waiting for cloud-init to finish..."
+    cloud-init status --wait >/dev/null 2>&1 || true
+fi
+mkdir -p "$STATE_DIR"
+printf 'DPkg::Lock::Timeout "900";\n' > "$APT_DROPIN"
+
+wait_for_internet || { release_tty; exit 1; }
+
+# install.sh's own preflight needs jq; Advanced -> Upgrade needs git.
+echo "Installing installer prerequisites (jq, git)..."
+DEBIAN_FRONTEND=noninteractive apt-get update -q >/dev/null
+DEBIAN_FRONTEND=noninteractive apt-get install -y -q jq git curl >/dev/null
+
+cat > "$SUDOERS_DROPIN".tmp <<SUDOERS
+# Temporary - removed by /usr/local/sbin/kiosk-firstboot when it exits.
+$ADMIN_USER ALL=(ALL) NOPASSWD: ALL
+Defaults:$ADMIN_USER env_keep += "DEBIAN_FRONTEND"
+SUDOERS
+chmod 440 "$SUDOERS_DROPIN".tmp
+if ! visudo -cf "$SUDOERS_DROPIN".tmp >/dev/null; then
+    rm -f "$SUDOERS_DROPIN".tmp
+    echo "ERROR: generated sudoers drop-in failed validation."
+    release_tty
+    exit 1
+fi
+mv "$SUDOERS_DROPIN".tmp "$SUDOERS_DROPIN"
+
+run_install() {
+    local -a envs=(
+        HOME="$ADMIN_HOME" USER="$ADMIN_USER" LOGNAME="$ADMIN_USER"
+        SHELL=/bin/bash TERM=linux LANG="${LANG:-C.UTF-8}"
+        PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
+        # config.sh would otherwise derive this from SUDO_USER/whoami.
+        BUILD_USER="$ADMIN_USER"
+        KIOSK_UNATTENDED="$KIOSK_UNATTENDED"
+        KIOSK_PROVISION_DONE_MARKER="$DONE_MARKER"
+    )
+    # Even interactively: stdout goes through tee, which debconf dialogs
+    # cannot draw on, and nothing install.sh installs needs a debconf answer.
+    envs+=(DEBIAN_FRONTEND=noninteractive)
+
+    # runuser rather than sudo -u: sudo would set SUDO_USER=root, which
+    # config.sh reads as "the admin running this tool".
+    runuser -u "$ADMIN_USER" -- env -i "${envs[@]}" \
+        bash -c 'cd "$1" && exec ./install.sh' _ "$REPO_DEST" \
+        2>&1 | tee -a "$LOG"
+    return "${PIPESTATUS[0]}"
+}
+
+attempt=1
+while true; do
+    run_install
+    rc=$?
+    if [[ -f "$DONE_MARKER" ]]; then
+        # Reached only when the final "Reboot now?" was declined.
+        echo
+        echo "Kiosk install complete. Reboot to start the kiosk: sudo reboot"
+        cleanup
+        release_tty
+        exit 0
+    fi
+
+    echo
+    echo "install.sh did not finish (exit code $rc). Full output: $LOG"
+    if [[ "$KIOSK_UNATTENDED" == "1" ]]; then
+        if (( attempt >= 3 )); then
+            echo "Giving up after $attempt attempts; will try again next boot."
+            release_tty
+            exit 1
+        fi
+        attempt=$((attempt + 1))
+        echo "Retrying in 60 seconds (attempt $attempt of 3)..."
+        sleep 60
+    else
+        offer_retry || { release_tty; exit 1; }
+    fi
+done
