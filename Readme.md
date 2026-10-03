@@ -197,6 +197,14 @@ The kiosk machine still needs a working internet connection (ethernet, or WiFi c
   instead of a web address and it's shown from the kiosk's own disk:
   HTML pages, PDFs (built-in viewer), and images. Works offline. The file
   must be readable by the `kiosk` user.
+- **Image slideshow** - Enter a folder instead (e.g. `/home/kiosk/photos/`)
+  and its images (jpg, png, gif, webp, bmp, svg, avif) play full-screen in
+  file-name order with a crossfade, 10 seconds each. Images added to or
+  removed from the folder are picked up within a minute, no restart
+  needed. Optional `slideshow.json` in the folder:
+  `{"interval": 10, "shuffle": false, "fit": "contain", "transition": 1, "recursive": false}`
+  (`fit`: `contain` shows the whole image, `cover` fills the screen and
+  crops; `recursive` includes subfolders).
 
 ### Touch Controls
 - **2-finger horizontal swipe** - Switch between sites
@@ -396,7 +404,7 @@ Both can be used at the same time — they serve different purposes:
 ## What This Script Installs
 
 ### Core Components
-- **Electron** v42.x (Chromium-based app framework)
+- **Electron** v44.x (Chromium-based app framework)
 - **Node.js** v20.x with npm
 - **Openbox** - Lightweight window manager
 - **LightDM** - Display manager with autologin
@@ -1453,9 +1461,16 @@ full migration pass.
 
 ## Project Status & Future Plans
 
-**Current Version:** 2.17.0
+**Current Version:** 2.18.0
 
-**Recent Updates (v2.17.0):**
+**Recent Updates (v2.18.0):**
+- **All-in-one install ISO** (`iso/build-iso.sh`, or Actions → Build kiosk ISO): Ubuntu Server 26.04 plus the kiosk in one USB stick — the Ubuntu install, then `install.sh` automatically on first boot. Interactive, unattended, or fully automatic. See "All-in-One Install ISO" above.
+- **Offline installs** (`--offline`): the ISO carries every package (including CUPS printing and all printer drivers), Node.js 22, and prebuilt Electron/Web UI modules, so a kiosk installs with no internet. With internet it still installs current versions online. Addons → CUPS Printing (menu or Web UI) installs from the bundle by itself when offline.
+- **Local files as sites:** an absolute path (`/home/kiosk/docs/menu.pdf`) shows a local page, PDF or image; a folder (`/home/kiosk/photos/`) plays as a full-screen **image slideshow** that picks up added/removed images within a minute. Works in both the Sites menu and the Web UI.
+- **Electron upgrade:** v42.x → v44.x (42 leaves Electron's support window when 45 ships). Existing kiosks move to it via Advanced → Upgrade.
+- **Fix:** the CUPS menu could report an installed CUPS as "not installed" (`dpkg -l | grep -q` failing under `set -o pipefail`).
+
+**Previous (v2.17.0):**
 - **Web UI now installs by default** during first-time provisioning (fixed port 8090, no prompt) instead of being opt-in — the Addons menu entry still works standalone for reconfiguring the port or reinstalling it on a kiosk provisioned before this change.
 - **The web UI can now install/reconfigure CUPS Printing, LMS Server, Squeezelite Player, and Asterisk Intercom, and check for updates** — the same four addons plus Update named directly. Every one of these is the exact same interactive `action_*` function the terminal menu already uses (no prompt/mutation refactor of any addon file), driven by piping the right answers on stdin — the same technique this project's own bash tests already use to drive these functions.
 - **Privilege model:** the web service itself still runs as `$KIOSK_USER` with zero ambient `sudo`. A new narrow, allow-listed root helper is the only way it ever gains privilege — reachable only via a single-path passwordless sudo rule (generated and validated with `visudo -c -f` before being installed), and it re-checks its own fixed action allow-list before dispatching anything. Chosen over running the whole service as root after asking directly: since this repo has no login of its own by design, a request that reaches the web UI with no reverse proxy in front is effectively unauthenticated, so the allow-list bounds what that can actually do to five vetted actions, never a root shell.

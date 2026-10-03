@@ -136,6 +136,9 @@ action_add_page() {
     echo "    0  = manual only (swipe/nav menu to reach it)"
     echo "   -1  = hidden (PIN-gated, F10 or 3-finger swipe)"
     echo
+    echo "URL: a web address, or a path on this kiosk - a file (page, PDF,"
+    echo "image) like /home/kiosk/docs/menu.pdf, or a folder of images ending"
+    echo "in / like /home/kiosk/photos/ for a slideshow."
 
     local raw_url url dur name needs_auth user pass
     read -r -p "URL: " raw_url

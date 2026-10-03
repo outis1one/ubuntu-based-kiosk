@@ -185,7 +185,14 @@ build_modules() {
     # postinstall since ~v42) - lib/electron.sh runs this same install.js
     # on the target when online; offline it has to already be in dist/.
     if [[ -f "$tmp/node_modules/electron/install.js" ]]; then
-        (cd "$tmp" && node node_modules/electron/install.js) || die "Electron binary download failed"
+        # Retried: a large download cut off mid-stream crashes it outright.
+        local try
+        for try in 1 2 3; do
+            (cd "$tmp" && node node_modules/electron/install.js) && break
+            (( try < 3 )) || die "Electron binary download failed (3 attempts)"
+            info "Electron download failed - retrying ($((try + 1))/3)..."
+            sleep 5
+        done
     fi
     tar -czf "$OUT_DIR/npm/${name}-node_modules.tar.gz" --owner=0 --group=0 -C "$tmp" node_modules
     info "$name: $(du -sh "$tmp/node_modules" | cut -f1) -> $(du -h "$OUT_DIR/npm/${name}-node_modules.tar.gz" | cut -f1) compressed"
