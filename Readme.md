@@ -107,19 +107,21 @@ iso/build-iso.sh --offline   # also offers to install apt-utils, python3, gnupg,
 # -> iso/build/ubuntu-26.04.x-kiosk-offline-amd64.iso (~3.2 GB)
 ```
 
-This adds a ~420 MB bundle to the ISO:
-- Every Ubuntu package the kiosk install and the **CUPS printing addon**
-  need (all printer drivers included), with their dependencies, as a local
-  package repository.
+This adds a ~520 MB bundle to the ISO (~3.3 GB total):
+- Every Ubuntu package the kiosk install needs, plus the addons that make
+  sense on a network without internet: **CUPS printing** (all printer
+  drivers), **LMS (Lyrion) music server** and **Squeezelite** player,
+  **Asterisk Intercom**, **VNC**, **WireGuard** and the **Emergency
+  Hotspot** - with their dependencies, as a local package repository.
 - Node.js 22 (NodeSource).
 - Prebuilt Electron and Web UI modules.
 
 On first boot it still installs online when there's internet. With none,
 it waits 90 seconds and then installs entirely from the bundle. The bundle
-stays on the kiosk at `/opt/kiosk-offline`, so **Addons → CUPS Printing**
-(in `./install.sh` or the Web UI) works with no internet too: when it can't
-reach the Ubuntu archive, it installs from the bundle by itself and then
-switches apt back to normal.
+stays on the kiosk at `/opt/kiosk-offline`, so those addons install from
+the normal menus (`./install.sh` or the Web UI) with no internet too: when
+an install can't reach the Ubuntu archive, it uses the bundle by itself and
+then switches apt back to normal.
 
 Notes:
 - Build it on an **amd64** Ubuntu/Debian machine, or let the GitHub
@@ -128,8 +130,12 @@ Notes:
 - Bundled versions are whatever was current when the ISO was built.
   Once the kiosk is online, normal updates and Advanced → Upgrade bring it
   current.
-- Addons that download their own software (LMS/Squeezelite, Tailscale,
-  Netbird, Asterisk Intercom, VNC) still need internet.
+- Tailscale and Netbird aren't bundled: they install from their vendors'
+  scripts and only work with their vendors' servers on the internet.
+- On a network with no internet, set **Core Settings → Time Server (NTP)**
+  to a time server on your network (most routers can serve time), or set
+  the clock by hand there - otherwise the clock slowly drifts, and lockout
+  times, quiet hours and power schedules drift with it.
 - `sudo rm -rf /opt/kiosk-offline` frees the space if you don't need it.
 
 **No Linux machine handy?** Build it on GitHub instead: **Actions → Build
@@ -1105,6 +1111,12 @@ Automatically creates a WiFi access point when internet connectivity is lost.
 - Optional configuration with custom SSID and password
 - Can be deferred and configured later
 
+**What counts as "cut off"** (chosen when you set it up; `./install.sh`
+version): by default, *the local network itself* is unreachable - neither
+the router nor the internet answers - so a kiosk on a network without
+internet doesn't start the hotspot on every boot. "No internet" (the old
+check) and "a specific address doesn't answer" are options too.
+
 **How It Works:**
 1. Service monitors internet connectivity every 30 seconds
 2. When internet is lost, automatically:
@@ -1477,6 +1489,9 @@ full migration pass.
 - **All-in-one install ISO** (`iso/build-iso.sh`, or Actions → Build kiosk ISO): Ubuntu Server 26.04 plus the kiosk in one USB stick — the Ubuntu install, then `install.sh` automatically on first boot. Interactive, unattended, or fully automatic. See "All-in-One Install ISO" above.
 - **Offline installs** (`--offline`): the ISO carries every package (including CUPS printing and all printer drivers), Node.js 22, and prebuilt Electron/Web UI modules, so a kiosk installs with no internet. With internet it still installs current versions online. Addons → CUPS Printing (menu or Web UI) installs from the bundle by itself when offline.
 - **Local files as sites:** an absolute path (`/home/kiosk/docs/menu.pdf`) shows a local page, PDF or image; a folder (`/home/kiosk/photos/`) plays as a full-screen **image slideshow** that picks up added/removed images within a minute. Works in both the Sites menu and the Web UI.
+- **Offline addons:** the `--offline` bundle now also carries LMS (Lyrion) + Squeezelite, Asterisk Intercom, VNC, WireGuard and the Emergency Hotspot; their normal installs use it automatically when there's no internet.
+- **Emergency Hotspot fix:** by default it now starts only when the local network is unreachable (router *and* internet), not merely when there's no internet - on a LAN without internet it used to start on every boot. Existing setups keep the old check until Advanced → Emergency Hotspot → Reconfigure.
+- **New: Core Settings → Time Server (NTP)** - use a time server on your network, go back to Ubuntu's, or set the clock by hand; for networks without internet.
 - **Word documents as sites:** a `.docx` path renders in the kiosk via docx-preview (~1 MB of JavaScript, bundled offline), updating when the file changes. Slideshow folders can mix `.docx` documents and PDFs (rendered with pdf.js) in with images.
 - **Electron upgrade:** v42.x → v44.x (42 leaves Electron's support window when 45 ships). Existing kiosks move to it via Advanced → Upgrade.
 - **Fix:** the CUPS menu could report an installed CUPS as "not installed" (`dpkg -l | grep -q` failing under `set -o pipefail`).

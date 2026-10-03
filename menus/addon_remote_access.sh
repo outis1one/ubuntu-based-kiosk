@@ -24,6 +24,12 @@
 # Depends on: lib/menu.sh, lib/config.sh being sourced first.
 ################################################################################
 
+# Also read by iso/offline/build-bundle.sh to bundle them for offline
+# installs. (Tailscale/Netbird aren't bundled: they install from their
+# vendors' scripts and need their vendors' servers to work anyway.)
+VNC_APT_PACKAGES=(x11vnc)
+WIREGUARD_APT_PACKAGES=(wireguard wireguard-tools)
+
 remote_access_status() {
     echo "VNC:       $(is_service_active x11vnc && echo "running" || echo "not installed")"
     echo "WireGuard: $(wireguard_connected && echo "connected" || (command -v wg &>/dev/null && echo "installed, not connected" || echo "not installed"))"
@@ -70,7 +76,7 @@ action_vnc_install() {
     echo
     ask_yes_no "Install x11vnc?" "n" || { echo "Cancelled"; return; }
 
-    if ! sudo apt install -y x11vnc; then
+    if ! run_with_offline_fallback sudo apt install -y "${VNC_APT_PACKAGES[@]}"; then
         log_error "x11vnc installation failed"
         return 1
     fi
@@ -182,7 +188,7 @@ action_wireguard_install() {
     echo
     ask_yes_no "Install WireGuard?" "n" || { echo "Cancelled"; return; }
 
-    if ! sudo apt install -y wireguard wireguard-tools; then
+    if ! run_with_offline_fallback sudo apt install -y "${WIREGUARD_APT_PACKAGES[@]}"; then
         log_error "WireGuard installation failed"
         return 1
     fi

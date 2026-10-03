@@ -70,8 +70,9 @@
 #   --repo-url URL        git remote recorded in the copied repo, used by
 #                         Advanced -> Upgrade (default: this checkout's
 #                         origin, else the upstream GitHub repo).
-#   --offline             Also bundle everything install.sh downloads (~420 MB:
-#                         every apt package incl. the CUPS printing addon,
+#   --offline             Also bundle everything install.sh downloads (~520 MB:
+#                         every apt package incl. the CUPS, LMS/Squeezelite,
+#                         Asterisk Intercom, VNC, WireGuard and hotspot addons,
 #                         Node.js, prebuilt Electron/Web UI node_modules), so
 #                         first boot can install the kiosk with NO internet.
 #                         With internet it still installs online as usual;

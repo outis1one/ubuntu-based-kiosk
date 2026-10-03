@@ -24,7 +24,8 @@
 #
 # Migrated so far, grouped the same way the legacy menu groups them:
 #   Core Settings: Sites & Page Timing, Display & Interaction, Timezone,
-#     Hidden Site PIN, Password Protection & Lockout, WiFi,
+#     Time Server (NTP - menus/time_sync.sh, a LAN time server or manual
+#     clock for networks without internet), Hidden Site PIN, Password Protection & Lockout, WiFi,
 #     Power/Display/Quiet Hours, Complete Uninstall
 #     (menus/complete_uninstall.sh - composed from every addon's own
 #     uninstall helper rather than re-implementing removal a second time).
@@ -72,6 +73,8 @@ source "$SCRIPT_DIR/menus/sites.sh"
 source "$SCRIPT_DIR/menus/display.sh"
 # shellcheck source=menus/timezone.sh
 source "$SCRIPT_DIR/menus/timezone.sh"
+# shellcheck source=menus/time_sync.sh
+source "$SCRIPT_DIR/menus/time_sync.sh"
 # shellcheck source=menus/hidden_pin.sh
 source "$SCRIPT_DIR/menus/hidden_pin.sh"
 # shellcheck source=menus/lockout.sh
@@ -151,6 +154,7 @@ core_settings_menu_builder() {
         "Sites & Page Timing"
         "Display & Interaction"
         "Timezone"
+        "Time Server (NTP)"
         "Hidden Site PIN"
         "Password Protection & Lockout"
         "WiFi"
@@ -161,6 +165,7 @@ core_settings_menu_builder() {
         sites_menu
         display_menu
         timezone_menu
+        time_sync_menu
         hidden_pin_menu
         lockout_menu
         wifi_menu

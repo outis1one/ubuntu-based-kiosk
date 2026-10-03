@@ -36,6 +36,9 @@
 ################################################################################
 
 BARESIP_CONFIG_DIR="${KIOSK_HOME}/.baresip"
+# Also read by iso/offline/build-bundle.sh to bundle them for offline installs.
+# pulseaudio-utils/pipewire-pulse: pactl, for audio routing.
+ASTERISK_INTERCOM_APT_PACKAGES=(baresip pulseaudio-utils pipewire-pulse)
 BARESIP_USER_SERVICE_DIR="${KIOSK_HOME}/.config/systemd/user"
 
 # Runs `systemctl --user ...` as $KIOSK_USER with the runtime dir/D-Bus
@@ -169,14 +172,13 @@ action_configure_asterisk_intercom() {
 
     echo
     echo "Installing Baresip..."
-    if ! command -v baresip &>/dev/null; then
-        if ! sudo apt install -y baresip; then
+    if ! command -v baresip &>/dev/null || ! command -v pactl &>/dev/null; then
+        if ! run_with_offline_fallback sudo apt install -y "${ASTERISK_INTERCOM_APT_PACKAGES[@]}"; then
             log_error "Failed to install baresip package"
             pause
             return 1
         fi
     fi
-    sudo apt install -y pulseaudio-utils pipewire-pulse 2>/dev/null || true
 
     sudo mkdir -p "$BARESIP_CONFIG_DIR"
 

@@ -29,6 +29,7 @@
 : "${CRON_D_DIR:=/etc/cron.d}"
 : "${BIN_DIR:=/usr/local/bin}"
 : "${NETPLAN_DIR:=/etc/netplan}"
+: "${TIMESYNCD_CONF_DIR:=/etc/systemd/timesyncd.conf.d}"
 : "${POLKIT_DIR:=/etc/polkit-1/localauthority/50-local.d}"
 : "${WIREGUARD_DIR:=/etc/wireguard}"
 : "${WEBUI_DIR:=/opt/kiosk-webui}"
