@@ -22,10 +22,23 @@
 # Depends on: lib/menu.sh, lib/config.sh being sourced first.
 ################################################################################
 
+# Also read by iso/offline/build-bundle.sh, to bundle the same versions
+# for offline installs (the .deb itself plus its apt dependencies).
+LMS_DEB_URL="https://downloads.lms-community.org/LyrionMusicServer_v9.0.3/lyrionmusicserver_9.0.3_amd64.deb"
+SQUEEZELITE_APT_PACKAGES=(squeezelite)
+
+# True on a kiosk installed from an --offline ISO that can't reach the
+# internet right now - the one case where LMS comes from the bundle.
+lms_offline_install_wanted() {
+    grep -q '^Package: lyrionmusicserver$' "$KIOSK_OFFLINE_DIR/apt/Packages" 2>/dev/null && ! have_internet
+}
+
 lms_service_name() {
-    if systemctl list-unit-files 2>/dev/null | grep -q "lyrionmusicserver.service"; then
+    # `systemctl cat`, not `list-unit-files | grep -q`: grep -q exiting
+    # early can SIGPIPE systemctl, failing the pipeline under pipefail.
+    if systemctl cat lyrionmusicserver.service &>/dev/null; then
         echo "lyrionmusicserver"
-    elif systemctl list-unit-files 2>/dev/null | grep -q "logitechmediaserver.service"; then
+    elif systemctl cat logitechmediaserver.service &>/dev/null; then
         echo "logitechmediaserver"
     fi
 }
@@ -114,42 +127,53 @@ action_install_lms() {
 
     echo "Installing Lyrion Music Server..."
 
-    # Try the repository method first.
-    if wget -qO - https://debian.slimdevices.com/debian/squeezebox-keyring.gpg | sudo gpg --dearmor -o /usr/share/keyrings/lms-keyring.gpg 2>/dev/null; then
-        echo "deb [signed-by=/usr/share/keyrings/lms-keyring.gpg] http://debian.slimdevices.com/debian stable main" | sudo tee /etc/apt/sources.list.d/lms.list
-        # `|| true`: a bare, unguarded `apt update` failing here (bad
-        # mirror, no network) would otherwise crash the whole session
-        # under set -e instead of falling through to the direct-download
-        # fallback below, which is exactly the degrade path this is
-        # supposed to hit when the repository route doesn't work.
-        sudo apt update 2>/dev/null || true
-        if sudo apt install -y logitechmediaserver 2>/dev/null; then
-            log_success "LMS installed via repository"
-        else
-            log_warning "Repository install failed, trying direct download..."
+    if lms_offline_install_wanted; then
+        # Kiosk installed from an --offline ISO with no internet right now:
+        # the bundle carries the same LMS_DEB_URL .deb as a package.
+        if ! run_with_offline_fallback sudo apt install -y lyrionmusicserver; then
+            log_error "Failed to install LMS from the offline bundle"
+            pause
+            return 1
         fi
-    fi
-
-    # Fall back to a direct .deb download if the repository didn't produce
-    # either possible package.
-    if ! command -v logitechmediaserver &>/dev/null && ! command -v lyrionmusicserver &>/dev/null; then
-        local lms_deb="/tmp/lms.deb"
-        echo "Downloading LMS v9.0.3..."
-        if wget -q https://downloads.lms-community.org/LyrionMusicServer_v9.0.3/lyrionmusicserver_9.0.3_amd64.deb -O "$lms_deb"; then
-            echo "Installing LMS package..."
-            if sudo apt install -y "$lms_deb"; then
-                log_success "LMS installed via direct download"
+        log_success "LMS installed from the offline bundle"
+    else
+        # Try the repository method first.
+        if wget -qO - https://debian.slimdevices.com/debian/squeezebox-keyring.gpg | sudo gpg --dearmor -o /usr/share/keyrings/lms-keyring.gpg 2>/dev/null; then
+            echo "deb [signed-by=/usr/share/keyrings/lms-keyring.gpg] http://debian.slimdevices.com/debian stable main" | sudo tee /etc/apt/sources.list.d/lms.list
+            # `|| true`: a bare, unguarded `apt update` failing here (bad
+            # mirror, no network) would otherwise crash the whole session
+            # under set -e instead of falling through to the direct-download
+            # fallback below, which is exactly the degrade path this is
+            # supposed to hit when the repository route doesn't work.
+            sudo apt update 2>/dev/null || true
+            if sudo apt install -y logitechmediaserver 2>/dev/null; then
+                log_success "LMS installed via repository"
             else
-                log_error "Failed to install LMS package"
+                log_warning "Repository install failed, trying direct download..."
+            fi
+        fi
+
+        # Fall back to a direct .deb download if the repository didn't produce
+        # either possible package.
+        if ! command -v logitechmediaserver &>/dev/null && ! command -v lyrionmusicserver &>/dev/null; then
+            local lms_deb="/tmp/lms.deb"
+            echo "Downloading LMS ($(basename "$LMS_DEB_URL"))..."
+            if wget -q "$LMS_DEB_URL" -O "$lms_deb"; then
+                echo "Installing LMS package..."
+                if sudo apt install -y "$lms_deb"; then
+                    log_success "LMS installed via direct download"
+                else
+                    log_error "Failed to install LMS package"
+                    rm -f "$lms_deb"
+                    pause
+                    return 1
+                fi
                 rm -f "$lms_deb"
+            else
+                log_error "Failed to download LMS from lms-community.org"
                 pause
                 return 1
             fi
-            rm -f "$lms_deb"
-        else
-            log_error "Failed to download LMS from lms-community.org"
-            pause
-            return 1
         fi
     fi
 
@@ -250,7 +274,7 @@ action_install_squeezelite() {
     fi
 
     if ! command -v squeezelite &>/dev/null; then
-        if ! sudo apt install -y squeezelite; then
+        if ! run_with_offline_fallback sudo apt install -y "${SQUEEZELITE_APT_PACKAGES[@]}"; then
             log_error "squeezelite package installation failed"
             pause
             return 1

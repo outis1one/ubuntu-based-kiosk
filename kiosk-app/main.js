@@ -4,8 +4,11 @@ const fs=require('fs');
 const path=require('path');
 const os=require('os');
 const crypto=require('crypto');
-// Sites that are a local folder show as an image slideshow (slideshow.js).
+// Local-file sites with their own viewer pages: a folder plays as an image
+// slideshow (slideshow.js), a .docx renders as a Word document (docview.js).
 const slideshow=require('./slideshow');
+const docview=require('./docview');
+function resolveLocalSite(url){return docview.resolveSiteUrl(slideshow.resolveSiteUrl(url));}
 
 // Suppress EPIPE errors (happen when no terminal attached)
 process.stdout.on('error',(e)=>{if(e.code!=='EPIPE')throw e;});
@@ -784,7 +787,7 @@ function attachView(i){
   
   const tabIdx=viewIndexToTabIndex(i);
   if(tabIdx>=0&&tabs[tabIdx]){
-    const configuredUrl=slideshow.resolveSiteUrl(tabs[tabIdx].url);
+    const configuredUrl=resolveLocalSite(tabs[tabIdx].url);
     const currentUrl=views[i].webContents.getURL();
 
     if(currentUrl&&!currentUrl.startsWith(configuredUrl)){
@@ -1336,7 +1339,7 @@ async function createWindow(){
         url=u.toString();
       }catch(e){}
     }
-    url=slideshow.resolveSiteUrl(url);
+    url=resolveLocalSite(url);
     
     const initialOrigin=new URL(t.url).origin;
     
@@ -1371,6 +1374,7 @@ async function createWindow(){
     
     view.webContents.setAudioMuted(false);
     slideshow.attach(view.webContents);
+    docview.attach(view.webContents);
     view.webContents.loadURL(url);
     
     view.webContents.on('did-finish-load',()=>{

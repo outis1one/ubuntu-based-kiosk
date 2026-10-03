@@ -1,8 +1,15 @@
 #!/bin/bash
 ################################################################################
 # menus/advanced_emergency_hotspot.sh - "Emergency Hotspot" (Advanced):
-# auto-starts a WiFi hotspot if no internet is detected 60 seconds after
-# boot, so the kiosk can be reached and reconfigured remotely.
+# auto-starts a WiFi hotspot if the kiosk finds itself cut off 60 seconds
+# after boot, so it can be reached and reconfigured remotely.
+# "Cut off" is chosen at setup (EMERGENCY_HOTSPOT_CHECK_MODE in the
+# generated script): by default the local network itself is unreachable -
+# neither the router nor the internet answers - so a kiosk on a LAN with
+# no internet (an offline install) doesn't start the hotspot on every
+# boot. The old internet-only check (ping 8.8.8.8) is still an option, as
+# is checking one specific address. Scripts generated before this choice
+# existed keep the internet-only check until Reconfigure is run.
 #
 # Writes a standalone runtime script ($BIN_DIR/kiosk-emergency-hotspot)
 # plus a oneshot systemd unit ($SYSTEMD_DIR) that runs it at boot - both
@@ -21,6 +28,8 @@
 ################################################################################
 
 EMERGENCY_HOTSPOT_SCRIPT="$BIN_DIR/kiosk-emergency-hotspot"
+# Also read by iso/offline/build-bundle.sh to bundle them for offline installs.
+EMERGENCY_HOTSPOT_APT_PACKAGES=(hostapd dnsmasq iptables)
 
 emergency_hotspot_is_configured() {
     [[ -f "$EMERGENCY_HOTSPOT_SCRIPT" ]]
@@ -38,8 +47,8 @@ advanced_emergency_hotspot_status() {
     else
         echo "Emergency Hotspot: Not configured"
     fi
-    echo "ℹ Auto-starts a WiFi hotspot if no internet is detected 60"
-    echo "  seconds after boot, so you can connect and reconfigure remotely."
+    echo "ℹ Auto-starts a WiFi hotspot if the kiosk can't reach its network"
+    echo "  60 seconds after boot, so you can connect and reconfigure remotely."
 }
 
 advanced_emergency_hotspot_menu_builder() {
@@ -62,7 +71,7 @@ advanced_emergency_hotspot_menu() {
 
 action_configure_emergency_hotspot() {
     echo
-    if ! sudo apt install -y hostapd dnsmasq iptables; then
+    if ! run_with_offline_fallback sudo apt install -y "${EMERGENCY_HOTSPOT_APT_PACKAGES[@]}"; then
         log_error "Failed to install hostapd/dnsmasq/iptables"
         pause
         return 1
@@ -91,6 +100,29 @@ action_configure_emergency_hotspot() {
         [[ ${#hotspot_pass} -lt 8 ]] && log_error "Password must be at least 8 characters"
     done
 
+    echo
+    echo "When should the hotspot start? (checked 60 seconds after boot)"
+    echo "  1) The local network is unreachable - neither the router nor the"
+    echo "     internet answers. Recommended; right for networks without"
+    echo "     internet too."
+    echo "  2) There's no internet. On a network without internet this starts"
+    echo "     the hotspot on every boot."
+    echo "  3) A specific address on your network doesn't answer (e.g. a server)."
+    local check_mode="network" check_host="" check_choice
+    check_choice=$(ask_integer "Choice" 1 1 3)
+    case "$check_choice" in
+        2) check_mode="internet" ;;
+        3)
+            check_host=$(ask_text "Address to check (IP or hostname)" "")
+            if [[ "$check_host" =~ ^[A-Za-z0-9.:-]+$ ]]; then
+                check_mode="host"
+            else
+                log_warning "Not a valid address - using option 1 instead"
+                check_host=""
+            fi
+            ;;
+    esac
+
     local hotspot_ip="192.168.50.1"
 
     sudo mkdir -p "$BIN_DIR"
@@ -98,9 +130,14 @@ action_configure_emergency_hotspot() {
 #!/bin/bash
 ################################################################################
 ### KIOSK EMERGENCY HOTSPOT
-### Auto-starts if no internet connection 60 seconds after boot
+### Auto-starts if the network check fails 60 seconds after boot
 ################################################################################
 
+# network  = neither the default gateway (router) nor the internet answers
+# internet = no internet (pings 8.8.8.8 / 1.1.1.1)
+# host     = CHECK_HOST doesn't answer
+CHECK_MODE="$check_mode"
+CHECK_HOST="$check_host"
 WIFI_IFACE="$wifi_iface"
 HOTSPOT_SSID="$hotspot_ssid"
 HOTSPOT_PASS="$hotspot_pass"
@@ -110,13 +147,36 @@ KIOSK_USER="$KIOSK_USER"
 # Wait 60 seconds after boot
 sleep 60
 
-# Check for internet connectivity
-if ping -c 3 -W 5 8.8.8.8 >/dev/null 2>&1; then
-    logger "KIOSK: Internet connected - emergency hotspot not needed"
-    exit 0
-fi
+ping_ok() { ping -c 2 -W 3 "\$1" >/dev/null 2>&1; }
+internet_ok() { ping_ok 8.8.8.8 || ping_ok 1.1.1.1; }
+# The router counts as there if it answers ping - or, for routers set to
+# ignore ping, if it answered the ARP lookup that ping just triggered.
+gateway_ok() {
+    local gw
+    gw=\$(ip -4 route show default 2>/dev/null | awk '{print \$3; exit}')
+    [[ -n "\$gw" ]] || return 1
+    ping_ok "\$gw" && return 0
+    ip neigh show "\$gw" 2>/dev/null | grep -qE 'REACHABLE|STALE|DELAY|PROBE'
+}
+connected() {
+    case "\$CHECK_MODE" in
+        internet) internet_ok ;;
+        host) ping_ok "\$CHECK_HOST" ;;
+        *) gateway_ok || internet_ok ;;
+    esac
+}
 
-logger "KIOSK: No internet detected - starting emergency hotspot"
+# Three tries, 10 seconds apart, so a slow DHCP lease or WiFi association
+# isn't mistaken for being cut off.
+for attempt in 1 2 3; do
+    if connected; then
+        logger "KIOSK: Network check (\$CHECK_MODE) passed - emergency hotspot not needed"
+        exit 0
+    fi
+    [[ \$attempt -lt 3 ]] && sleep 10
+done
+
+logger "KIOSK: Network check (\$CHECK_MODE) failed - starting emergency hotspot"
 
 # Stop any conflicting services
 systemctl stop wpa_supplicant 2>/dev/null || true

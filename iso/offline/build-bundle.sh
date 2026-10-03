@@ -8,17 +8,20 @@
 #
 # OUT_DIR ends up as /opt/kiosk-offline on the installed system:
 #   apt/              Local apt repository (flat, [trusted=yes]) with every
-#                     package install.sh's provisioning and the CUPS addon
-#                     install ask for, NodeSource's nodejs, and all their
+#                     package install.sh's provisioning and the addons ask
+#                     for (CUPS, LMS + Squeezelite, Asterisk Intercom, VNC,
+#                     WireGuard, Emergency Hotspot - not Tailscale/Netbird,
+#                     which need their vendors' servers anyway), Lyrion's
+#                     own .deb, NodeSource's nodejs, and all their
 #                     dependencies that a fresh Ubuntu Server install from
 #                     SOURCE_ISO doesn't already have.
 #   npm/kiosk-app-node_modules.tar.gz   Prebuilt node_modules (Electron
 #   npm/webui-node_modules.tar.gz       included) in place of `npm install`.
 #   bundle-info.txt   What was bundled, from where, when.
 #
-# Package lists are read from REPO_DIR's own lib/provision.sh and
-# menus/addon_cups.sh (PROVISION_APT_PACKAGES, PROVISION_INTEL_APT_PACKAGES,
-# CUPS_APT_PACKAGES), so the bundle always matches what install.sh asks for.
+# Package lists are read from REPO_DIR's own lib/provision.sh and menus/
+# (PROVISION_APT_PACKAGES, CUPS_APT_PACKAGES, SQUEEZELITE_APT_PACKAGES,
+# LMS_DEB_URL, ...), so the bundle always matches what install.sh asks for.
 #
 # Dependencies are resolved against SOURCE_ISO's own package manifest - a
 # fake dpkg status built from it (fake-dpkg-status.py) - so apt only
@@ -127,21 +130,45 @@ python3 "$HERE/fake-dpkg-status.py" "$manifest" "$R/var/lib/apt/lists" > "$R/var
 ################################################################################
 
 # shellcheck disable=SC1091,SC2034
+# Each list lives next to the code that installs it; lib/config.sh first
+# for the path defaults those files use at the top level.
 mapfile -t packages < <(
     SCRIPT_DIR="$REPO_DIR"
+    source "$REPO_DIR/lib/config.sh"
     source "$REPO_DIR/lib/provision.sh"
     source "$REPO_DIR/menus/addon_cups.sh"
+    source "$REPO_DIR/menus/addon_lms_squeezelite.sh"
+    source "$REPO_DIR/menus/addon_asterisk_intercom.sh"
+    source "$REPO_DIR/menus/addon_remote_access.sh"
+    source "$REPO_DIR/menus/advanced_emergency_hotspot.sh"
     printf '%s\n' "${PROVISION_APT_PACKAGES[@]}" "${PROVISION_INTEL_APT_PACKAGES[@]}" \
-        "${CUPS_APT_PACKAGES[@]}" "${EXTRA_APT_PACKAGES[@]}"
+        "${CUPS_APT_PACKAGES[@]}" "${SQUEEZELITE_APT_PACKAGES[@]}" \
+        "${ASTERISK_INTERCOM_APT_PACKAGES[@]}" "${VNC_APT_PACKAGES[@]}" \
+        "${WIREGUARD_APT_PACKAGES[@]}" "${EMERGENCY_HOTSPOT_APT_PACKAGES[@]}" \
+        "${EXTRA_APT_PACKAGES[@]}"
 )
 (( ${#packages[@]} > 20 )) || die "couldn't read the package lists from $REPO_DIR"
+
+# Lyrion Music Server isn't in Ubuntu's archive: bundle the exact .deb the
+# LMS addon downloads online, and let apt resolve its dependencies from it
+# (a local .deb path in the install list).
+# shellcheck disable=SC1091,SC2034
+lms_url="$(SCRIPT_DIR="$REPO_DIR"; source "$REPO_DIR/lib/config.sh"; source "$REPO_DIR/menus/addon_lms_squeezelite.sh"; echo "$LMS_DEB_URL")"
+lms_deb="$CACHE_DIR/$(basename "$lms_url")"
+if [[ ! -s "$lms_deb" ]]; then
+    info "Downloading $(basename "$lms_url")..."
+    curl -fL --retry 3 -o "$lms_deb.part" "$lms_url" || die "couldn't download $lms_url"
+    mv "$lms_deb.part" "$lms_deb"
+fi
+dpkg-deb -I "$lms_deb" >/dev/null 2>&1 || { rm -f "$lms_deb"; die "$lms_deb isn't a valid .deb - deleted, re-run to retry"; }
+packages+=("$lms_deb")
 
 info "Resolving ${#packages[@]} packages (with recommends, as install.sh installs them)..."
 # --print-uris against an empty archive dir: it leaves out anything already
 # in the cache, which on a rebuild would be everything.
 rm -rf "$R/empty-archives"; mkdir -p "$R/empty-archives/partial"
 mapfile -t debs < <("${APT[@]}" -qq -o "Dir::Cache::archives=$R/empty-archives" \
-    install --print-uris -y "${packages[@]}" | awk '{print $2}')
+    install --print-uris -y "${packages[@]}" | awk '$1 !~ /^.file:/ {print $2}')  # the local LMS .deb is copied below
 (( ${#debs[@]} )) || die "apt resolved nothing to download - check the output above"
 
 info "Downloading ${#debs[@]} .debs (cached between builds)..."
@@ -150,6 +177,7 @@ info "Downloading ${#debs[@]} .debs (cached between builds)..."
 for f in "${debs[@]}"; do
     cp "$R/var/cache/apt/archives/$f" "$OUT_DIR/apt/"
 done
+cp "$lms_deb" "$OUT_DIR/apt/"
 (
     cd "$OUT_DIR/apt"
     apt-ftparchive packages . > Packages 2>/dev/null

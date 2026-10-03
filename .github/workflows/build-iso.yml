@@ -41,9 +41,10 @@ on:
         default: ""
       offline:
         description: >-
-          Bundle everything install.sh downloads (~420 MB: all packages incl.
-          CUPS printing, Node.js, Electron) so the kiosk installs with no
-          internet on first boot.
+          Bundle everything install.sh downloads (~520 MB: all packages incl.
+          the CUPS, LMS/Squeezelite, Intercom, VNC, WireGuard and hotspot
+          addons, Node.js, Electron) so the kiosk and those addons install
+          with no internet.
         type: boolean
         default: true
       retention_days:

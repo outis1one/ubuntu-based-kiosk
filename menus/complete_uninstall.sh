@@ -8,7 +8,7 @@
 # tailscale_do_uninstall, netbird_do_uninstall, lms_do_uninstall,
 # squeezelite_do_uninstall, asterisk_intercom_do_uninstall,
 # webui_do_uninstall, power_schedule_do_remove_all,
-# emergency_hotspot_do_disable) instead of
+# emergency_hotspot_do_disable, time_sync_do_reset) instead of
 # re-implementing removal logic for each addon a second time here - if an
 # addon's uninstall logic changes, this picks it up automatically. Only
 # the pieces no single addon owns - the kiosk user/files, Node.js/
@@ -62,6 +62,7 @@ action_complete_uninstall() {
     echo "  • LightDM and Openbox"
     echo "  • All kiosk schedules and services"
     echo "  • Emergency hotspot configuration"
+    echo "  • LAN time server setting (back to Ubuntu's defaults)"
     echo
     echo "⚠️  This CANNOT be undone!"
     echo
@@ -90,9 +91,10 @@ action_complete_uninstall() {
     asterisk_intercom_do_uninstall purge
     webui_do_uninstall
 
-    echo "[3/12] Removing schedules and emergency hotspot..."
+    echo "[3/12] Removing schedules, emergency hotspot and time server setting..."
     power_schedule_do_remove_all
     emergency_hotspot_do_disable
+    time_sync_do_reset
 
     # Must come after every addon teardown above - Asterisk Intercom's
     # helper still needs this user to resolve its systemd --user session.
