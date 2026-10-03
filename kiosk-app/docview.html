@@ -1,0 +1,106 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>Document</title>
+<!-- Shown for a site that's a local .docx file - see docview.js. The
+     document's bytes arrive from main.js via window.kioskDocView.show(). -->
+<style>
+  html, body { margin: 0; background: #666; }
+  #doc { transform-origin: top left; }
+  /* docx-preview's page wrapper: grey backdrop with white pages. */
+  #doc .docx-wrapper { background: #666; padding: 16px 0; }
+  #doc .docx-wrapper > section.docx { margin-bottom: 16px; box-shadow: 0 2px 8px rgba(0,0,0,.4); }
+  #msg {
+    position: fixed; inset: 0; display: flex; align-items: center; justify-content: center;
+    color: #eee; font: 22px sans-serif; text-align: center; padding: 2em; box-sizing: border-box;
+  }
+</style>
+<script src="node_modules/jszip/dist/jszip.min.js"></script>
+<script src="node_modules/docx-preview/dist/docx-preview.min.js"></script>
+</head>
+<body>
+<div id="msg">Loading document…</div>
+<div id="doc"></div>
+<script>
+(() => {
+  const docEl = document.getElementById('doc');
+  const msg = document.getElementById('msg');
+
+  function showMessage(text) {
+    msg.textContent = text;
+    msg.style.display = 'flex';
+    docEl.innerHTML = '';
+  }
+
+  // Scale pages to the screen width (never above 100% + a little), so a
+  // portrait page is readable on a landscape kiosk without sideways
+  // scrolling. CSS zoom keeps scrolling and touch coordinates consistent.
+  function fitWidth() {
+    const page = docEl.querySelector('section.docx');
+    if (!page) return;
+    docEl.style.zoom = 1;
+    const pageWidth = page.getBoundingClientRect().width + 32;
+    docEl.style.zoom = Math.min(window.innerWidth / pageWidth, 1.6);
+  }
+  window.addEventListener('resize', fitWidth);
+
+  // Word draws most bullets with private-use characters from the Symbol
+  // and Wingdings fonts (U+F0B7 etc.), which a kiosk doesn't have - they
+  // render as blanks. docx-preview passes them through into its generated
+  // list CSS; swap the common ones for real Unicode equivalents.
+  const SYMBOL_BULLETS = {
+    '\uf0b7': '\u2022', // Symbol bullet        -> •
+    '\uf0a7': '\u25aa', // Wingdings square      -> ▪
+    '\uf0d8': '\u27a2', // Wingdings arrowhead   -> ➢
+    '\uf076': '\u2756', // Wingdings diamond     -> ❖
+    '\uf0fc': '\u2713', // Wingdings check       -> ✓
+    '\uf06e': '\u25a0', // Wingdings black square -> ■
+    '\uf071': '\u274f', // Wingdings box         -> ❏
+  };
+  function fixSymbolBullets() {
+    document.querySelectorAll('style').forEach((st) => {
+      let css = st.textContent;
+      const before = css;
+      for (const [from, to] of Object.entries(SYMBOL_BULLETS)) {
+        css = css.split(from).join(to);
+        // Also the CSS-escaped form ("\f0b7" / "\00f0b7 "), in case it's
+        // emitted that way.
+        const hex = from.charCodeAt(0).toString(16);
+        css = css.replace(new RegExp('\\\\0*' + hex + '\\s?', 'gi'), to);
+      }
+      if (css !== before) st.textContent = css;
+    });
+  }
+
+  window.kioskDocView = {
+    async show(d) {
+      if (d.error) { showMessage(d.error); return; }
+      if (!window.docx || !window.JSZip) {
+        showMessage('Word document viewer is missing (docx-preview) - run Advanced -> Upgrade.');
+        return;
+      }
+      try {
+        const bytes = Uint8Array.from(atob(d.data), (c) => c.charCodeAt(0));
+        docEl.innerHTML = '';
+        await window.docx.renderAsync(bytes, docEl, null, {
+          inWrapper: true,
+          ignoreLastRenderedPageBreak: true,
+          experimental: true,
+          useBase64URL: true,
+        });
+        msg.style.display = 'none';
+        fixSymbolBullets();
+        fitWidth();
+        // Only called on first load or when the file changed on disk -
+        // start a changed document from the top.
+        window.scrollTo(0, 0);
+      } catch (e) {
+        showMessage(`Couldn't show ${d.file}: ${e.message || e}`);
+      }
+    },
+  };
+})();
+</script>
+</body>
+</html>
