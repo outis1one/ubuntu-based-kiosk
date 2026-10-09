@@ -67,6 +67,11 @@ PROVISION_APT_PACKAGES=(
     gstreamer1.0-pipewire libspa-0.2-bluetooth
     systemd-timesyncd acpid xbindkeys xdotool python3-evdev unzip
     net-tools ncdu evtest
+    # WiFi: a default Ubuntu Server install only has these if WiFi was set
+    # up in the installer - without them netplan can't join a WiFi network
+    # and Core Settings -> WiFi has nothing to scan with. In the base list
+    # so an offline install gets them (from the bundle) before that menu.
+    wpasupplicant iw
 )
 PROVISION_INTEL_APT_PACKAGES=(
     intel-gpu-tools xserver-xorg-video-intel i965-va-driver intel-media-va-driver
