@@ -94,8 +94,17 @@ provision_install_packages() {
 
 provision_create_kiosk_user() {
     echo "[2/10] Creating kiosk user..."
+    local kiosk_groups=(audio video input plugdev netdev)
+    # Not every Ubuntu release ships all of these - 26.04 Server has no
+    # netdev group - and useradd refuses to create the user at all if any
+    # -G group is missing. Create missing ones as plain system groups
+    # (no-op when they exist).
+    local g
+    for g in "${kiosk_groups[@]}"; do
+        sudo groupadd -f -r "$g"
+    done
     if ! id "$KIOSK_USER" &>/dev/null; then
-        sudo useradd -m -s /bin/bash -G audio,video,input,plugdev,netdev "$KIOSK_USER"
+        sudo useradd -m -s /bin/bash -G "$(IFS=,; echo "${kiosk_groups[*]}")" "$KIOSK_USER"
         echo "$KIOSK_USER:kiosk" | sudo chpasswd
         log_success "Kiosk user created (default password: kiosk - change it)"
     else
