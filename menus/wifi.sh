@@ -31,6 +31,18 @@ wifi_menu() {
     echo " ═══ WIFI CONFIGURATION ═══"
     echo
 
+    # netplan needs wpa_supplicant to join WiFi at all; iw/wpa_cli scan.
+    # Missing on a server install that skipped WiFi in the installer -
+    # install them here (from the offline bundle if there's no internet,
+    # which is exactly the situation this menu is usually opened in).
+    if ! command -v wpa_supplicant &>/dev/null || ! command -v iw &>/dev/null; then
+        echo "WiFi support (wpasupplicant, iw) isn't installed yet - installing..."
+        if ! run_with_offline_fallback sudo apt install -y wpasupplicant iw; then
+            log_error "Couldn't install WiFi support (needs internet, wired, or an --offline install ISO)"
+            return 1
+        fi
+    fi
+
     local has_tools=false
     if command -v nmcli &>/dev/null || command -v iw &>/dev/null || command -v wpa_cli &>/dev/null; then
         has_tools=true
