@@ -61,8 +61,9 @@ if [[ "${1:-}" == "--cleanup" ]]; then
     exit 0
 fi
 
-# Hand tty1 back to a normal login prompt (the unit Conflicts= with
-# getty@tty1 so it can own the console; systemd won't restart it alone).
+# Make sure tty1 gets its login prompt back. getty@tty1 is ordered after
+# this unit and normally starts by itself once we exit; this just covers
+# a getty that was stopped or never queued (e.g. started by hand later).
 release_tty() {
     systemctl --no-block start getty@tty1.service 2>/dev/null || true
 }
@@ -167,12 +168,10 @@ echo "Mode       : $([[ "$KIOSK_UNATTENDED" == "1" ]] && echo "unattended (defau
 echo "Log        : $LOG"
 echo
 
-# cloud-init and the first apt/unattended-upgrades run on a fresh system
-# both want the dpkg lock; let them finish rather than racing them.
-if command -v cloud-init &>/dev/null; then
-    echo "Waiting for cloud-init to finish..."
-    cloud-init status --wait >/dev/null 2>&1 || true
-fi
+# Anything else on a fresh system that wants the dpkg lock (e.g. the
+# first unattended-upgrades run): wait for it rather than failing. Not
+# `cloud-init status --wait` - cloud-init's final stage runs after
+# multi-user.target, which waits for this service: a deadlock.
 mkdir -p "$STATE_DIR"
 printf 'DPkg::Lock::Timeout "900";\n' > "$APT_DROPIN"
 
