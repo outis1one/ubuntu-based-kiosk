@@ -138,6 +138,27 @@ Notes:
   times, quiet hours and power schedules drift with it.
 - `sudo rm -rf /opt/kiosk-offline` frees the space if you don't need it.
 
+**Booting it from Easy2Boot (or another multiboot USB)?** Some of their boot
+modes need the ISO stored in one unbroken piece on the drive, and a 3.5 GB
+file copied onto a well-used drive usually isn't. The symptom is a brief
+black screen and straight back to the menu. From Linux, with the drive
+plugged in:
+
+```bash
+sudo iso/e2b-contig.sh --check /media/$USER/E2B/_ISO/LINUX/ubuntu-26.04.1-kiosk-offline-amd64.iso
+sudo iso/e2b-contig.sh /media/$USER/E2B/_ISO/LINUX/ubuntu-26.04.1-kiosk-offline-amd64.iso
+```
+
+It rewrites just that file in one piece using ordinary file operations
+(never the filesystem's own structures), and keeps the original if anything
+doesn't verify. It temporarily fills the drive's free space to do it, so
+it takes a few minutes. `--move-out` lets it park the original on this
+computer when there isn't room for a second copy. NTFS, FAT32 and exFAT;
+on NTFS mounted through `ntfs-3g` it can usually read the layout, and if
+not it tells you to remount with the kernel's `ntfs3` driver. Also check
+the copy isn't simply damaged: `sha256sum` it on the build machine and on
+the drive.
+
 **No Linux machine handy?** Build it on GitHub instead: **Actions → Build
 kiosk ISO → Run workflow**, pick a mode, and download the ISO from the run's
 **Artifacts** once it finishes (about 10 minutes; kept for 3 days by default).
@@ -1491,6 +1512,7 @@ full migration pass.
 - **Local files as sites:** an absolute path (`/home/kiosk/docs/menu.pdf`) shows a local page, PDF or image; a folder (`/home/kiosk/photos/`) plays as a full-screen **image slideshow** that picks up added/removed images within a minute. Works in both the Sites menu and the Web UI.
 - **Fix: the first-boot kiosk setup never started on 26.04.** Its service was ordered after cloud-init's final stage, which itself runs after `multi-user.target` - an ordering cycle that systemd broke by dropping the kiosk setup. It also "conflicted" with the tty1 login prompt, which systemd can resolve the same way. Both removed; checked with `systemd-analyze verify` against 26.04's own units. Rebuild the ISO to pick this up.
 - **WiFi tools in the base install:** `wpasupplicant` and `iw` are now installed (and bundled offline). A default Ubuntu Server install only has them if WiFi was set up in the installer; without them, Core Settings → WiFi couldn't connect an offline kiosk. The WiFi menu also installs them itself if missing.
+- **New: `iso/e2b-contig.sh`** - makes a file on an Easy2Boot (or any NTFS/FAT32/exFAT) USB drive contiguous from Linux, so ISOs that need to be in one piece boot.
 - **Offline addons:** the `--offline` bundle now also carries LMS (Lyrion) + Squeezelite, Asterisk Intercom, VNC, WireGuard and the Emergency Hotspot; their normal installs use it automatically when there's no internet.
 - **Emergency Hotspot fix:** by default it now starts only when the local network is unreachable (router *and* internet), not merely when there's no internet - on a LAN without internet it used to start on every boot. Existing setups keep the old check until Advanced → Emergency Hotspot → Reconfigure.
 - **New: Core Settings → Time Server (NTP)** - use a time server on your network, go back to Ubuntu's, or set the clock by hand; for networks without internet.
