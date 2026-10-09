@@ -1,5 +1,5 @@
 const {app,BrowserWindow,BrowserView,globalShortcut,ipcMain,dialog,session}=require('electron');
-const {exec}=require('child_process');
+const {exec,spawn}=require('child_process');
 const fs=require('fs');
 const path=require('path');
 const os=require('os');
@@ -159,6 +159,7 @@ function showLockoutScreen(){
 
   isLockedOut=true;
   console.log('[LOCKOUT] Showing lockout screen');
+  closeWifiWindow();
 
   // Detach all browser views to prevent content from being visible
   console.log('[LOCKOUT] Detaching all browser views for security');
@@ -1189,7 +1190,170 @@ function showHiddenTab(index){
   showingHidden=true;
 }
 
+// WiFi screen (hold Shift+W+S+F+H, or Ctrl+Alt+Shift+Super+W): join a WiFi network from the kiosk
+// itself, for when the console (Ctrl+Alt+F1..F6) is switched off and the
+// admin menu can't be reached. Gated by the hidden-tab PIN (.jitsi-pin,
+// same rules as pin-entry.html: no file = 1234, NOPIN = none). The root
+// work is done by /usr/local/bin/kiosk-wifi-helper, which the kiosk user
+// may run through sudo and nothing else (/etc/sudoers.d/kiosk-wifi).
+const WIFI_HELPER='/usr/local/bin/kiosk-wifi-helper';
+const WIFI_IDLE_TIMEOUT=5*60000; // closes after 5 minutes untouched
+const WIFI_MAX_PIN_TRIES=5;
+let wifiWindow=null,wifiUnlocked=false,wifiPinTries=0,wifiIdleTimer=null;
+
+function readHiddenPin(){
+  try{
+    const stored=fs.readFileSync(path.join(__dirname,'.jitsi-pin'),'utf8').trim();
+    if(stored==='NOPIN')return null;
+    if(stored)return stored;
+  }catch(e){}
+  return '1234';
+}
+
+function runWifiHelper(action,input){
+  return new Promise(resolve=>{
+    let out='',err='',done=false;
+    const finish=result=>{if(!done){done=true;resolve(result);}};
+    let child;
+    try{
+      child=spawn('sudo',['-n',WIFI_HELPER,action],{stdio:['pipe','pipe','pipe']});
+    }catch(e){
+      finish({ok:false,error:'Could not run the WiFi helper: '+e.message});
+      return;
+    }
+    const killer=setTimeout(()=>{child.kill();finish({ok:false,error:'The WiFi helper timed out'});},120000);
+    child.stdout.on('data',d=>{out+=d;});
+    child.stderr.on('data',d=>{err+=d;});
+    child.on('error',e=>{clearTimeout(killer);finish({ok:false,error:'Could not run the WiFi helper: '+e.message});});
+    child.on('close',()=>{
+      clearTimeout(killer);
+      const line=out.trim().split('\n').pop();
+      try{
+        finish(JSON.parse(line));
+      }catch(e){
+        // Not our JSON - typically sudo refusing ("a password is required")
+        // on a kiosk set up before this feature: Upgrade installs the rule.
+        console.error('[WIFI] helper output:',out,err);
+        finish({ok:false,error:(err.trim()||'The WiFi helper is not installed')+' - run Advanced -> Upgrade from the admin menu'});
+      }
+    });
+    child.stdin.on('error',()=>{});
+    child.stdin.end(input?JSON.stringify(input):'');
+  });
+}
+
+function resetWifiIdleTimer(){
+  if(wifiIdleTimer)clearTimeout(wifiIdleTimer);
+  wifiIdleTimer=setTimeout(()=>{
+    console.log('[WIFI] Closing after 5 minutes idle');
+    closeWifiWindow();
+  },WIFI_IDLE_TIMEOUT);
+}
+
+function closeWifiWindow(){
+  if(wifiWindow&&!wifiWindow.isDestroyed())wifiWindow.close();
+}
+
+function showWifiWindow(){
+  if(isLockedOut)return;
+  if(wifiWindow&&!wifiWindow.isDestroyed()){
+    wifiWindow.focus();
+    return;
+  }
+  wifiUnlocked=(readHiddenPin()===null);
+  wifiPinTries=0;
+  let width=720,height=820;
+  if(mainWindow&&!mainWindow.isDestroyed()){
+    const[w,h]=mainWindow.getContentSize();
+    width=Math.min(width,w);
+    height=Math.min(height,h);
+  }
+  wifiWindow=new BrowserWindow({
+    width,height,
+    frame:false,
+    alwaysOnTop:true,
+    parent:mainWindow,
+    modal:true,
+    webPreferences:{nodeIntegration:true,contextIsolation:false}
+  });
+  wifiWindow.setMenu(null);
+  wifiWindow.loadFile(path.join(__dirname,'wifi.html'));
+  wifiWindow.on('closed',()=>{
+    if(wifiIdleTimer){clearTimeout(wifiIdleTimer);wifiIdleTimer=null;}
+    wifiWindow=null;
+    wifiUnlocked=false;
+  });
+  resetWifiIdleTimer();
+  console.log('[WIFI] WiFi screen opened');
+}
+
+// Shift+W+S+F+H, all held together, opens the WiFi screen. A globalShortcut
+// can only have one non-modifier key, so this watches the raw key events
+// of every page/window instead (before-input-event): a key counts as held
+// from its keyDown (autorepeat keeps refreshing it) until its keyUp, or
+// for 1.5s if the keyUp never arrives (focus moved mid-press). Physical
+// keys (input.code), so it's the same keys on any keyboard layout. The
+// key presses that complete the chord are swallowed, not typed into the
+// page.
+const WIFI_CHORD_KEYS=['KeyW','KeyS','KeyF','KeyH'];
+const WIFI_CHORD_HOLD_MS=1500;
+const wifiChordDown=new Map();
+
+function wifiChordInput(event,input){
+  if(!WIFI_CHORD_KEYS.includes(input.code))return;
+  if(input.type==='keyUp'){wifiChordDown.delete(input.code);return;}
+  if(input.type!=='keyDown')return;
+  const now=Date.now();
+  wifiChordDown.set(input.code,now);
+  if(!input.shift||input.control||input.alt||input.meta)return;
+  const all=WIFI_CHORD_KEYS.every(k=>now-(wifiChordDown.get(k)||0)<WIFI_CHORD_HOLD_MS);
+  if(!all)return;
+  event.preventDefault();
+  if(input.isAutoRepeat)return;
+  wifiChordDown.clear();
+  console.log('[WIFI] Shift+W+S+F+H pressed');
+  showWifiWindow();
+}
+
+app.on('web-contents-created',(e,contents)=>{
+  contents.on('before-input-event',wifiChordInput);
+});
+
+ipcMain.handle('wifi-request',async(event,req)=>{
+  if(!wifiWindow||wifiWindow.isDestroyed()||event.sender!==wifiWindow.webContents){
+    return{ok:false,error:'Not allowed'};
+  }
+  resetWifiIdleTimer();
+  const action=req&&req.action;
+  if(action==='close'){closeWifiWindow();return{ok:true};}
+  if(action==='needs-pin')return{ok:true,needsPin:!wifiUnlocked};
+  if(action==='unlock'){
+    if(wifiUnlocked)return{ok:true};
+    if(String(req.pin||'')===readHiddenPin()){
+      wifiUnlocked=true;
+      return{ok:true};
+    }
+    wifiPinTries++;
+    console.log('[WIFI] Wrong PIN, attempt',wifiPinTries);
+    if(wifiPinTries>=WIFI_MAX_PIN_TRIES){
+      setTimeout(closeWifiWindow,1500);
+      return{ok:false,error:'Too many wrong PINs'};
+    }
+    return{ok:false,error:'Incorrect PIN'};
+  }
+  if(!wifiUnlocked)return{ok:false,error:'Enter the PIN first'};
+  if(action==='status'||action==='scan')return runWifiHelper(action);
+  if(action==='connect'){
+    console.log('[WIFI] Connecting to',JSON.stringify(String(req.ssid||'')));
+    const result=await runWifiHelper('connect',{ssid:String(req.ssid||''),password:String(req.password||'')});
+    console.log('[WIFI] Connect result:',result.ok?('ok '+result.ip):result.error);
+    return result;
+  }
+  return{ok:false,error:'Unknown request'};
+});
+
 function forceReturnToTabs(){
+  closeWifiWindow();
   if(pinWindow&&!pinWindow.isDestroyed()){
     pinWindow.close();
     pinWindow=null;
@@ -1625,6 +1789,10 @@ async function createWindow(){
   globalShortcut.register('Control+Alt+Delete',showPowerMenu);
   globalShortcut.register('Control+Alt+P',showPowerMenu);
   globalShortcut.register('Control+Alt+Escape',showPowerMenu);
+  // Five keys on purpose - not something a visitor hits by accident.
+  if(!globalShortcut.register('Control+Alt+Shift+Super+W',showWifiWindow)){
+    console.error('[WIFI] Could not register Ctrl+Alt+Shift+Super+W');
+  }
   globalShortcut.register('Control+K',()=>{
     if(htmlKeyboardWindow&&!htmlKeyboardWindow.isDestroyed()){
       closeHTMLKeyboard();

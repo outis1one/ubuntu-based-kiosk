@@ -492,6 +492,19 @@ Both can be used at the same time — they serve different purposes:
 - **Multi-method WiFi scan** - nmcli, iw, wpa_cli fallbacks
 - **Watchdog support** - Auto-revert bad WiFi configs
 - **Emergency hotspot** - Fallback if no internet
+- **WiFi from the kiosk screen** - hold **Shift+W+S+F+H** together (or press Ctrl+Alt+Shift+Super+W) to join a WiFi network without the admin console - see below
+
+### WiFi from the kiosk screen (consoles turned off)
+
+With virtual consoles switched off, there's no way to reach the admin menu at the kiosk itself. To join a WiFi network anyway, plug in a keyboard and **hold Shift, W, S, F and H all at once** (or press Ctrl+Alt+Shift+Super+W). A WiFi screen opens:
+
+1. Enter the hidden-sites PIN (the same one as F10 - default `1234`; skipped if the PIN is turned off).
+2. Pick a network from the scan (strongest first, 🔒 = needs a password), or type its name.
+3. Type the password (empty for an open network) and press **Connect**.
+
+It writes the same netplan file as Core Settings → WiFi (`/etc/netplan/60-kiosk-wifi.yaml`), so the connection persists across reboots. If the kiosk gets no address within 30 seconds (usually a wrong password) the previous WiFi setting is put back. Esc or Close shuts the screen; it also closes itself after 5 minutes untouched, and five wrong PINs close it. The keys only work as a chord (typing W-S-F-H one at a time does nothing), and they don't interfere with the tab or power shortcuts.
+
+The root part is `/usr/local/bin/kiosk-wifi-helper` (status/scan/connect only), which the kiosk user may run via sudo through `/etc/sudoers.d/kiosk-wifi` - nothing else. Existing kiosks get it with Advanced → Upgrade.
 
 ---
 
@@ -1512,6 +1525,7 @@ full migration pass.
 - **Local files as sites:** an absolute path (`/home/kiosk/docs/menu.pdf`) shows a local page, PDF or image; a folder (`/home/kiosk/photos/`) plays as a full-screen **image slideshow** that picks up added/removed images within a minute. Works in both the Sites menu and the Web UI.
 - **Fix: the first-boot kiosk setup never started on 26.04.** Its service was ordered after cloud-init's final stage, which itself runs after `multi-user.target` - an ordering cycle that systemd broke by dropping the kiosk setup. It also "conflicted" with the tty1 login prompt, which systemd can resolve the same way. Both removed; checked with `systemd-analyze verify` against 26.04's own units. Rebuild the ISO to pick this up.
 - **WiFi tools in the base install:** `wpasupplicant` and `iw` are now installed (and bundled offline). A default Ubuntu Server install only has them if WiFi was set up in the installer; without them, Core Settings → WiFi couldn't connect an offline kiosk. The WiFi menu also installs them itself if missing.
+- **New: WiFi from the kiosk screen** - hold Shift+W+S+F+H (or Ctrl+Alt+Shift+Super+W) to scan for and join a WiFi network right on the kiosk, PIN-protected, for kiosks with the consoles turned off. Reverts to the previous WiFi if the new one doesn't connect. See "WiFi from the kiosk screen".
 - **New: `iso/e2b-contig.sh`** - makes a file on an Easy2Boot (or any NTFS/FAT32/exFAT) USB drive contiguous from Linux, so ISOs that need to be in one piece boot.
 - **Offline addons:** the `--offline` bundle now also carries LMS (Lyrion) + Squeezelite, Asterisk Intercom, VNC, WireGuard and the Emergency Hotspot; their normal installs use it automatically when there's no internet.
 - **Emergency Hotspot fix:** by default it now starts only when the local network is unreachable (router *and* internet), not merely when there's no internet - on a LAN without internet it used to start on every boot. Existing setups keep the old check until Advanced → Emergency Hotspot → Reconfigure.

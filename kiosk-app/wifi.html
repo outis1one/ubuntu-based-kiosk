@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>WiFi</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      background: #2c3e50;
+      color: #ecf0f1;
+      height: 100vh;
+      overflow-y: auto;
+      padding: 24px;
+    }
+    h2 { text-align: center; margin-bottom: 16px; font-size: 26px; }
+    .hidden { display: none !important; }
+    label { display: block; margin: 14px 0 6px; font-size: 16px; color: #bdc3c7; }
+    input {
+      width: 100%;
+      padding: 14px;
+      font-size: 20px;
+      border: 2px solid #34495e;
+      border-radius: 10px;
+      background: #34495e;
+      color: #ecf0f1;
+      outline: none;
+    }
+    input:focus { border-color: #3498db; }
+    .row { display: flex; gap: 10px; align-items: center; }
+    .row input { flex: 1; }
+    button {
+      padding: 14px 20px;
+      font-size: 18px;
+      border: none;
+      border-radius: 10px;
+      font-weight: bold;
+      cursor: pointer;
+      color: #fff;
+      background: #34495e;
+    }
+    button:disabled { opacity: 0.5; cursor: default; }
+    .primary { background: #27ae60; }
+    .scan { background: #2980b9; }
+    .close { background: #e74c3c; }
+    .actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 20px; }
+    #status {
+      background: #34495e;
+      border-radius: 10px;
+      padding: 12px 14px;
+      font-size: 16px;
+      line-height: 1.5;
+    }
+    #message { margin-top: 16px; font-size: 17px; font-weight: bold; text-align: center; min-height: 24px; }
+    #message.error { color: #e74c3c; }
+    #message.ok { color: #2ecc71; }
+    #message.busy { color: #f1c40f; }
+    #networks {
+      list-style: none;
+      max-height: 260px;
+      overflow-y: auto;
+      border-radius: 10px;
+      background: #34495e;
+      margin-top: 8px;
+    }
+    #networks li {
+      display: flex;
+      justify-content: space-between;
+      padding: 12px 14px;
+      font-size: 18px;
+      border-bottom: 1px solid #2c3e50;
+      cursor: pointer;
+    }
+    #networks li:last-child { border-bottom: none; }
+    #networks li.selected { background: #2980b9; }
+    #networks li .meta { color: #bdc3c7; font-size: 15px; white-space: nowrap; margin-left: 12px; }
+    #networks li.empty { color: #95a5a6; cursor: default; }
+    .hint { text-align: center; font-size: 13px; color: #95a5a6; margin-top: 18px; }
+  </style>
+</head>
+<body>
+  <h2>📶 WiFi</h2>
+
+  <div id="pin-step" class="hidden">
+    <label for="pin">Enter the PIN</label>
+    <input id="pin" type="password" inputmode="numeric" autocomplete="off">
+    <div class="actions">
+      <button class="primary" id="pin-ok">✓ OK</button>
+      <button class="close" data-close>✗ Close</button>
+    </div>
+  </div>
+
+  <div id="wifi-step" class="hidden">
+    <div id="status">Checking…</div>
+
+    <div class="row" style="margin-top: 14px">
+      <label style="margin: 0; flex: 1">Networks nearby</label>
+      <button class="scan" id="scan">⟳ Scan</button>
+    </div>
+    <ul id="networks"><li class="empty">Scanning…</li></ul>
+
+    <label for="ssid">Network name</label>
+    <input id="ssid" type="text" autocomplete="off" spellcheck="false">
+
+    <label for="password">Password (empty for an open network)</label>
+    <div class="row">
+      <input id="password" type="password" autocomplete="off" spellcheck="false">
+      <button id="show">Show</button>
+    </div>
+
+    <div class="actions">
+      <button class="primary" id="connect">Connect</button>
+      <button class="close" data-close>✗ Close</button>
+    </div>
+  </div>
+
+  <div id="message"></div>
+  <div class="hint">Esc closes this screen. Closes by itself after 5 minutes untouched.</div>
+
+  <script>
+    const {ipcRenderer} = require('electron');
+    const $ = id => document.getElementById(id);
+    let busy = false;
+
+    function request(action, extra) {
+      return ipcRenderer.invoke('wifi-request', Object.assign({action}, extra || {}))
+        .catch(e => ({ok: false, error: String(e && e.message || e)}));
+    }
+
+    function message(text, kind) {
+      const m = $('message');
+      m.textContent = text || '';
+      m.className = kind || '';
+    }
+
+    function setBusy(on) {
+      busy = on;
+      for (const id of ['scan', 'connect', 'pin-ok']) $(id).disabled = on;
+    }
+
+    function signalBars(dbm) {
+      if (dbm >= -55) return '▂▄▆█';
+      if (dbm >= -67) return '▂▄▆';
+      if (dbm >= -78) return '▂▄';
+      return '▂';
+    }
+
+    async function refreshStatus() {
+      const s = await request('status');
+      const box = $('status');
+      if (!s.ok) { box.textContent = s.error || 'Status unavailable'; return; }
+      if (!s.iface) { box.textContent = 'No WiFi adapter found'; return; }
+      box.textContent = '';
+      const line = (text) => { const d = document.createElement('div'); d.textContent = text; box.appendChild(d); };
+      line(s.connected ? `Connected to "${s.ssid}" - ${s.ip}` : 'Not connected');
+      if (s.configured && s.configured !== s.ssid) line(`Saved network: "${s.configured}"`);
+      line(`Adapter: ${s.iface}`);
+      if (!$('ssid').value && (s.ssid || s.configured)) $('ssid').value = s.ssid || s.configured;
+    }
+
+    async function scan() {
+      if (busy) return;
+      setBusy(true);
+      message('Scanning…', 'busy');
+      const list = $('networks');
+      const r = await request('scan');
+      list.textContent = '';
+      if (!r.ok) {
+        message(r.error, 'error');
+        list.innerHTML = '<li class="empty">No scan results</li>';
+      } else {
+        message('');
+        if (!r.networks.length) list.innerHTML = '<li class="empty">No networks found - type the name below</li>';
+        for (const n of r.networks) {
+          const li = document.createElement('li');
+          const name = document.createElement('span');
+          name.textContent = n.ssid;
+          const meta = document.createElement('span');
+          meta.className = 'meta';
+          meta.textContent = (n.secure ? '🔒 ' : '') + signalBars(n.signal);
+          li.append(name, meta);
+          li.addEventListener('click', () => {
+            for (const other of list.children) other.classList.remove('selected');
+            li.classList.add('selected');
+            $('ssid').value = n.ssid;
+            $('password').value = '';
+            $('password').focus();
+          });
+          list.appendChild(li);
+        }
+      }
+      setBusy(false);
+    }
+
+    async function connect() {
+      if (busy) return;
+      const ssid = $('ssid').value;
+      const password = $('password').value;
+      if (!ssid) { message('Pick a network or type its name', 'error'); return; }
+      setBusy(true);
+      message(`Connecting to "${ssid}" (up to 30 seconds)…`, 'busy');
+      const r = await request('connect', {ssid, password});
+      if (r.ok) {
+        message(`✓ Connected to "${r.ssid}" - ${r.ip}`, 'ok');
+        $('password').value = '';
+      } else {
+        message(r.error || 'Connection failed', 'error');
+      }
+      setBusy(false);
+      refreshStatus();
+    }
+
+    async function unlock() {
+      if (busy) return;
+      setBusy(true);
+      const r = await request('unlock', {pin: $('pin').value});
+      setBusy(false);
+      $('pin').value = '';
+      if (r.ok) { showWifi(); } else { message(r.error, 'error'); $('pin').focus(); }
+    }
+
+    function showWifi() {
+      message('');
+      $('pin-step').classList.add('hidden');
+      $('wifi-step').classList.remove('hidden');
+      refreshStatus();
+      scan();
+    }
+
+    $('pin-ok').addEventListener('click', unlock);
+    $('pin').addEventListener('keydown', e => { if (e.key === 'Enter') unlock(); });
+    $('scan').addEventListener('click', scan);
+    $('connect').addEventListener('click', connect);
+    $('password').addEventListener('keydown', e => { if (e.key === 'Enter') connect(); });
+    $('ssid').addEventListener('keydown', e => { if (e.key === 'Enter') $('password').focus(); });
+    $('show').addEventListener('click', () => {
+      const p = $('password');
+      p.type = p.type === 'password' ? 'text' : 'password';
+      $('show').textContent = p.type === 'password' ? 'Show' : 'Hide';
+    });
+    for (const b of document.querySelectorAll('[data-close]')) b.addEventListener('click', () => request('close'));
+
+    request('needs-pin').then(r => {
+      if (r.ok && r.needsPin) {
+        $('pin-step').classList.remove('hidden');
+        $('pin').focus();
+      } else {
+        showWifi();
+      }
+    });
+  </script>
+</body>
+</html>
