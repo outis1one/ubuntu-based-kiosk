@@ -1,16 +1,26 @@
 # Installed by the custom ISO (iso/build-iso.sh) and enabled from its
 # autoinstall late-commands. Runs install.sh once, on tty1, the first
-# time the freshly installed system boots - takes tty1 over from getty
-# so an interactive install has a keyboard and screen, then hands tty1
-# back. /var/lib/kiosk-firstboot/pending is removed once the install
+# time the freshly installed system boots - ordered before getty@tty1,
+# so the login prompt only appears on tty1 once this has finished and
+# an interactive install has the keyboard and screen to itself. /var/lib/kiosk-firstboot/pending is removed once the install
 # finishes, so this is a no-op on every boot after that; an interrupted
 # or failed install leaves it in place and simply runs again next boot.
+#
+# Ordering, learned the hard way on 26.04:
+# - NOT After=cloud-final.service: cloud-final is After=multi-user.target,
+#   and multi-user.target (which wants this unit) is After= it - an
+#   ordering cycle, which systemd "fixes" at boot by dropping a job: this
+#   one, so the install silently never ran. (The script doesn't wait for
+#   cloud-init either, for the same reason - it would deadlock.)
+# - NOT Conflicts=getty@tty1: getty.target pulls getty@tty1 into the same
+#   boot transaction, and systemd resolves a conflict between two wanted
+#   jobs by dropping one. Before= alone is enough - getty@tty1 waits for
+#   this oneshot to finish.
 [Unit]
 Description=Ubuntu Based Kiosk first-boot install
-After=network-online.target systemd-user-sessions.service cloud-final.service plymouth-quit-wait.service
+After=network-online.target systemd-user-sessions.service plymouth-quit-wait.service
 Wants=network-online.target
 Before=getty@tty1.service
-Conflicts=getty@tty1.service
 ConditionPathExists=/var/lib/kiosk-firstboot/pending
 
 [Service]
