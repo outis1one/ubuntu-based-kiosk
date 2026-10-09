@@ -62,7 +62,9 @@ baresip_installed_version() {
 # `apt install baresip` with no configured extension isn't something
 # this menu should call done.
 baresip_is_installed() {
-    command -v baresip &>/dev/null && [[ -f "$BARESIP_CONFIG_DIR/accounts" ]]
+    # sudo: it's under the kiosk user's home, which the admin running this
+    # can't look inside (mode 750) - a plain [[ -f ]] is always false there.
+    command -v baresip &>/dev/null && sudo test -f "$BARESIP_CONFIG_DIR/accounts"
 }
 
 baresip_is_running() {
@@ -78,9 +80,9 @@ addon_asterisk_intercom_status() {
         else
             echo "Asterisk Intercom: Installed (v${ver:-unknown}) - Not running"
         fi
-        if [[ -f "$BARESIP_CONFIG_DIR/accounts" ]]; then
+        if sudo test -f "$BARESIP_CONFIG_DIR/accounts"; then
             local account
-            account=$(head -1 "$BARESIP_CONFIG_DIR/accounts" 2>/dev/null)
+            account=$(sudo head -1 "$BARESIP_CONFIG_DIR/accounts" 2>/dev/null)
             local extension="${account#<sip:}"
             extension="${extension%%@*}"
             [[ -n "$extension" ]] && echo "  Extension: $extension"

@@ -94,8 +94,17 @@ provision_install_packages() {
 
 provision_create_kiosk_user() {
     echo "[2/10] Creating kiosk user..."
+    local kiosk_groups=(audio video input plugdev netdev)
+    # Not every Ubuntu release ships all of these - 26.04 Server has no
+    # netdev group - and useradd refuses to create the user at all if any
+    # -G group is missing. Create missing ones as plain system groups
+    # (no-op when they exist).
+    local g
+    for g in "${kiosk_groups[@]}"; do
+        sudo groupadd -f -r "$g"
+    done
     if ! id "$KIOSK_USER" &>/dev/null; then
-        sudo useradd -m -s /bin/bash -G audio,video,input,plugdev,netdev "$KIOSK_USER"
+        sudo useradd -m -s /bin/bash -G "$(IFS=,; echo "${kiosk_groups[*]}")" "$KIOSK_USER"
         echo "$KIOSK_USER:kiosk" | sudo chpasswd
         log_success "Kiosk user created (default password: kiosk - change it)"
     else
@@ -129,7 +138,12 @@ provision_install_app() {
     echo "[4/10] Installing kiosk app..."
     # *.mjs: pdf-render.mjs (pdf.js only ships as a JavaScript module).
     sudo cp "$KIOSK_APP_SRC"/*.js "$KIOSK_APP_SRC"/*.mjs "$KIOSK_APP_SRC"/*.html "$KIOSK_APP_SRC/package.json" "$KIOSK_APP_SRC/start.sh" "$KIOSK_DIR/"
-    sudo chown "$KIOSK_USER:$KIOSK_USER" "$KIOSK_DIR"/*.js "$KIOSK_DIR"/*.mjs "$KIOSK_DIR"/*.html "$KIOSK_DIR/package.json" "$KIOSK_DIR/start.sh"
+    # Not `chown "$KIOSK_DIR"/*.js ...`: that glob is expanded by *this*
+    # (admin) shell before sudo runs, and the kiosk user's home is private
+    # (mode 750 on 26.04), so it can't be listed - the pattern stays literal
+    # and chown fails. find runs as root. Top level only: node_modules is
+    # already the kiosk user's, and chrome-sandbox inside it must stay root's.
+    sudo find "$KIOSK_DIR" -maxdepth 1 -type f -exec chown "$KIOSK_USER:$KIOSK_USER" {} +
     sudo chmod +x "$KIOSK_DIR/start.sh"
 
     if offline_mode_active; then
