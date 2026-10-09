@@ -138,7 +138,12 @@ provision_install_app() {
     echo "[4/10] Installing kiosk app..."
     # *.mjs: pdf-render.mjs (pdf.js only ships as a JavaScript module).
     sudo cp "$KIOSK_APP_SRC"/*.js "$KIOSK_APP_SRC"/*.mjs "$KIOSK_APP_SRC"/*.html "$KIOSK_APP_SRC/package.json" "$KIOSK_APP_SRC/start.sh" "$KIOSK_DIR/"
-    sudo chown "$KIOSK_USER:$KIOSK_USER" "$KIOSK_DIR"/*.js "$KIOSK_DIR"/*.mjs "$KIOSK_DIR"/*.html "$KIOSK_DIR/package.json" "$KIOSK_DIR/start.sh"
+    # Not `chown "$KIOSK_DIR"/*.js ...`: that glob is expanded by *this*
+    # (admin) shell before sudo runs, and the kiosk user's home is private
+    # (mode 750 on 26.04), so it can't be listed - the pattern stays literal
+    # and chown fails. find runs as root. Top level only: node_modules is
+    # already the kiosk user's, and chrome-sandbox inside it must stay root's.
+    sudo find "$KIOSK_DIR" -maxdepth 1 -type f -exec chown "$KIOSK_USER:$KIOSK_USER" {} +
     sudo chmod +x "$KIOSK_DIR/start.sh"
 
     if offline_mode_active; then
