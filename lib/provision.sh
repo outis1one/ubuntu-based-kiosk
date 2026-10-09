@@ -216,8 +216,32 @@ provision_configure_display() {
     sudo udevadm control --reload-rules
 
     provision_configure_lightdm_autologin
+    provision_install_wifi_helper
 
     log_success "Display configured"
+}
+
+# The kiosk app's WiFi screen (Ctrl+Alt+Shift+Super+W) - joining WiFi from
+# the kiosk itself when the console is switched off. The app runs as the
+# kiosk user; the netplan write is done by this one root helper, which
+# the kiosk user may run through sudo and nothing else (it only does
+# status/scan/connect - see its header). Here rather than its own
+# provisioning step so Advanced -> Upgrade, which re-runs this function,
+# installs it on an existing kiosk too. The sudoers rule is validated
+# before it goes in place, like the Web UI's: a broken sudoers.d file
+# breaks sudo for everyone.
+provision_install_wifi_helper() {
+    provision_install_file "usr/local/bin/kiosk-wifi-helper" "$BIN_DIR/kiosk-wifi-helper" 755
+    local tmp
+    tmp=$(mktemp)
+    echo "${KIOSK_USER} ALL=(root) NOPASSWD: ${BIN_DIR}/kiosk-wifi-helper" > "$tmp"
+    if sudo visudo -c -f "$tmp" &>/dev/null; then
+        sudo mkdir -p "$SUDOERS_D_DIR"
+        sudo install -m 0440 -o root -g root "$tmp" "$SUDOERS_D_DIR/kiosk-wifi"
+    else
+        log_warning "Couldn't set up the kiosk WiFi screen's permission - Ctrl+Alt+Shift+Super+W won't be able to connect"
+    fi
+    rm -f "$tmp"
 }
 
 provision_configure_firewall() {

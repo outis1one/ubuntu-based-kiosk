@@ -116,6 +116,7 @@ action_complete_uninstall() {
 
     echo "[7/12] Removing remaining scripts..."
     sudo rm -f "$BIN_DIR"/kiosk-*
+    sudo rm -f "$SUDOERS_D_DIR/kiosk-wifi"
     sudo rm -f /etc/udev/rules.d/99-kiosk-hotplug.rules
     sudo udevadm control --reload-rules 2>/dev/null || true
 

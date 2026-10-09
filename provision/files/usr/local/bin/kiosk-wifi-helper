@@ -1,0 +1,273 @@
+#!/bin/bash
+################################################################################
+# kiosk-wifi-helper - the root side of the kiosk app's WiFi screen
+# (Ctrl+Alt+Shift+Super+W), for joining a WiFi network from the kiosk
+# itself when the console (Ctrl+Alt+F1..F6) is switched off.
+#
+# The kiosk user may run this one script via passwordless sudo
+# (/etc/sudoers.d/kiosk-wifi, written by lib/provision.sh) - it does a
+# fixed set of things and nothing else:
+#
+#   kiosk-wifi-helper status     {"iface","connected","ssid","ip","configured"}
+#   kiosk-wifi-helper scan       {"iface","networks":[{"ssid","signal","secure"}]}
+#   kiosk-wifi-helper connect    stdin {"ssid","password"} -> {"ok","ip"|"error"}
+#
+# Every reply is one JSON line on stdout, exit 0 on success. connect
+# writes the same netplan file as Core Settings -> WiFi (menus/wifi.sh,
+# 60-kiosk-wifi.yaml) and puts the previous one back if the interface
+# gets no address - a typo in the password doesn't lose a WiFi network
+# that was working. The password comes in on stdin, never argv (argv is
+# visible to every user in ps).
+################################################################################
+set -uo pipefail
+
+NETPLAN_DIR="${NETPLAN_DIR:-/etc/netplan}"
+SYS_CLASS="${KIOSK_WIFI_SYS_CLASS:-/sys/class}"   # overridable for tests
+WIFI_NETPLAN_FILE="$NETPLAN_DIR/60-kiosk-wifi.yaml"
+LOCK_FILE="${KIOSK_WIFI_LOCK:-/run/kiosk-wifi-helper.lock}"
+CONNECT_WAIT="${KIOSK_WIFI_CONNECT_WAIT:-30}"
+
+reply_error() {
+    jq -cn --arg e "$1" '{ok:false,error:$e}'
+    exit 1
+}
+
+# The first wireless interface, by what it is (sysfs wireless/ or
+# phy80211), falling back to the wl* naming convention. Same as
+# menus/wifi.sh's wifi_detect_iface.
+detect_iface() {
+    local d
+    for d in $SYS_CLASS/net/*; do
+        if [[ -d "$d/wireless" || -e "$d/phy80211" ]]; then
+            basename "$d"
+            return 0
+        fi
+    done
+    for d in $SYS_CLASS/net/wl*; do
+        [[ -e "$d" ]] || continue
+        basename "$d"
+        return 0
+    done
+    return 1
+}
+
+# Clear an rfkill soft block (a hard block can't be cleared from software).
+unblock() {
+    local r
+    for r in $SYS_CLASS/rfkill/rfkill*; do
+        [[ "$(cat "$r/type" 2>/dev/null)" == "wlan" ]] || continue
+        [[ "$(cat "$r/soft" 2>/dev/null)" == "1" ]] && echo 0 > "$r/soft" 2>/dev/null
+    done
+    return 0
+}
+
+hard_blocked() {
+    local r
+    for r in $SYS_CLASS/rfkill/rfkill*; do
+        [[ "$(cat "$r/type" 2>/dev/null)" == "wlan" ]] || continue
+        [[ "$(cat "$r/hard" 2>/dev/null)" == "1" ]] && return 0
+    done
+    return 1
+}
+
+iface_ip() {
+    ip -4 -o addr show dev "$1" 2>/dev/null \
+        | awk '{for (i = 1; i < NF; i++) if ($i == "inet") { sub("/.*", "", $(i+1)); print $(i+1); exit }}'
+}
+
+# YAML single-quoted scalar - the quote itself doubled is the only escape.
+yaml_quote() {
+    local v="$1"
+    printf "'%s'" "${v//\'/\'\'}"
+}
+
+# iw prints a backslash, a leading/trailing space and anything
+# unprintable in an SSID as \xNN (a backslash itself is always \x5c,
+# so there are no other escapes) - %b turns those back into the bytes.
+unescape_ssid() {
+    printf '%b' "$1"
+}
+
+# The SSID the interface is associated with right now, if any.
+current_ssid() {
+    unescape_ssid "$(iw dev "$1" link 2>/dev/null | sed -n 's/^[[:space:]]*SSID: //p' | head -1)"
+}
+
+# The SSID in our netplan file, if any (the first access point's key).
+configured_ssid() {
+    [[ -f "$WIFI_NETPLAN_FILE" ]] || return 0
+    python3 -I -c '
+import sys, yaml
+try:
+    d = yaml.safe_load(open(sys.argv[1]))
+    for w in (d.get("network", {}).get("wifis") or {}).values():
+        for ssid in (w.get("access-points") or {}):
+            print(ssid); sys.exit(0)
+except Exception:
+    pass' "$WIFI_NETPLAN_FILE" 2>/dev/null
+}
+
+need_iface() {
+    IFACE=$(detect_iface) || reply_error "No WiFi adapter found. If it's a USB adapter, check it's plugged in."
+    command -v iw >/dev/null || reply_error "WiFi support (iw, wpasupplicant) isn't installed - run Core Settings -> WiFi once from the admin menu"
+}
+
+do_status() {
+    local iface ssid="" ip="" configured
+    configured=$(configured_ssid)
+    if ! iface=$(detect_iface); then
+        jq -cn --arg c "$configured" '{ok:true,iface:"",connected:false,ssid:"",ip:"",configured:$c}'
+        return 0
+    fi
+    ssid=$(current_ssid "$iface")
+    ip=$(iface_ip "$iface")
+    jq -cn --arg i "$iface" --arg s "$ssid" --arg a "$ip" --arg c "$configured" \
+        '{ok:true,iface:$i,connected:($s != "" and $a != ""),ssid:$s,ip:$a,configured:$c}'
+}
+
+do_scan() {
+    need_iface
+    unblock
+    hard_blocked && reply_error "WiFi is switched off by a hardware switch or in the BIOS/UEFI"
+    ip link set "$IFACE" up 2>/dev/null || reply_error "Couldn't switch on $IFACE"
+
+    # "Device or resource busy" while wpa_supplicant is mid-scan - retry.
+    local out="" try
+    for try in 1 2 3; do
+        out=$(iw dev "$IFACE" scan 2>/dev/null) && break
+        out=""
+        sleep 2
+    done
+    # wpa_supplicant owns the interface and refuses iw: use its last scan.
+    if [[ -z "$out" ]] && command -v wpa_cli >/dev/null; then
+        wpa_cli -i "$IFACE" scan >/dev/null 2>&1
+        sleep 4
+        wpa_cli -i "$IFACE" scan_results 2>/dev/null | awk -F'\t' '
+            NR > 1 && $5 != "" { secure = ($4 ~ /WPA|WEP|RSN|SAE/) ? 1 : 0; print $3 "\t" secure "\t" $5 }' \
+            > "$TMP_SCAN"
+    else
+        # BSS blocks: signal, SSID, and RSN/WPA/Privacy for "secured".
+        printf '%s\n' "$out" | awk '
+            function flush() { if (ssid != "") print sig "\t" sec "\t" ssid; ssid = ""; sig = -100; sec = 0 }
+            /^BSS / { flush() }
+            /^\tsignal:/ { sig = int($2) }
+            /^\tSSID: / { sub(/^\tSSID: /, ""); ssid = $0 }
+            /^\t(RSN|WPA):/ { sec = 1 }
+            /^\tcapability:.*Privacy/ { sec = 1 }
+            END { flush() }' \
+            | while IFS=$'\t' read -r sig sec ssid; do
+                printf '%s\t%s\t%s\n' "$sig" "$sec" "$(unescape_ssid "$ssid")"
+            done > "$TMP_SCAN"
+    fi
+
+    # Strongest first, one entry per SSID.
+    jq -cR --arg i "$IFACE" -n '
+        [inputs | split("\t") | select(length >= 3)
+            | {signal: (.[0] | tonumber? // -100), secure: (.[1] == "1"), ssid: (.[2:] | join("\t"))}]
+        | group_by(.ssid) | map(max_by(.signal)) | sort_by(-.signal)
+        | {ok: true, iface: $i, networks: .}' < "$TMP_SCAN"
+}
+
+do_connect() {
+    need_iface
+    local input ssid password
+    input=$(head -c 4096)
+    ssid=$(jq -er '.ssid | strings' <<< "$input" 2>/dev/null) || reply_error "No network name given"
+    password=$(jq -r '.password // "" | strings' <<< "$input" 2>/dev/null) || reply_error "Bad request"
+
+    local ssid_bytes
+    ssid_bytes=$(printf '%s' "$ssid" | wc -c)
+    (( ssid_bytes >= 1 && ssid_bytes <= 32 )) || reply_error "A network name is 1-32 characters"
+    # No control characters (newlines etc.) in either - they can't be in a
+    # real SSID/passphrase and would only serve to break the YAML.
+    [[ "$ssid$password" == *[[:cntrl:]]* ]] && reply_error "The name or password contains an invalid character"
+    if [[ -n "$password" ]]; then
+        local plen=${#password}
+        if ! (( plen >= 8 && plen <= 63 )) && ! [[ "$password" =~ ^[0-9A-Fa-f]{64}$ ]]; then
+            reply_error "A WiFi password is 8-63 characters"
+        fi
+    fi
+
+    unblock
+    hard_blocked && reply_error "WiFi is switched off by a hardware switch or in the BIOS/UEFI"
+
+    local backup="" new
+    mkdir -p "$NETPLAN_DIR"
+    if [[ -f "$WIFI_NETPLAN_FILE" ]]; then
+        backup="${WIFI_NETPLAN_FILE}.backup-$(date +%Y%m%d-%H%M%S)"
+        cp -p "$WIFI_NETPLAN_FILE" "$backup"
+    fi
+
+    new=$(mktemp "$NETPLAN_DIR/.kiosk-wifi.XXXXXX")
+    {
+        echo "network:"
+        echo "  version: 2"
+        echo "  renderer: networkd"
+        echo "  wifis:"
+        echo "    $IFACE:"
+        echo "      dhcp4: true"
+        echo "      dhcp6: false"
+        echo "      optional: true"
+        echo "      access-points:"
+        if [[ -n "$password" ]]; then
+            echo "        $(yaml_quote "$ssid"):"
+            echo "          password: $(yaml_quote "$password")"
+        else
+            echo "        $(yaml_quote "$ssid"): {}"
+        fi
+    } > "$new"
+    chmod 0600 "$new"
+    mv -f "$new" "$WIFI_NETPLAN_FILE"
+
+    local err
+    if ! err=$(netplan apply 2>&1); then
+        restore "$backup"
+        reply_error "netplan apply failed: ${err:0:300}"
+    fi
+
+    local i addr="" now
+    for (( i = 0; i < CONNECT_WAIT; i++ )); do
+        now=$(current_ssid "$IFACE")
+        addr=$(iface_ip "$IFACE")
+        [[ "$now" == "$ssid" && -n "$addr" ]] && break
+        addr=""
+        sleep 1
+    done
+
+    if [[ -z "$addr" ]]; then
+        restore "$backup"
+        if [[ -n "$backup" ]]; then
+            reply_error "Couldn't connect to \"$ssid\" - wrong password, or out of range. The previous WiFi setting was put back."
+        fi
+        reply_error "Couldn't connect to \"$ssid\" - wrong password, or out of range."
+    fi
+    jq -cn --arg s "$ssid" --arg a "$addr" --arg i "$IFACE" '{ok:true,ssid:$s,ip:$a,iface:$i}'
+}
+
+# Put the previous netplan WiFi file back (or remove ours if there was
+# none) and re-apply, after a failed connect.
+restore() {
+    if [[ -n "$1" && -f "$1" ]]; then
+        mv -f "$1" "$WIFI_NETPLAN_FILE"
+    else
+        rm -f "$WIFI_NETPLAN_FILE"
+    fi
+    netplan apply >/dev/null 2>&1
+}
+
+[[ $EUID -eq 0 ]] || reply_error "must run as root (sudo)"
+command -v jq >/dev/null || { echo '{"ok":false,"error":"jq is not installed"}'; exit 1; }
+
+TMP_SCAN=$(mktemp)
+trap 'rm -f "$TMP_SCAN"' EXIT
+
+# One at a time - two overlapping netplan applies/backups would race.
+exec 9> "$LOCK_FILE"
+flock -w 60 9 || reply_error "Another WiFi change is still running - try again in a moment"
+
+case "${1:-}" in
+    status)  do_status ;;
+    scan)    do_scan ;;
+    connect) do_connect ;;
+    *)       reply_error "unknown action: ${1:-}" ;;
+esac
