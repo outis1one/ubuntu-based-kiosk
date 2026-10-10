@@ -218,17 +218,24 @@ function hiddenPinRequired(){
   return!readHiddenPinEntry().none;
 }
 
-function checkHiddenPin(pin){
-  const blocked=throttleWaitSeconds(hiddenPinThrottle);
+// checkCode(THROTTLE, HASH, CODE, LABEL) - CODE against the stored SHA-256
+// HASH, with THROTTLE's slowdown. {ok} or {ok:false, error, waitSeconds?}.
+function checkCode(throttle,hash,code,label){
+  const blocked=throttleWaitSeconds(throttle);
   if(blocked)return{ok:false,waitSeconds:blocked,error:'Too many wrong tries - wait '+blocked+'s'};
-  const entry=readHiddenPinEntry();
-  if(entry.none||sha256Hex(pin)===entry.hash){
-    hiddenPinThrottle.failures=0;
+  if(sha256Hex(code)===hash){
+    throttle.failures=0;
     return{ok:true};
   }
-  const wait=throttleFail(hiddenPinThrottle);
-  console.log('[PIN] Wrong hidden-sites PIN, attempt',hiddenPinThrottle.failures);
-  return wait?{ok:false,waitSeconds:wait,error:'Too many wrong tries - wait '+wait+'s'}:{ok:false,error:'Incorrect PIN'};
+  const wait=throttleFail(throttle);
+  console.log('[CODE] Wrong',label+', attempt',throttle.failures);
+  return wait?{ok:false,waitSeconds:wait,error:'Too many wrong tries - wait '+wait+'s'}:{ok:false,error:'Incorrect '+label};
+}
+
+function checkHiddenPin(pin){
+  const entry=readHiddenPinEntry();
+  if(entry.none)return{ok:true};
+  return checkCode(hiddenPinThrottle,entry.hash,pin,'PIN');
 }
 
 // Password lockout functions
@@ -1197,10 +1204,11 @@ function showHiddenTab(index){
   showingHidden=true;
 }
 
-// WiFi screen (hold Shift+W+S+F+H, or Ctrl+Alt+Shift+Super+W): join a WiFi network from the kiosk
+// WiFi screen (Ctrl+Alt+Super+W): join a WiFi network from the kiosk
 // itself, for when the console (Ctrl+Alt+F1..F6) is switched off and the
-// admin menu can't be reached. Gated by the hidden-sites PIN
-// (checkHiddenPin - same PIN and slowdown as F10). The root
+// admin menu can't be reached. Gated by the kiosk's unlock code - the
+// lock screen's PIN or password, with its slowdown - or, when password
+// protection is off, the hidden-sites PIN (see wifiGate). The root
 // work is done by /usr/local/bin/kiosk-wifi-helper, which the kiosk user
 // may run through sudo and nothing else (/etc/sudoers.d/kiosk-wifi).
 const WIFI_HELPER='/usr/local/bin/kiosk-wifi-helper';
@@ -1257,7 +1265,7 @@ function showWifiWindow(){
     wifiWindow.focus();
     return;
   }
-  wifiUnlocked=!hiddenPinRequired();
+  wifiUnlocked=!wifiGate();
   let width=720,height=820;
   if(mainWindow&&!mainWindow.isDestroyed()){
     const[w,h]=mainWindow.getContentSize();
@@ -1283,37 +1291,23 @@ function showWifiWindow(){
   console.log('[WIFI] WiFi screen opened');
 }
 
-// Shift+W+S+F+H, all held together, opens the WiFi screen. A globalShortcut
-// can only have one non-modifier key, so this watches the raw key events
-// of every page/window instead (before-input-event): a key counts as held
-// from its keyDown (autorepeat keeps refreshing it) until its keyUp, or
-// for 1.5s if the keyUp never arrives (focus moved mid-press). Physical
-// keys (input.code), so it's the same keys on any keyboard layout. The
-// key presses that complete the chord are swallowed, not typed into the
-// page.
-const WIFI_CHORD_KEYS=['KeyW','KeyS','KeyF','KeyH'];
-const WIFI_CHORD_HOLD_MS=1500;
-const wifiChordDown=new Map();
-
-function wifiChordInput(event,input){
-  if(!WIFI_CHORD_KEYS.includes(input.code))return;
-  if(input.type==='keyUp'){wifiChordDown.delete(input.code);return;}
-  if(input.type!=='keyDown')return;
-  const now=Date.now();
-  wifiChordDown.set(input.code,now);
-  if(!input.shift||input.control||input.alt||input.meta)return;
-  const all=WIFI_CHORD_KEYS.every(k=>now-(wifiChordDown.get(k)||0)<WIFI_CHORD_HOLD_MS);
-  if(!all)return;
-  event.preventDefault();
-  if(input.isAutoRepeat)return;
-  wifiChordDown.clear();
-  console.log('[WIFI] Shift+W+S+F+H pressed');
-  showWifiWindow();
+// Which code guards the WiFi screen: the unlock code (PIN or password)
+// when password protection is on, else the hidden-sites PIN; null if
+// neither is set (hidden PIN turned off and no lock code).
+function wifiGate(){
+  if(enablePasswordProtection&&lockoutPassword)return{kind:'lock',codeType:lockoutCodeType};
+  if(hiddenPinRequired())return{kind:'hidden',codeType:'pin'};
+  return null;
 }
 
-app.on('web-contents-created',(e,contents)=>{
-  contents.on('before-input-event',wifiChordInput);
-});
+function checkWifiCode(code){
+  const gate=wifiGate();
+  if(!gate)return{ok:true};
+  if(gate.kind==='lock'){
+    return checkCode(lockoutThrottle,lockoutPassword,code,gate.codeType==='pin'?'PIN':'password');
+  }
+  return checkHiddenPin(code);
+}
 
 ipcMain.handle('wifi-request',async(event,req)=>{
   if(!wifiWindow||wifiWindow.isDestroyed()||event.sender!==wifiWindow.webContents){
@@ -1322,10 +1316,13 @@ ipcMain.handle('wifi-request',async(event,req)=>{
   resetWifiIdleTimer();
   const action=req&&req.action;
   if(action==='close'){closeWifiWindow();return{ok:true};}
-  if(action==='needs-pin')return{ok:true,needsPin:!wifiUnlocked};
+  if(action==='needs-pin'){
+    const gate=wifiGate();
+    return{ok:true,needsPin:!wifiUnlocked,codeType:gate?gate.codeType:'pin'};
+  }
   if(action==='unlock'){
     if(wifiUnlocked)return{ok:true};
-    const result=checkHiddenPin(req.pin);
+    const result=checkWifiCode(req.pin);
     if(result.ok)wifiUnlocked=true;
     return result;
   }
@@ -1607,20 +1604,13 @@ async function createWindow(){
   // (see createCodeThrottle).
   ipcMain.on('check-lockout-password',(event,code)=>{
     if(!lockoutWindow||lockoutWindow.isDestroyed()||event.sender!==lockoutWindow.webContents)return;
-    const blocked=throttleWaitSeconds(lockoutThrottle);
-    if(blocked){
-      event.sender.send('password-incorrect',{waitSeconds:blocked});
-      return;
-    }
     const expected=(lockoutMode==='boot'&&bootPassword)?bootPassword:lockoutPassword;
-    if(sha256Hex(code)===expected){
-      lockoutThrottle.failures=0;
+    const result=checkCode(lockoutThrottle,expected,code,'code');
+    if(result.ok){
       unlockScreen();
       return;
     }
-    const waitSeconds=throttleFail(lockoutThrottle);
-    console.log('[LOCKOUT] Wrong code, attempt',lockoutThrottle.failures);
-    event.sender.send('password-incorrect',{waitSeconds});
+    event.sender.send('password-incorrect',{waitSeconds:result.waitSeconds||0});
   });
 
   ipcMain.handle('check-hidden-pin',(event,pin)=>{
@@ -1798,9 +1788,10 @@ async function createWindow(){
   globalShortcut.register('Control+Alt+Delete',showPowerMenu);
   globalShortcut.register('Control+Alt+P',showPowerMenu);
   globalShortcut.register('Control+Alt+Escape',showPowerMenu);
-  // Five keys on purpose - not something a visitor hits by accident.
-  if(!globalShortcut.register('Control+Alt+Shift+Super+W',showWifiWindow)){
-    console.error('[WIFI] Could not register Ctrl+Alt+Shift+Super+W');
+  // WiFi screen - code-gated (wifiGate), so an easy-to-press combo is fine.
+  // Fn isn't part of it: it never reaches the computer on most keyboards.
+  if(!globalShortcut.register('Control+Alt+Super+W',showWifiWindow)){
+    console.error('[WIFI] Could not register Ctrl+Alt+Super+W');
   }
   globalShortcut.register('Control+K',()=>{
     if(htmlKeyboardWindow&&!htmlKeyboardWindow.isDestroyed()){

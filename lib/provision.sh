@@ -221,7 +221,7 @@ provision_configure_display() {
     log_success "Display configured"
 }
 
-# The kiosk app's WiFi screen (Ctrl+Alt+Shift+Super+W) - joining WiFi from
+# The kiosk app's WiFi screen (Ctrl+Alt+Super+W) - joining WiFi from
 # the kiosk itself when the console is switched off. The app runs as the
 # kiosk user; the netplan write is done by this one root helper, which
 # the kiosk user may run through sudo and nothing else (it only does
@@ -239,7 +239,7 @@ provision_install_wifi_helper() {
         sudo mkdir -p "$SUDOERS_D_DIR"
         sudo install -m 0440 -o root -g root "$tmp" "$SUDOERS_D_DIR/kiosk-wifi"
     else
-        log_warning "Couldn't set up the kiosk WiFi screen's permission - Ctrl+Alt+Shift+Super+W won't be able to connect"
+        log_warning "Couldn't set up the kiosk WiFi screen's permission - Ctrl+Alt+Super+W won't be able to connect"
     fi
     rm -f "$tmp"
 }
