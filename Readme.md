@@ -262,7 +262,10 @@ The kiosk machine still needs a working internet connection (ethernet, or WiFi c
 - **Session lockout** after configured inactivity
 - **Scheduled lockout** at specific time daily 
 - **Display wake lockout** - Require password after display schedule
-- **Boot password** option - Require password on system startup
+- **Boot password** option - Require password on system startup, with the unlock code or **its own separate code**
+- **Password or PIN** - each code (unlock, boot) can be a password or a **4-8 digit PIN** entered on an on-screen number pad, so it works on a touch-only kiosk
+- **The kiosk's own codes** - set in Core Settings → Password Protection & Lockout or the Web UI; not the admin (sudo) password, which never needs to be shared
+- **Wrong-code slowdown** - after 5 wrong codes in a row the lock screen refuses input for 30 seconds, doubling up to 5 minutes, so a PIN can't be guessed through
 - **Full screen blocking** during lockout (no content visible)
 
 ### Navigation Security
@@ -1047,7 +1050,7 @@ When "Are you still here?" prompt appears (on manual or hidden sites):
 **During Lockout:**
 - Full black screen (no content visible)
 - All browser views detached for security
-- Password prompt displayed
+- Password field, or number pad for a PIN (the boot screen uses the boot code if one is set)
 - Limited power menu (no Reload option to prevent bypass)
 - Rotation and timers paused
 
@@ -1525,6 +1528,7 @@ full migration pass.
 - **Local files as sites:** an absolute path (`/home/kiosk/docs/menu.pdf`) shows a local page, PDF or image; a folder (`/home/kiosk/photos/`) plays as a full-screen **image slideshow** that picks up added/removed images within a minute. Works in both the Sites menu and the Web UI.
 - **Fix: the first-boot kiosk setup never started on 26.04.** Its service was ordered after cloud-init's final stage, which itself runs after `multi-user.target` - an ordering cycle that systemd broke by dropping the kiosk setup. It also "conflicted" with the tty1 login prompt, which systemd can resolve the same way. Both removed; checked with `systemd-analyze verify` against 26.04's own units. Rebuild the ISO to pick this up.
 - **WiFi tools in the base install:** `wpasupplicant` and `iw` are now installed (and bundled offline). A default Ubuntu Server install only has them if WiFi was set up in the installer; without them, Core Settings → WiFi couldn't connect an offline kiosk. The WiFi menu also installs them itself if missing.
+- **Lock screen PINs and a separate boot code:** the unlock code and the boot code can each be a password or a 4-8 digit PIN (on-screen number pad, works on touch screens), and the boot lock can have its own code. Repeated wrong codes now pause the lock screen (30s, doubling to 5 min). Set in Core Settings → Password Protection & Lockout or the Web UI's Lockout page. Existing settings keep working unchanged (password, same code at boot).
 - **New: WiFi from the kiosk screen** - hold Shift+W+S+F+H (or Ctrl+Alt+Shift+Super+W) to scan for and join a WiFi network right on the kiosk, PIN-protected, for kiosks with the consoles turned off. Reverts to the previous WiFi if the new one doesn't connect. See "WiFi from the kiosk screen".
 - **New: `iso/e2b-contig.sh`** - makes a file on an Easy2Boot (or any NTFS/FAT32/exFAT) USB drive contiguous from Linux, so ISOs that need to be in one piece boot.
 - **Offline addons:** the `--offline` bundle now also carries LMS (Lyrion) + Squeezelite, Asterisk Intercom, VNC, WireGuard and the Emergency Hotspot; their normal installs use it automatically when there's no internet.

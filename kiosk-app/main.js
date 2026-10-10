@@ -66,9 +66,15 @@ let lockoutAtTime="";
 let lockoutActiveStart="";
 let lockoutActiveEnd="";
 let requirePasswordOnBoot=false;
+let lockoutCodeType='password'; // 'password' or 'pin' (4-8 digits, keypad)
+let bootPassword='';           // separate boot code hash; '' = use lockoutPassword
+let bootCodeType='password';
 
 // Password lockout state
 let isLockedOut=false;
+let lockoutMode='unlock';   // 'boot' while the boot lock screen is up
+let lockoutFailures=0;
+let lockoutBlockedUntil=0;
 let lockoutWindow=null;
 let lockoutTimer=null;
 let lockoutActivityTime=Date.now();
@@ -103,6 +109,9 @@ function loadConfig(){
     lockoutActiveStart=config.lockoutActiveStart||"";
     lockoutActiveEnd=config.lockoutActiveEnd||"";
     requirePasswordOnBoot=(config.requirePasswordOnBoot===true);
+    lockoutCodeType=(config.lockoutCodeType==='pin')?'pin':'password';
+    bootPassword=config.bootPassword||'';
+    bootCodeType=(config.bootCodeType==='pin')?'pin':'password';
     autheliaURL=config.autheliaURL||'';
     autheliaUsername=config.autheliaUsername||'';
     autheliaEncryptedPassword=config.autheliaEncryptedPassword||'';
@@ -118,6 +127,7 @@ function loadConfig(){
     if(lockoutAtTime)console.log('[CONFIG] Lock at time:',lockoutAtTime);
     if(lockoutActiveStart&&lockoutActiveEnd)console.log('[CONFIG] Active hours:',lockoutActiveStart,'-',lockoutActiveEnd);
     console.log('[CONFIG] Require password on boot:',requirePasswordOnBoot);
+    console.log('[CONFIG] Unlock code:',lockoutCodeType,'| boot code:',bootPassword?('separate '+bootCodeType):'same as unlock');
     console.log('[CONFIG] Sites:',config.tabs?.length||0);
     console.log('[CONFIG] ╚═══════════════════════════════╝');
     
@@ -154,10 +164,11 @@ function markKeyboardActivity(){
 }
 
 // Password lockout functions
-function showLockoutScreen(){
+function showLockoutScreen(mode){
   if(isLockedOut||!enablePasswordProtection||!lockoutPassword)return;
 
   isLockedOut=true;
+  lockoutMode=(mode==='boot')?'boot':'unlock';
   console.log('[LOCKOUT] Showing lockout screen');
   closeWifiWindow();
 
@@ -193,81 +204,9 @@ function showLockoutScreen(){
     }
   });
 
-  lockoutWindow.loadURL('data:text/html;charset=utf-8,'+encodeURIComponent(`
-    <!DOCTYPE html>
-    <html>
-    <head>
-      <meta charset="UTF-8">
-      <style>
-        *{margin:0;padding:0;box-sizing:border-box;}
-        body{
-          background:#000;
-          color:#fff;
-          font-family:Arial,sans-serif;
-          display:flex;
-          justify-content:center;
-          align-items:center;
-          height:100vh;
-          overflow:hidden;
-        }
-        .lockout-container{
-          text-align:center;
-          max-width:400px;
-        }
-        h1{font-size:32px;margin-bottom:30px;}
-        input{
-          width:100%;
-          padding:15px;
-          font-size:18px;
-          border:2px solid #fff;
-          background:#000;
-          color:#fff;
-          border-radius:5px;
-          margin-bottom:20px;
-        }
-        button{
-          padding:15px 30px;
-          font-size:18px;
-          background:#fff;
-          color:#000;
-          border:none;
-          border-radius:5px;
-          cursor:pointer;
-        }
-        button:hover{background:#ccc;}
-        .error{color:#f44;margin-top:15px;display:none;}
-      </style>
-    </head>
-    <body>
-      <div class="lockout-container">
-        <h1>Session Locked</h1>
-        <input type="password" id="password" placeholder="Enter password to unlock" autofocus>
-        <button onclick="checkPassword()">Unlock</button>
-        <div class="error" id="error">Incorrect password</div>
-      </div>
-      <script>
-        const crypto=require('crypto');
-        const{ipcRenderer}=require('electron');
-
-        function checkPassword(){
-          const pass=document.getElementById('password').value;
-          const hash=crypto.createHash('sha256').update(pass).digest('hex');
-          ipcRenderer.send('check-lockout-password',hash);
-        }
-
-        document.getElementById('password').addEventListener('keydown',(e)=>{
-          if(e.key==='Enter')checkPassword();
-        });
-
-        ipcRenderer.on('password-incorrect',()=>{
-          document.getElementById('error').style.display='block';
-          document.getElementById('password').value='';
-          document.getElementById('password').focus();
-        });
-      </script>
-    </body>
-    </html>
-  `));
+  // The boot screen takes the separate boot code when one is set.
+  const codeType=(lockoutMode==='boot'&&bootPassword)?bootCodeType:lockoutCodeType;
+  lockoutWindow.loadFile(path.join(__dirname,'lockscreen.html'),{query:{type:codeType,mode:lockoutMode}});
 
   lockoutWindow.on('closed',()=>{
     lockoutWindow=null;
@@ -1585,7 +1524,7 @@ async function createWindow(){
       if(enablePasswordProtection&&lockoutPassword&&requirePasswordOnBoot&&fs.existsSync(bootFlag)){
         console.log('[LOCKOUT] Boot detected, requiring password BEFORE showing sites');
         fs.unlinkSync(bootFlag);
-        showLockoutScreen();
+        showLockoutScreen('boot');
       }else{
         attachView(startIndex);
         startMasterTimer();
@@ -1609,14 +1548,31 @@ async function createWindow(){
   ipcMain.on('close-keyboard',()=>{closeHTMLKeyboard();});
   ipcMain.on('keyboard-activity',()=>{markKeyboardActivity();});
   ipcMain.on('show-pause-dialog',()=>{showPauseDialog();});
-  ipcMain.on('check-lockout-password',(event,hash)=>{
-    if(hash===lockoutPassword){
-      unlockScreen();
-    }else{
-      if(lockoutWindow&&!lockoutWindow.isDestroyed()){
-        lockoutWindow.webContents.send('password-incorrect');
-      }
+  // The lock screen sends the code as typed; compared here as a SHA-256
+  // hash (how the menu and Web UI store it). After every 5 wrong codes in
+  // a row the screen refuses input for a while - 30s, doubling up to 5
+  // minutes - so a 4-digit PIN can't simply be tried through.
+  ipcMain.on('check-lockout-password',(event,code)=>{
+    if(!lockoutWindow||lockoutWindow.isDestroyed()||event.sender!==lockoutWindow.webContents)return;
+    if(Date.now()<lockoutBlockedUntil){
+      event.sender.send('password-incorrect',{waitSeconds:Math.ceil((lockoutBlockedUntil-Date.now())/1000)});
+      return;
     }
+    const expected=(lockoutMode==='boot'&&bootPassword)?bootPassword:lockoutPassword;
+    const hash=crypto.createHash('sha256').update(String(code||'')).digest('hex');
+    if(hash===expected){
+      lockoutFailures=0;
+      unlockScreen();
+      return;
+    }
+    lockoutFailures++;
+    console.log('[LOCKOUT] Wrong code, attempt',lockoutFailures);
+    let waitSeconds=0;
+    if(lockoutFailures%5===0){
+      waitSeconds=Math.min(300,30*Math.pow(2,lockoutFailures/5-1));
+      lockoutBlockedUntil=Date.now()+waitSeconds*1000;
+    }
+    event.sender.send('password-incorrect',{waitSeconds});
   });
 
   ipcMain.on('get-config',(event)=>{

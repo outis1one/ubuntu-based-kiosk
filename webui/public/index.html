@@ -115,7 +115,7 @@
     <section class="page" id="page-lockout">
       <div class="page-header">
         <h1>Password Protection &amp; Lockout</h1>
-        <p>Blank the screen after inactivity and require a password to unlock.</p>
+        <p>Blank the screen after inactivity and require a password or PIN to unlock. These are the kiosk's own codes, not the admin (sudo) password.</p>
       </div>
       <div class="card">
         <form id="lockout-form">
@@ -123,11 +123,18 @@
 
           <div id="lockout-fields">
             <label>
+              Unlock with
+              <select name="lockoutCodeType">
+                <option value="password">Password (needs a keyboard)</option>
+                <option value="pin">PIN, 4-8 digits (on-screen number pad)</option>
+              </select>
+            </label>
+            <label>
               <span id="password-label">Set lockout password</span>
               <input type="password" name="newLockoutPassword" autocomplete="new-password">
             </label>
             <label>
-              Confirm password
+              Confirm password/PIN
               <input type="password" id="lockout-password-confirm" autocomplete="new-password">
             </label>
 
@@ -142,7 +149,33 @@
               <input type="time" name="lockoutAtTime" id="lockout-at-time" disabled>
             </label>
 
-            <label class="checkbox"><input type="checkbox" name="requirePasswordOnBoot"> Require password on system boot</label>
+            <label class="checkbox"><input type="checkbox" name="requirePasswordOnBoot" id="boot-lock-enabled"> Lock the kiosk on system boot</label>
+            <div id="boot-code-fields">
+              <label>
+                Boot code
+                <select name="bootCodeMode" id="boot-code-mode">
+                  <option value="same">Same as the unlock code</option>
+                  <option value="separate">Its own password/PIN</option>
+                </select>
+              </label>
+              <div id="boot-separate-fields">
+                <label>
+                  Boot code type
+                  <select name="bootCodeType">
+                    <option value="password">Password (needs a keyboard)</option>
+                    <option value="pin">PIN, 4-8 digits (on-screen number pad)</option>
+                  </select>
+                </label>
+                <label>
+                  <span id="boot-password-label">Set boot password/PIN</span>
+                  <input type="password" name="newBootPassword" autocomplete="new-password">
+                </label>
+                <label>
+                  Confirm boot password/PIN
+                  <input type="password" id="boot-password-confirm" autocomplete="new-password">
+                </label>
+              </div>
+            </div>
           </div>
 
           <div class="button-row"><button type="submit">Save Password Protection &amp; Lockout</button></div>

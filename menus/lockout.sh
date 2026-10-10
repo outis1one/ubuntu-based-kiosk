@@ -2,6 +2,11 @@
 ################################################################################
 # menus/lockout.sh - "Password Protection & Lockout" menu.
 #
+# The unlock code and the (optional, separate) boot code are each either
+# a password or a 4-8 digit PIN - the kiosk's own codes, independent of
+# the admin account's sudo password. A PIN gets an on-screen number pad
+# on the lock screen, so it works on a touch-only kiosk.
+#
 # Fifth menu migrated. Back to config.json (like Display), but with a
 # sensitive field: the lockout password is SHA-256 hashed before it's
 # ever written to disk (matching the Electron app's comparison logic in
@@ -31,7 +36,11 @@ lockout_status() {
         else
             echo "Daily lock time:     not set"
         fi
-        echo "Password on boot:    $(onoff "$REQUIRE_PASSWORD_ON_BOOT")"
+        echo "Unlock code:         $(lockout_code_label "$LOCKOUT_CODE_TYPE")"
+        echo "Lock on boot:        $(onoff "$REQUIRE_PASSWORD_ON_BOOT")"
+        if [[ "$REQUIRE_PASSWORD_ON_BOOT" == "true" ]]; then
+            echo "Boot code:           $(lockout_boot_code_label)"
+        fi
     else
         echo "Password protection: disabled"
     fi
@@ -40,10 +49,11 @@ lockout_status() {
 lockout_menu_builder() {
     if [[ "$ENABLE_PASSWORD_PROTECTION" == "true" ]]; then
         MENU_LABELS=(
-            "Change lockout password"
+            "Change unlock password/PIN (currently: $(lockout_code_label "$LOCKOUT_CODE_TYPE"))"
             "Change inactivity lockout timeout (currently: ${LOCKOUT_TIMEOUT}m)"
             "Set/clear daily lock time (currently: ${LOCKOUT_AT_TIME:-not set})"
-            "Toggle require password on boot (currently: $(onoff "$REQUIRE_PASSWORD_ON_BOOT"))"
+            "Toggle lock on boot (currently: $(onoff "$REQUIRE_PASSWORD_ON_BOOT"))"
+            "Set boot password/PIN (currently: $(lockout_boot_code_label))"
             "Disable password protection"
         )
         MENU_HANDLERS=(
@@ -51,6 +61,7 @@ lockout_menu_builder() {
             action_change_timeout
             action_change_daily_lock
             action_toggle_boot_password
+            action_set_boot_code
             action_disable_protection
         )
     else
@@ -68,29 +79,72 @@ lockout_menu() {
 # Shared helpers
 ################################################################################
 
-# Prompts for a new password twice, hashes it, and assigns to
-# LOCKOUT_PASSWORD. Returns 1 (without saving) if the user gives up.
-prompt_and_hash_password() {
-    local pass1 pass2
+# "PIN" / "password" for menus and status lines.
+lockout_code_label() {
+    [[ "$1" == "pin" ]] && echo "PIN" || echo "password"
+}
+
+lockout_boot_code_label() {
+    if [[ -z "$BOOT_PASSWORD" ]]; then
+        echo "same as unlock"
+    else
+        echo "separate $(lockout_code_label "$BOOT_CODE_TYPE")"
+    fi
+}
+
+# True if $1 is a valid kiosk PIN: 4-8 digits.
+lockout_valid_pin() {
+    [[ "$1" =~ ^[0-9]{4,8}$ ]]
+}
+
+# prompt_code WHAT - asks whether WHAT (e.g. "unlock") is a password or a
+# 4-8 digit PIN, then for the code itself twice. Sets CODE_TYPE ("password"
+# or "pin") and CODE_HASH (SHA-256 hex, matching the Electron app's check
+# in main.js - never plaintext). These are the kiosk's own codes, not
+# any Linux account's password.
+prompt_code() {
+    local what="$1" choice
+    echo "How should the $what code be entered?"
+    echo "  1) Password (letters, numbers, anything - needs a keyboard)"
+    echo "  2) PIN (4-8 digits - on-screen number pad, works on a touch screen)"
     while true; do
-        read -r -s -p "Enter password: " pass1
-        echo
-        read -r -s -p "Confirm password: " pass2
-        echo
+        read -r -p "Choose [1-2]: " choice
+        case "$choice" in
+            1) CODE_TYPE="password"; break ;;
+            2) CODE_TYPE="pin"; break ;;
+            *) echo "❌ Enter 1 or 2" ;;
+        esac
+    done
 
+    local label pass1 pass2
+    label=$(lockout_code_label "$CODE_TYPE")
+    while true; do
+        read -r -s -p "Enter $what $label: " pass1
+        echo
         if [[ -z "$pass1" ]]; then
-            echo "❌ Password cannot be empty"
+            echo "❌ The $label cannot be empty"
             continue
         fi
-
+        if [[ "$CODE_TYPE" == "pin" ]] && ! lockout_valid_pin "$pass1"; then
+            echo "❌ A PIN is 4-8 digits (0-9 only)"
+            continue
+        fi
+        read -r -s -p "Confirm $what $label: " pass2
+        echo
         if [[ "$pass1" != "$pass2" ]]; then
-            echo "❌ Passwords don't match, try again"
+            echo "❌ They don't match, try again"
             continue
         fi
-
-        LOCKOUT_PASSWORD=$(echo -n "$pass1" | sha256sum | cut -d' ' -f1)
+        CODE_HASH=$(echo -n "$pass1" | sha256sum | cut -d' ' -f1)
         return 0
     done
+}
+
+# Prompts for the unlock code into LOCKOUT_PASSWORD/LOCKOUT_CODE_TYPE.
+prompt_and_hash_password() {
+    prompt_code "unlock"
+    LOCKOUT_CODE_TYPE="$CODE_TYPE"
+    LOCKOUT_PASSWORD="$CODE_HASH"
 }
 
 ################################################################################
@@ -101,13 +155,14 @@ action_enable_protection() {
     echo
     echo "Add password protection with automatic lockout:"
     echo "  • Blank screen after an inactivity period"
-    echo "  • Password required to unlock"
-    echo "  • Password required after display schedule wake-up"
+    echo "  • Password or PIN required to unlock"
+    echo "  • Required after display schedule wake-up"
     echo "  • Optional: lock at a specific time daily"
-    echo "  • Optional: require password on system boot"
+    echo "  • Optional: locked on system boot, with the same or its own code"
+    echo
+    echo "These are the kiosk's own codes - not your admin (sudo) password."
     echo
 
-    echo "Set lockout password:"
     prompt_and_hash_password
 
     echo
@@ -123,8 +178,16 @@ action_enable_protection() {
     fi
 
     echo
-    if ask_yes_no "Require password on system boot/power on?" "y"; then
+    BOOT_PASSWORD=""
+    BOOT_CODE_TYPE="password"
+    if ask_yes_no "Lock the kiosk on system boot/power on?" "y"; then
         REQUIRE_PASSWORD_ON_BOOT="true"
+        echo
+        if ask_yes_no "Use a different password/PIN at boot than for unlocking?" "n"; then
+            prompt_code "boot"
+            BOOT_CODE_TYPE="$CODE_TYPE"
+            BOOT_PASSWORD="$CODE_HASH"
+        fi
     else
         REQUIRE_PASSWORD_ON_BOOT="false"
     fi
@@ -140,6 +203,9 @@ action_disable_protection() {
     LOCKOUT_TIMEOUT=0
     LOCKOUT_AT_TIME=""
     REQUIRE_PASSWORD_ON_BOOT="false"
+    LOCKOUT_CODE_TYPE="password"
+    BOOT_PASSWORD=""
+    BOOT_CODE_TYPE="password"
     log_success "Password protection disabled"
     save_config
 }
@@ -147,7 +213,7 @@ action_disable_protection() {
 action_change_password() {
     echo
     prompt_and_hash_password
-    log_success "Password updated"
+    log_success "Unlock $(lockout_code_label "$LOCKOUT_CODE_TYPE") updated"
     save_config
 }
 
@@ -178,10 +244,29 @@ action_change_daily_lock() {
 action_toggle_boot_password() {
     if [[ "$REQUIRE_PASSWORD_ON_BOOT" == "true" ]]; then
         REQUIRE_PASSWORD_ON_BOOT="false"
-        log_warning "Password on boot disabled"
+        log_warning "Lock on boot disabled"
     else
         REQUIRE_PASSWORD_ON_BOOT="true"
-        log_success "Password on boot enabled"
+        log_success "Lock on boot enabled (boot code: $(lockout_boot_code_label))"
+    fi
+    save_config
+}
+
+action_set_boot_code() {
+    echo
+    echo "The boot lock screen can use its own password/PIN, or the unlock one."
+    echo "Currently: $(lockout_boot_code_label)"
+    echo
+    if ask_yes_no "Use a separate password/PIN at boot?" "y"; then
+        prompt_code "boot"
+        BOOT_CODE_TYPE="$CODE_TYPE"
+        BOOT_PASSWORD="$CODE_HASH"
+        REQUIRE_PASSWORD_ON_BOOT="true"
+        log_success "Boot $(lockout_code_label "$BOOT_CODE_TYPE") set (lock on boot: on)"
+    else
+        BOOT_PASSWORD=""
+        BOOT_CODE_TYPE="password"
+        log_success "Boot uses the unlock $(lockout_code_label "$LOCKOUT_CODE_TYPE")"
     fi
     save_config
 }

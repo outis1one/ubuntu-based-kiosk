@@ -81,6 +81,12 @@ LOCKOUT_AT_TIME=""
 LOCKOUT_ACTIVE_START=""
 LOCKOUT_ACTIVE_END=""
 REQUIRE_PASSWORD_ON_BOOT="false"
+# "password" or "pin" (4-8 digits, unlocked with an on-screen keypad).
+LOCKOUT_CODE_TYPE="password"
+# A separate code for the boot lock screen - empty means the unlock code
+# above is used at boot too. Hashed like LOCKOUT_PASSWORD.
+BOOT_PASSWORD=""
+BOOT_CODE_TYPE="password"
 AUTHELIA_URL=""
 AUTHELIA_USERNAME=""
 AUTHELIA_ENCRYPTED_PASSWORD=""
@@ -214,6 +220,13 @@ load_existing_config() {
     boot_password=$(sudo -u "$KIOSK_USER" jq -r '.requirePasswordOnBoot // false' "$CONFIG_PATH" 2>/dev/null)
     [[ "$boot_password" == "true" ]] && REQUIRE_PASSWORD_ON_BOOT="true" || REQUIRE_PASSWORD_ON_BOOT="false"
 
+    local code_type
+    code_type=$(sudo -u "$KIOSK_USER" jq -r '.lockoutCodeType // "password"' "$CONFIG_PATH" 2>/dev/null)
+    [[ "$code_type" == "pin" ]] && LOCKOUT_CODE_TYPE="pin" || LOCKOUT_CODE_TYPE="password"
+    BOOT_PASSWORD=$(sudo -u "$KIOSK_USER" jq -r '.bootPassword // ""' "$CONFIG_PATH" 2>/dev/null || echo "")
+    code_type=$(sudo -u "$KIOSK_USER" jq -r '.bootCodeType // "password"' "$CONFIG_PATH" 2>/dev/null)
+    [[ "$code_type" == "pin" ]] && BOOT_CODE_TYPE="pin" || BOOT_CODE_TYPE="password"
+
     AUTHELIA_URL=$(sudo -u "$KIOSK_USER" jq -r '.autheliaURL // ""' "$CONFIG_PATH" 2>/dev/null || echo "")
     AUTHELIA_USERNAME=$(sudo -u "$KIOSK_USER" jq -r '.autheliaUsername // ""' "$CONFIG_PATH" 2>/dev/null || echo "")
     AUTHELIA_ENCRYPTED_PASSWORD=$(sudo -u "$KIOSK_USER" jq -r '.autheliaEncryptedPassword // ""' "$CONFIG_PATH" 2>/dev/null || echo "")
@@ -290,10 +303,13 @@ save_config() {
         --arg lockoutActiveStart "${LOCKOUT_ACTIVE_START:-}" \
         --arg lockoutActiveEnd "${LOCKOUT_ACTIVE_END:-}" \
         --argjson requirePasswordOnBoot "$boot_password_json" \
+        --arg lockoutCodeType "${LOCKOUT_CODE_TYPE:-password}" \
+        --arg bootPassword "${BOOT_PASSWORD:-}" \
+        --arg bootCodeType "${BOOT_CODE_TYPE:-password}" \
         --arg autheliaURL "${AUTHELIA_URL:-}" \
         --arg autheliaUsername "${AUTHELIA_USERNAME:-}" \
         --arg autheliaEncryptedPassword "${AUTHELIA_ENCRYPTED_PASSWORD:-}" \
-        '. + {autoswitch:$autoswitch,enableTouch:$enableTouch,dualSwipe:$dualSwipe,swipeMode:$swipeMode,allowNavigation:$allowNavigation,homeTabIndex:$homeTabIndex,inactivityTimeout:$inactivityTimeout,enablePauseButton:$enablePauseButton,enableKeyboardButton:$enableKeyboardButton,enableNavButton:$enableNavButton,enablePasswordProtection:$enablePasswordProtection,lockoutPassword:$lockoutPassword,lockoutTimeout:$lockoutTimeout,lockoutAtTime:$lockoutAtTime,lockoutActiveStart:$lockoutActiveStart,lockoutActiveEnd:$lockoutActiveEnd,requirePasswordOnBoot:$requirePasswordOnBoot,autheliaURL:$autheliaURL,autheliaUsername:$autheliaUsername,autheliaEncryptedPassword:$autheliaEncryptedPassword,tabs:[]}' > "$tmp"
+        '. + {autoswitch:$autoswitch,enableTouch:$enableTouch,dualSwipe:$dualSwipe,swipeMode:$swipeMode,allowNavigation:$allowNavigation,homeTabIndex:$homeTabIndex,inactivityTimeout:$inactivityTimeout,enablePauseButton:$enablePauseButton,enableKeyboardButton:$enableKeyboardButton,enableNavButton:$enableNavButton,enablePasswordProtection:$enablePasswordProtection,lockoutPassword:$lockoutPassword,lockoutTimeout:$lockoutTimeout,lockoutAtTime:$lockoutAtTime,lockoutActiveStart:$lockoutActiveStart,lockoutActiveEnd:$lockoutActiveEnd,requirePasswordOnBoot:$requirePasswordOnBoot,lockoutCodeType:$lockoutCodeType,bootPassword:$bootPassword,bootCodeType:$bootCodeType,autheliaURL:$autheliaURL,autheliaUsername:$autheliaUsername,autheliaEncryptedPassword:$autheliaEncryptedPassword,tabs:[]}' > "$tmp"
 
     if [[ ${#URLS[@]} -gt 0 ]]; then
         for idx in "${!URLS[@]}"; do

@@ -1,0 +1,165 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>Locked</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      background: #000;
+      color: #fff;
+      font-family: Arial, sans-serif;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      overflow: hidden;
+      user-select: none;
+    }
+    .box { text-align: center; width: 100%; max-width: 400px; padding: 20px; }
+    h1 { font-size: 32px; margin-bottom: 30px; }
+    .hidden { display: none !important; }
+    input {
+      width: 100%;
+      padding: 15px;
+      font-size: 18px;
+      border: 2px solid #fff;
+      background: #000;
+      color: #fff;
+      border-radius: 5px;
+      margin-bottom: 20px;
+    }
+    #pin-display {
+      font-size: 44px;
+      letter-spacing: 16px;
+      min-height: 64px;
+      line-height: 64px;
+      border-bottom: 2px solid #555;
+      margin-bottom: 24px;
+      font-family: monospace;
+    }
+    .pad { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px; }
+    .pad button {
+      padding: 22px 0;
+      font-size: 30px;
+      font-weight: bold;
+      background: #222;
+      color: #fff;
+      border: 1px solid #444;
+      border-radius: 50px;
+    }
+    .pad button:active { background: #555; }
+    .pad .ok { background: #fff; color: #000; font-size: 22px; }
+    .pad .back { font-size: 24px; }
+    button.unlock {
+      padding: 15px 30px;
+      font-size: 18px;
+      background: #fff;
+      color: #000;
+      border: none;
+      border-radius: 5px;
+      cursor: pointer;
+    }
+    button:disabled { opacity: 0.4; }
+    .error { color: #f44; margin-top: 18px; min-height: 22px; font-size: 18px; }
+  </style>
+</head>
+<body>
+  <div class="box">
+    <h1 id="title">Session Locked</h1>
+
+    <div id="password-entry" class="hidden">
+      <input type="password" id="password" autocomplete="off">
+      <button class="unlock" id="unlock">Unlock</button>
+    </div>
+
+    <div id="pin-entry" class="hidden">
+      <div id="pin-display"></div>
+      <div class="pad" id="pad"></div>
+    </div>
+
+    <div class="error" id="error"></div>
+  </div>
+  <script>
+    const {ipcRenderer} = require('electron');
+    const params = new URLSearchParams(location.search);
+    const isPin = params.get('type') === 'pin';
+    const isBoot = params.get('mode') === 'boot';
+    const $ = id => document.getElementById(id);
+    let pin = '';
+    let blockedUntil = 0;
+    let blockTimer = null;
+
+    $('title').textContent = isBoot ? 'Kiosk Locked' : 'Session Locked';
+
+    function submit(code) {
+      if (Date.now() < blockedUntil || !code) return;
+      ipcRenderer.send('check-lockout-password', code);
+    }
+
+    function setDisabled(on) {
+      for (const b of document.querySelectorAll('button')) b.disabled = on;
+      $('password').disabled = on;
+    }
+
+    if (isPin) {
+      $('pin-entry').classList.remove('hidden');
+      const keys = ['1', '2', '3', '4', '5', '6', '7', '8', '9', '⌫', '0', 'OK'];
+      for (const k of keys) {
+        const b = document.createElement('button');
+        b.textContent = k;
+        if (k === 'OK') b.className = 'ok';
+        if (k === '⌫') b.className = 'back';
+        b.addEventListener('click', () => press(k));
+        $('pad').appendChild(b);
+      }
+      const show = () => { $('pin-display').textContent = '•'.repeat(pin.length); };
+      window.press = k => {
+        if (Date.now() < blockedUntil) return;
+        if (k === 'OK') { submit(pin); return; }
+        if (k === '⌫') pin = pin.slice(0, -1);
+        else if (pin.length < 8) pin += k;
+        $('error').textContent = '';
+        show();
+      };
+      document.addEventListener('keydown', e => {
+        if (e.key >= '0' && e.key <= '9') press(e.key);
+        else if (e.key === 'Backspace') press('⌫');
+        else if (e.key === 'Enter') press('OK');
+      });
+      window.clearEntry = () => { pin = ''; show(); };
+      show();
+    } else {
+      $('password-entry').classList.remove('hidden');
+      $('password').placeholder = 'Enter password to unlock';
+      $('password').focus();
+      $('unlock').addEventListener('click', () => submit($('password').value));
+      $('password').addEventListener('keydown', e => { if (e.key === 'Enter') submit($('password').value); });
+      window.clearEntry = () => { $('password').value = ''; $('password').focus(); };
+    }
+
+    ipcRenderer.on('password-incorrect', (event, info) => {
+      clearEntry();
+      const wait = (info && info.waitSeconds) || 0;
+      const what = isPin ? 'PIN' : 'password';
+      if (!wait) { $('error').textContent = 'Incorrect ' + what; return; }
+      blockedUntil = Date.now() + wait * 1000;
+      setDisabled(true);
+      clearInterval(blockTimer);
+      const tick = () => {
+        const left = Math.ceil((blockedUntil - Date.now()) / 1000);
+        if (left <= 0) {
+          clearInterval(blockTimer);
+          setDisabled(false);
+          $('error').textContent = '';
+          if (!isPin) $('password').focus();
+          return;
+        }
+        $('error').textContent = 'Too many wrong tries - wait ' + left + 's';
+      };
+      tick();
+      blockTimer = setInterval(tick, 500);
+    });
+  </script>
+</body>
+</html>

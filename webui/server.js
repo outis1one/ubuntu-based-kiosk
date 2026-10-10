@@ -114,18 +114,59 @@ app.put('/api/config', (req, res) => {
 
     if (body.requirePasswordOnBoot !== undefined) patch.requirePasswordOnBoot = !!body.requirePasswordOnBoot;
 
+    const CODE_TYPES = ['password', 'pin'];
+    const PIN_RE = /^[0-9]{4,8}$/;
+    const current = loadConfig();
+
+    if (body.lockoutCodeType !== undefined) {
+        if (!CODE_TYPES.includes(body.lockoutCodeType)) return badRequest(res, 'lockoutCodeType must be "password" or "pin"');
+        patch.lockoutCodeType = body.lockoutCodeType;
+    }
+    const lockoutType = patch.lockoutCodeType || current.lockoutCodeType;
+
     if (body.newLockoutPassword !== undefined) {
         if (typeof body.newLockoutPassword !== 'string' || body.newLockoutPassword.length === 0) {
             return badRequest(res, 'Password cannot be empty');
         }
+        if (lockoutType === 'pin' && !PIN_RE.test(body.newLockoutPassword)) {
+            return badRequest(res, 'A PIN is 4-8 digits');
+        }
         patch.newLockoutPassword = body.newLockoutPassword;
+    }
+    // Switching between password and PIN changes which entry screen the
+    // kiosk shows - the old code can't be kept across that.
+    if (patch.lockoutCodeType && patch.lockoutCodeType !== current.lockoutCodeType && current.hasLockoutPassword
+        && !patch.newLockoutPassword && patch.enablePasswordProtection !== false) {
+        return badRequest(res, `Enter a new ${lockoutType === 'pin' ? 'PIN' : 'password'} when switching between password and PIN`);
+    }
+
+    // Boot code: "same" (use the unlock code) or "separate" (its own
+    // password/PIN).
+    if (body.bootCodeMode !== undefined) {
+        if (body.bootCodeMode === 'same') {
+            patch.clearBootPassword = true;
+        } else if (body.bootCodeMode === 'separate') {
+            const bootType = body.bootCodeType !== undefined ? body.bootCodeType : current.bootCodeType;
+            if (!CODE_TYPES.includes(bootType)) return badRequest(res, 'bootCodeType must be "password" or "pin"');
+            patch.bootCodeType = bootType;
+            const newBoot = body.newBootPassword;
+            if (newBoot !== undefined && newBoot !== '') {
+                if (typeof newBoot !== 'string') return badRequest(res, 'Boot password must be text');
+                if (bootType === 'pin' && !PIN_RE.test(newBoot)) return badRequest(res, 'A boot PIN is 4-8 digits');
+                patch.newBootPassword = newBoot;
+            } else if (!current.hasBootPassword || bootType !== current.bootCodeType) {
+                return badRequest(res, `Enter the boot ${bootType === 'pin' ? 'PIN' : 'password'}`);
+            }
+        } else {
+            return badRequest(res, 'bootCodeMode must be "same" or "separate"');
+        }
     }
 
     // Mirrors action_enable_protection() always requiring a password up
     // front - lockout.sh has no path that enables protection without one.
     if (patch.enablePasswordProtection === true) {
         const hasNewPassword = typeof patch.newLockoutPassword === 'string' && patch.newLockoutPassword.length > 0;
-        if (!hasNewPassword && !loadConfig().hasLockoutPassword) {
+        if (!hasNewPassword && !current.hasLockoutPassword) {
             return badRequest(res, 'Set a lockout password before enabling password protection');
         }
     }
