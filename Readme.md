@@ -262,7 +262,10 @@ The kiosk machine still needs a working internet connection (ethernet, or WiFi c
 - **Session lockout** after configured inactivity
 - **Scheduled lockout** at specific time daily 
 - **Display wake lockout** - Require password after display schedule
-- **Boot password** option - Require password on system startup
+- **Boot password** option - Require password on system startup, with the unlock code or **its own separate code**
+- **Password or PIN** - each code (unlock, boot) can be a password or a **4-8 digit PIN** entered on an on-screen number pad, so it works on a touch-only kiosk
+- **The kiosk's own codes** - set in Core Settings → Password Protection & Lockout or the Web UI; not the admin (sudo) password, which never needs to be shared
+- **Wrong-code slowdown** - after 5 wrong codes in a row the lock screen refuses input for 30 seconds, doubling up to 5 minutes, so a PIN can't be guessed through
 - **Full screen blocking** during lockout (no content visible)
 
 ### Navigation Security
@@ -492,17 +495,22 @@ Both can be used at the same time — they serve different purposes:
 - **Multi-method WiFi scan** - nmcli, iw, wpa_cli fallbacks
 - **Watchdog support** - Auto-revert bad WiFi configs
 - **Emergency hotspot** - Fallback if no internet
-- **WiFi from the kiosk screen** - hold **Shift+W+S+F+H** together (or press Ctrl+Alt+Shift+Super+W) to join a WiFi network without the admin console - see below
+- **WiFi from the kiosk screen** - press **Ctrl+Alt+Super+W** (Super = the Windows key) to join a WiFi network without the admin console, guarded by the kiosk's PIN/password - see below
 
 ### WiFi from the kiosk screen (consoles turned off)
 
-With virtual consoles switched off, there's no way to reach the admin menu at the kiosk itself. To join a WiFi network anyway, plug in a keyboard and **hold Shift, W, S, F and H all at once** (or press Ctrl+Alt+Shift+Super+W). A WiFi screen opens:
+With virtual consoles switched off, there's no way to reach the admin menu at the kiosk itself. To join a WiFi network anyway, plug in a keyboard and press **Ctrl+Alt+Super+W** (Super = the Windows key). A WiFi screen opens:
 
-1. Enter the hidden-sites PIN (the same one as F10 - default `1234`; skipped if the PIN is turned off).
+1. Enter the kiosk's code:
+   - **Password protection on** (Core Settings → Password Protection & Lockout): the unlock **PIN**, or the unlock **password** if it's a password. Same slowdown after wrong tries as the lock screen.
+   - **Password protection off:** the hidden-sites PIN (the F10 one - default `1234`).
+   - Neither (protection off and the hidden-sites PIN turned off): no code is asked.
 2. Pick a network from the scan (strongest first, 🔒 = needs a password), or type its name.
 3. Type the password (empty for an open network) and press **Connect**.
 
-It writes the same netplan file as Core Settings → WiFi (`/etc/netplan/60-kiosk-wifi.yaml`), so the connection persists across reboots. If the kiosk gets no address within 30 seconds (usually a wrong password) the previous WiFi setting is put back. Esc or Close shuts the screen; it also closes itself after 5 minutes untouched, and five wrong PINs close it. The keys only work as a chord (typing W-S-F-H one at a time does nothing), and they don't interfere with the tab or power shortcuts.
+It writes the same netplan file as Core Settings → WiFi (`/etc/netplan/60-kiosk-wifi.yaml`), so the connection persists across reboots. If the kiosk gets no address within 30 seconds (usually a wrong password) the previous WiFi setting is put back. Esc or Close shuts the screen; it also closes itself after 5 minutes untouched. After 5 wrong codes in a row, entry pauses (30s, doubling up to 5 min).
+
+**About Fn:** the Fn key is handled inside most keyboards and never reaches the computer, so it isn't part of the combo - holding it too does no harm where Fn+W is still W. On compact keyboards where Fn+W is something else (often Up arrow), leave Fn out.
 
 The root part is `/usr/local/bin/kiosk-wifi-helper` (status/scan/connect only), which the kiosk user may run via sudo through `/etc/sudoers.d/kiosk-wifi` - nothing else. Existing kiosks get it with Advanced → Upgrade.
 
@@ -900,11 +908,14 @@ The PIN file controls access to hidden sites (duration = -1):
 - **Default:** `1234`
 - **Configure via:** Main Menu → Core Settings → Sites → Configure Hidden Sites PIN
 - **Disable PIN:** Set content to `NOPIN` to allow any entry
-- **Custom PIN:** 4-8 digits
+- **Custom PIN:** 4-8 digits, independent of the lock screen's password/PIN (same or different, as you like)
+- **Stored hashed:** the file holds `sha256:<hash>`, never the digits. A file with plain digits (set by hand, or from before this) still works and is converted to the hashed form when the kiosk app starts.
+- **Wrong-PIN slowdown:** after 5 wrong PINs in a row, PIN entry is refused for 30 seconds, doubling up to 5 minutes. The hidden-sites PIN box shares this count with the WiFi screen when that uses this PIN.
+- Also guards the WiFi screen (Ctrl+Alt+Super+W) when password protection is off - otherwise that uses the unlock PIN/password.
 
 ```bash
-# Set custom PIN
-echo "5678" | sudo -u kiosk tee /home/kiosk/kiosk-app/.jitsi-pin
+# Set custom PIN (the menu does this for you)
+echo "sha256:$(echo -n 5678 | sha256sum | cut -d' ' -f1)" | sudo -u kiosk tee /home/kiosk/kiosk-app/.jitsi-pin
 
 # Disable PIN protection
 echo "NOPIN" | sudo -u kiosk tee /home/kiosk/kiosk-app/.jitsi-pin
@@ -1047,7 +1058,7 @@ When "Are you still here?" prompt appears (on manual or hidden sites):
 **During Lockout:**
 - Full black screen (no content visible)
 - All browser views detached for security
-- Password prompt displayed
+- Password field, or number pad for a PIN (the boot screen uses the boot code if one is set)
 - Limited power menu (no Reload option to prevent bypass)
 - Rotation and timers paused
 
@@ -1525,7 +1536,9 @@ full migration pass.
 - **Local files as sites:** an absolute path (`/home/kiosk/docs/menu.pdf`) shows a local page, PDF or image; a folder (`/home/kiosk/photos/`) plays as a full-screen **image slideshow** that picks up added/removed images within a minute. Works in both the Sites menu and the Web UI.
 - **Fix: the first-boot kiosk setup never started on 26.04.** Its service was ordered after cloud-init's final stage, which itself runs after `multi-user.target` - an ordering cycle that systemd broke by dropping the kiosk setup. It also "conflicted" with the tty1 login prompt, which systemd can resolve the same way. Both removed; checked with `systemd-analyze verify` against 26.04's own units. Rebuild the ISO to pick this up.
 - **WiFi tools in the base install:** `wpasupplicant` and `iw` are now installed (and bundled offline). A default Ubuntu Server install only has them if WiFi was set up in the installer; without them, Core Settings → WiFi couldn't connect an offline kiosk. The WiFi menu also installs them itself if missing.
-- **New: WiFi from the kiosk screen** - hold Shift+W+S+F+H (or Ctrl+Alt+Shift+Super+W) to scan for and join a WiFi network right on the kiosk, PIN-protected, for kiosks with the consoles turned off. Reverts to the previous WiFi if the new one doesn't connect. See "WiFi from the kiosk screen".
+- **Hidden-sites PIN hashed, with the same slowdown:** the F10 PIN is now stored as a SHA-256 hash (existing PIN files convert automatically) and repeated wrong PINs pause entry (30s, doubling to 5 min), shared with the WiFi screen. The PIN pad no longer shows "Default PIN: 1234" on screen.
+- **Lock screen PINs and a separate boot code:** the unlock code and the boot code can each be a password or a 4-8 digit PIN (on-screen number pad, works on touch screens), and the boot lock can have its own code. Repeated wrong codes now pause the lock screen (30s, doubling to 5 min). Set in Core Settings → Password Protection & Lockout or the Web UI's Lockout page. Existing settings keep working unchanged (password, same code at boot).
+- **New: WiFi from the kiosk screen** - press Ctrl+Alt+Super+W to scan for and join a WiFi network right on the kiosk, guarded by the unlock PIN/password (or the hidden-sites PIN when password protection is off), for kiosks with the consoles turned off. Reverts to the previous WiFi if the new one doesn't connect. See "WiFi from the kiosk screen".
 - **New: `iso/e2b-contig.sh`** - makes a file on an Easy2Boot (or any NTFS/FAT32/exFAT) USB drive contiguous from Linux, so ISOs that need to be in one piece boot.
 - **Offline addons:** the `--offline` bundle now also carries LMS (Lyrion) + Squeezelite, Asterisk Intercom, VNC, WireGuard and the Emergency Hotspot; their normal installs use it automatically when there's no internet.
 - **Emergency Hotspot fix:** by default it now starts only when the local network is unreachable (router *and* internet), not merely when there's no internet - on a LAN without internet it used to start on every boot. Existing setups keep the old check until Advanced → Emergency Hotspot → Reconfigure.

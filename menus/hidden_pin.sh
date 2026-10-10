@@ -6,6 +6,12 @@
 # flat PIN file rather than config.json - a fourth shape for the framework
 # to prove out (plain file, not JSON at all).
 #
+# The file holds "NOPIN", or "sha256:<hex>" - the PIN is never stored as
+# plain digits (a file from before that is converted by the kiosk app at
+# startup; plain digits are still accepted until then). No file = the
+# default PIN 1234. The kiosk app reads it on every check, so changes
+# apply immediately, and slows down repeated wrong guesses.
+#
 # Depends on: lib/menu.sh, lib/config.sh being sourced first.
 ################################################################################
 
@@ -22,8 +28,10 @@ hidden_pin_status() {
         current_pin=$(sudo -u "$KIOSK_USER" cat "$pin_file" 2>/dev/null)
         if [[ "$current_pin" == "NOPIN" ]]; then
             echo "Current: no PIN (hidden pages open to anyone)"
+        elif [[ "$current_pin" == "sha256:$(hidden_pin_hash 1234)" || "$current_pin" == "1234" ]]; then
+            echo "Current: default PIN (1234) - set your own"
         else
-            echo "Current: PIN set (${#current_pin} digits)"
+            echo "Current: PIN set"
         fi
     else
         echo "Current: not configured (default: 1234)"
@@ -43,29 +51,36 @@ hidden_pin_menu() {
 # Actions
 ################################################################################
 
+hidden_pin_hash() {
+    echo -n "$1" | sha256sum | cut -d' ' -f1
+}
+
+# write_pin VALUE - VALUE is "NOPIN" or the PIN digits (stored hashed).
 write_pin() {
     local value="$1"
     local pin_file
     pin_file=$(hidden_pin_file)
 
+    [[ "$value" == "NOPIN" ]] || value="sha256:$(hidden_pin_hash "$value")"
     sudo mkdir -p "$KIOSK_DIR"
     echo "$value" | sudo -u "$KIOSK_USER" tee "$pin_file" > /dev/null
     sudo -u "$KIOSK_USER" chmod 600 "$pin_file"
-    log_warning "Restart the kiosk display for this to take effect"
 }
 
 action_set_pin() {
     echo
     local new_pin confirm_pin
     while true; do
-        read -r -p "Enter new PIN (4-8 digits): " new_pin
+        read -r -s -p "Enter new PIN (4-8 digits): " new_pin
+        echo
 
         if [[ ! "$new_pin" =~ ^[0-9]{4,8}$ ]]; then
             echo "❌ PIN must be 4-8 digits"
             continue
         fi
 
-        read -r -p "Confirm PIN: " confirm_pin
+        read -r -s -p "Confirm PIN: " confirm_pin
+        echo
 
         if [[ "$new_pin" == "$confirm_pin" ]]; then
             write_pin "$new_pin"

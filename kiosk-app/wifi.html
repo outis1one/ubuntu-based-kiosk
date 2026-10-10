@@ -82,7 +82,7 @@
   <h2>📶 WiFi</h2>
 
   <div id="pin-step" class="hidden">
-    <label for="pin">Enter the PIN</label>
+    <label for="pin" id="pin-label">Enter the PIN</label>
     <input id="pin" type="password" inputmode="numeric" autocomplete="off">
     <div class="actions">
       <button class="primary" id="pin-ok">✓ OK</button>
@@ -242,6 +242,10 @@
 
     request('needs-pin').then(r => {
       if (r.ok && r.needsPin) {
+        if (r.codeType === 'password') {
+          $('pin-label').textContent = 'Enter the kiosk password';
+          $('pin').removeAttribute('inputmode');
+        }
         $('pin-step').classList.remove('hidden');
         $('pin').focus();
       } else {

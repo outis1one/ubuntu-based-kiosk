@@ -44,6 +44,10 @@ const SCALAR_DEFAULTS = {
     lockoutTimeout: 0,
     lockoutAtTime: '',
     requirePasswordOnBoot: false,
+    // 'password' or 'pin' (4-8 digits, entered on the lock screen's
+    // number pad) - for the unlock code and the optional separate boot code.
+    lockoutCodeType: 'password',
+    bootCodeType: 'password',
 };
 
 function readExisting() {
@@ -94,6 +98,8 @@ function loadConfig() {
         out[key] = key in existing ? existing[key] : def;
     }
     out.hasLockoutPassword = typeof existing.lockoutPassword === 'string' && existing.lockoutPassword.length > 0;
+    // A boot code of its own (empty bootPassword = the unlock code is used at boot).
+    out.hasBootPassword = typeof existing.bootPassword === 'string' && existing.bootPassword.length > 0;
     out.dualSwipe = out.swipeMode === 'dual';
     return out;
 }
@@ -122,11 +128,24 @@ function saveConfig(patch) {
     if (typeof patch.newLockoutPassword === 'string' && patch.newLockoutPassword.length > 0) {
         merged.lockoutPassword = hashPassword(patch.newLockoutPassword);
     }
+    // Separate boot code: a new one is hashed in, clearBootPassword goes
+    // back to "boot uses the unlock code".
+    if (!('bootPassword' in merged)) merged.bootPassword = '';
+    if (typeof patch.newBootPassword === 'string' && patch.newBootPassword.length > 0) {
+        merged.bootPassword = hashPassword(patch.newBootPassword);
+    }
+    if (patch.clearBootPassword === true) {
+        merged.bootPassword = '';
+        merged.bootCodeType = 'password';
+    }
     if (patch.enablePasswordProtection === false) {
         merged.lockoutPassword = '';
         merged.lockoutTimeout = 0;
         merged.lockoutAtTime = '';
         merged.requirePasswordOnBoot = false;
+        merged.lockoutCodeType = 'password';
+        merged.bootPassword = '';
+        merged.bootCodeType = 'password';
     }
 
     if (Array.isArray(patch.tabs)) {

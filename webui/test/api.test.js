@@ -141,6 +141,85 @@ async function main() {
         assert.strictEqual(JSON.stringify(body).includes('hunter2'), false);
     });
 
+    const put = (body) => fetch(`${base}/api/config`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body),
+    });
+    const onDisk = () => JSON.parse(fs.readFileSync(process.env.CONFIG_PATH, 'utf8'));
+    const sha = (v) => require('crypto').createHash('sha256').update(v).digest('hex');
+
+    await check('PUT rejects switching to a PIN without a new code', async () => {
+        const res = await put({ lockoutCodeType: 'pin' });
+        assert.strictEqual(res.status, 400);
+        assert.strictEqual(onDisk().lockoutCodeType || 'password', 'password');
+    });
+
+    await check('PUT rejects a PIN that is not 4-8 digits', async () => {
+        for (const pin of ['123', '123456789', '12a4']) {
+            const res = await put({ lockoutCodeType: 'pin', newLockoutPassword: pin });
+            assert.strictEqual(res.status, 400, pin);
+        }
+    });
+
+    await check('PUT switches the unlock code to a 4-digit PIN', async () => {
+        const res = await put({ lockoutCodeType: 'pin', newLockoutPassword: '4821' });
+        assert.strictEqual(res.status, 200);
+        const body = await res.json();
+        assert.strictEqual(body.lockoutCodeType, 'pin');
+        assert.strictEqual(onDisk().lockoutPassword, sha('4821'));
+    });
+
+    await check('PUT sets a separate boot password, never echoed back', async () => {
+        let res = await put({ requirePasswordOnBoot: true, bootCodeMode: 'separate', bootCodeType: 'password' });
+        assert.strictEqual(res.status, 400, 'separate boot code without one entered');
+        res = await put({ requirePasswordOnBoot: true, bootCodeMode: 'separate', bootCodeType: 'password', newBootPassword: 'boot pass!' });
+        assert.strictEqual(res.status, 200);
+        const body = await res.json();
+        assert.strictEqual(body.hasBootPassword, true);
+        assert.strictEqual(body.bootCodeType, 'password');
+        assert.strictEqual(JSON.stringify(body).includes('boot pass!'), false);
+        assert.strictEqual(onDisk().bootPassword, sha('boot pass!'));
+        assert.strictEqual(onDisk().lockoutPassword, sha('4821'), 'unlock PIN untouched');
+    });
+
+    await check('PUT keeps the boot code when saved again without a new one', async () => {
+        const res = await put({ bootCodeMode: 'separate', bootCodeType: 'password' });
+        assert.strictEqual(res.status, 200);
+        assert.strictEqual(onDisk().bootPassword, sha('boot pass!'));
+    });
+
+    await check('PUT requires a new boot code when its type changes, and checks PIN format', async () => {
+        let res = await put({ bootCodeMode: 'separate', bootCodeType: 'pin' });
+        assert.strictEqual(res.status, 400);
+        res = await put({ bootCodeMode: 'separate', bootCodeType: 'pin', newBootPassword: '12' });
+        assert.strictEqual(res.status, 400);
+        res = await put({ bootCodeMode: 'separate', bootCodeType: 'pin', newBootPassword: '90210777' });
+        assert.strictEqual(res.status, 200);
+        assert.strictEqual(onDisk().bootCodeType, 'pin');
+        assert.strictEqual(onDisk().bootPassword, sha('90210777'));
+    });
+
+    await check('PUT bootCodeMode "same" clears the separate boot code', async () => {
+        const res = await put({ bootCodeMode: 'same' });
+        assert.strictEqual(res.status, 200);
+        const body = await res.json();
+        assert.strictEqual(body.hasBootPassword, false);
+        assert.strictEqual(onDisk().bootPassword, '');
+    });
+
+    await check('PUT disabling protection clears PIN type and boot code too', async () => {
+        await put({ bootCodeMode: 'separate', bootCodeType: 'pin', newBootPassword: '5555' });
+        const res = await put({ enablePasswordProtection: false });
+        assert.strictEqual(res.status, 200);
+        const d = onDisk();
+        assert.strictEqual(d.lockoutPassword, '');
+        assert.strictEqual(d.lockoutCodeType, 'password');
+        assert.strictEqual(d.bootPassword, '');
+        // back to the state the next test expects
+        await put({ enablePasswordProtection: true, newLockoutPassword: 'hunter2', lockoutTimeoutMinutes: 15 });
+    });
+
     await check('PUT rejects a malformed lockoutAtTime', async () => {
         const res = await fetch(`${base}/api/config`, {
             method: 'PUT',

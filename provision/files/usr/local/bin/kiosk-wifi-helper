@@ -1,7 +1,7 @@
 #!/bin/bash
 ################################################################################
 # kiosk-wifi-helper - the root side of the kiosk app's WiFi screen
-# (Ctrl+Alt+Shift+Super+W), for joining a WiFi network from the kiosk
+# (Ctrl+Alt+Super+W), for joining a WiFi network from the kiosk
 # itself when the console (Ctrl+Alt+F1..F6) is switched off.
 #
 # The kiosk user may run this one script via passwordless sudo

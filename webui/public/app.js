@@ -196,10 +196,18 @@ const dailyLockEnabled = document.getElementById('daily-lock-enabled');
 const lockoutAtTime = document.getElementById('lockout-at-time');
 const passwordLabel = document.getElementById('password-label');
 
+const bootLockEnabled = document.getElementById('boot-lock-enabled');
+const bootCodeMode = document.getElementById('boot-code-mode');
+const PIN_RE = /^[0-9]{4,8}$/;
+
 function refreshLockoutFieldVisibility() {
     lockoutFields.hidden = !lockoutEnabled.checked;
+    document.getElementById('boot-code-fields').hidden = !bootLockEnabled.checked;
+    document.getElementById('boot-separate-fields').hidden = bootCodeMode.value !== 'separate';
 }
 lockoutEnabled.addEventListener('change', refreshLockoutFieldVisibility);
+bootLockEnabled.addEventListener('change', refreshLockoutFieldVisibility);
+bootCodeMode.addEventListener('change', refreshLockoutFieldVisibility);
 
 dailyLockEnabled.addEventListener('change', () => {
     lockoutAtTime.disabled = !dailyLockEnabled.checked;
@@ -221,6 +229,23 @@ lockoutForm.addEventListener('submit', async (e) => {
         showMessage('Set a lockout password before enabling password protection', true);
         return;
     }
+    const codeType = fd.get('lockoutCodeType');
+    if (enable && newPassword && codeType === 'pin' && !PIN_RE.test(newPassword)) {
+        showMessage('A PIN is 4-8 digits', true);
+        return;
+    }
+    const bootSeparate = fd.get('requirePasswordOnBoot') === 'on' && fd.get('bootCodeMode') === 'separate';
+    const newBootPassword = fd.get('newBootPassword') || '';
+    if (enable && bootSeparate) {
+        if (newBootPassword !== document.getElementById('boot-password-confirm').value) {
+            showMessage("Boot passwords don't match", true);
+            return;
+        }
+        if (newBootPassword && fd.get('bootCodeType') === 'pin' && !PIN_RE.test(newBootPassword)) {
+            showMessage('A boot PIN is 4-8 digits', true);
+            return;
+        }
+    }
 
     const patch = { enablePasswordProtection: enable };
     if (enable) {
@@ -228,6 +253,14 @@ lockoutForm.addEventListener('submit', async (e) => {
         patch.lockoutTimeoutMinutes = parseInt(fd.get('lockoutTimeoutMinutes'), 10);
         patch.lockoutAtTime = dailyLockEnabled.checked ? fd.get('lockoutAtTime') : '';
         patch.requirePasswordOnBoot = fd.get('requirePasswordOnBoot') === 'on';
+        patch.lockoutCodeType = codeType;
+        if (bootSeparate) {
+            patch.bootCodeMode = 'separate';
+            patch.bootCodeType = fd.get('bootCodeType');
+            if (newBootPassword) patch.newBootPassword = newBootPassword;
+        } else if (patch.requirePasswordOnBoot) {
+            patch.bootCodeMode = 'same';
+        }
     }
 
     try {
@@ -236,6 +269,8 @@ lockoutForm.addEventListener('submit', async (e) => {
         populateAll(currentConfig);
         lockoutForm.querySelector('[name=newLockoutPassword]').value = '';
         document.getElementById('lockout-password-confirm').value = '';
+        lockoutForm.querySelector('[name=newBootPassword]').value = '';
+        document.getElementById('boot-password-confirm').value = '';
     } catch (err) {
         showMessage(err.message, true);
     }
@@ -252,12 +287,17 @@ function populateAll(config) {
     displayForm.elements.inactivityTimeoutMinutes.value = Math.round(config.inactivityTimeout / 60);
 
     lockoutEnabled.checked = !!config.enablePasswordProtection;
-    passwordLabel.textContent = config.hasLockoutPassword ? 'New password (leave blank to keep the current one)' : 'Set lockout password';
+    passwordLabel.textContent = config.hasLockoutPassword ? 'New password/PIN (leave blank to keep the current one)' : 'Set unlock password/PIN';
     lockoutForm.elements.lockoutTimeoutMinutes.value = config.lockoutTimeout;
     dailyLockEnabled.checked = !!config.lockoutAtTime;
     lockoutAtTime.disabled = !config.lockoutAtTime;
     lockoutAtTime.value = config.lockoutAtTime || '';
     lockoutForm.elements.requirePasswordOnBoot.checked = !!config.requirePasswordOnBoot;
+    lockoutForm.elements.lockoutCodeType.value = config.lockoutCodeType === 'pin' ? 'pin' : 'password';
+    bootCodeMode.value = config.hasBootPassword ? 'separate' : 'same';
+    lockoutForm.elements.bootCodeType.value = config.bootCodeType === 'pin' ? 'pin' : 'password';
+    document.getElementById('boot-password-label').textContent = config.hasBootPassword
+        ? 'New boot password/PIN (leave blank to keep the current one)' : 'Set boot password/PIN';
     refreshLockoutFieldVisibility();
 }
 
