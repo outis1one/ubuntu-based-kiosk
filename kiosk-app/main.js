@@ -73,8 +73,7 @@ let bootCodeType='password';
 // Password lockout state
 let isLockedOut=false;
 let lockoutMode='unlock';   // 'boot' while the boot lock screen is up
-let lockoutFailures=0;
-let lockoutBlockedUntil=0;
+const lockoutThrottle=createCodeThrottle();
 let lockoutWindow=null;
 let lockoutTimer=null;
 let lockoutActivityTime=Date.now();
@@ -161,6 +160,75 @@ function markKeyboardActivity(){
   keyboardLastUsed=now;
   keyboardOpenTime=now;
   keyboardClosePending=false;
+}
+
+// Wrong-code slowdown, shared by the lock screen and the hidden-sites PIN
+// (one throttle per code): after every 5 wrong codes in a row, input is
+// refused for 30s, doubling up to 5 minutes - so a 4-digit PIN can't
+// simply be tried through. A right code resets it.
+function createCodeThrottle(){
+  return{failures:0,blockedUntil:0};
+}
+function throttleWaitSeconds(t){
+  return Math.max(0,Math.ceil((t.blockedUntil-Date.now())/1000));
+}
+// Counts a wrong code; returns the seconds input is now refused for (0 = none).
+function throttleFail(t){
+  t.failures++;
+  if(t.failures%5!==0)return 0;
+  const wait=Math.min(300,30*Math.pow(2,t.failures/5-1));
+  t.blockedUntil=Date.now()+wait*1000;
+  return wait;
+}
+
+function sha256Hex(v){
+  return crypto.createHash('sha256').update(String(v==null?'':v)).digest('hex');
+}
+
+// Hidden-sites PIN (.jitsi-pin, set in Core Settings -> Hidden Sites PIN):
+// "NOPIN" (no PIN), "sha256:<hex>", or - written before the PIN was
+// hashed - the plain digits, which migrateHiddenPin() rewrites hashed at
+// startup. No file = the default PIN 1234. Read on every check, so a
+// change from the menu applies without a restart. Guards the hidden
+// sites (F10) and the WiFi screen, with one shared slowdown.
+const HIDDEN_PIN_FILE=path.join(__dirname,'.jitsi-pin');
+const hiddenPinThrottle=createCodeThrottle();
+
+function readHiddenPinEntry(){
+  try{
+    const stored=fs.readFileSync(HIDDEN_PIN_FILE,'utf8').trim();
+    if(stored==='NOPIN')return{none:true};
+    if(stored.startsWith('sha256:'))return{hash:stored.slice(7)};
+    if(stored)return{hash:sha256Hex(stored)};
+  }catch(e){}
+  return{hash:sha256Hex('1234')};
+}
+
+function migrateHiddenPin(){
+  try{
+    const stored=fs.readFileSync(HIDDEN_PIN_FILE,'utf8').trim();
+    if(/^[0-9]{4,8}$/.test(stored)){
+      fs.writeFileSync(HIDDEN_PIN_FILE,'sha256:'+sha256Hex(stored)+'\n',{mode:0o600});
+      console.log('[PIN] Hidden-sites PIN converted to hashed form');
+    }
+  }catch(e){}
+}
+
+function hiddenPinRequired(){
+  return!readHiddenPinEntry().none;
+}
+
+function checkHiddenPin(pin){
+  const blocked=throttleWaitSeconds(hiddenPinThrottle);
+  if(blocked)return{ok:false,waitSeconds:blocked,error:'Too many wrong tries - wait '+blocked+'s'};
+  const entry=readHiddenPinEntry();
+  if(entry.none||sha256Hex(pin)===entry.hash){
+    hiddenPinThrottle.failures=0;
+    return{ok:true};
+  }
+  const wait=throttleFail(hiddenPinThrottle);
+  console.log('[PIN] Wrong hidden-sites PIN, attempt',hiddenPinThrottle.failures);
+  return wait?{ok:false,waitSeconds:wait,error:'Too many wrong tries - wait '+wait+'s'}:{ok:false,error:'Incorrect PIN'};
 }
 
 // Password lockout functions
@@ -1131,23 +1199,13 @@ function showHiddenTab(index){
 
 // WiFi screen (hold Shift+W+S+F+H, or Ctrl+Alt+Shift+Super+W): join a WiFi network from the kiosk
 // itself, for when the console (Ctrl+Alt+F1..F6) is switched off and the
-// admin menu can't be reached. Gated by the hidden-tab PIN (.jitsi-pin,
-// same rules as pin-entry.html: no file = 1234, NOPIN = none). The root
+// admin menu can't be reached. Gated by the hidden-sites PIN
+// (checkHiddenPin - same PIN and slowdown as F10). The root
 // work is done by /usr/local/bin/kiosk-wifi-helper, which the kiosk user
 // may run through sudo and nothing else (/etc/sudoers.d/kiosk-wifi).
 const WIFI_HELPER='/usr/local/bin/kiosk-wifi-helper';
 const WIFI_IDLE_TIMEOUT=5*60000; // closes after 5 minutes untouched
-const WIFI_MAX_PIN_TRIES=5;
-let wifiWindow=null,wifiUnlocked=false,wifiPinTries=0,wifiIdleTimer=null;
-
-function readHiddenPin(){
-  try{
-    const stored=fs.readFileSync(path.join(__dirname,'.jitsi-pin'),'utf8').trim();
-    if(stored==='NOPIN')return null;
-    if(stored)return stored;
-  }catch(e){}
-  return '1234';
-}
+let wifiWindow=null,wifiUnlocked=false,wifiIdleTimer=null;
 
 function runWifiHelper(action,input){
   return new Promise(resolve=>{
@@ -1199,8 +1257,7 @@ function showWifiWindow(){
     wifiWindow.focus();
     return;
   }
-  wifiUnlocked=(readHiddenPin()===null);
-  wifiPinTries=0;
+  wifiUnlocked=!hiddenPinRequired();
   let width=720,height=820;
   if(mainWindow&&!mainWindow.isDestroyed()){
     const[w,h]=mainWindow.getContentSize();
@@ -1268,17 +1325,9 @@ ipcMain.handle('wifi-request',async(event,req)=>{
   if(action==='needs-pin')return{ok:true,needsPin:!wifiUnlocked};
   if(action==='unlock'){
     if(wifiUnlocked)return{ok:true};
-    if(String(req.pin||'')===readHiddenPin()){
-      wifiUnlocked=true;
-      return{ok:true};
-    }
-    wifiPinTries++;
-    console.log('[WIFI] Wrong PIN, attempt',wifiPinTries);
-    if(wifiPinTries>=WIFI_MAX_PIN_TRIES){
-      setTimeout(closeWifiWindow,1500);
-      return{ok:false,error:'Too many wrong PINs'};
-    }
-    return{ok:false,error:'Incorrect PIN'};
+    const result=checkHiddenPin(req.pin);
+    if(result.ok)wifiUnlocked=true;
+    return result;
   }
   if(!wifiUnlocked)return{ok:false,error:'Enter the PIN first'};
   if(action==='status'||action==='scan')return runWifiHelper(action);
@@ -1394,6 +1443,7 @@ async function autheliaAuthenticate(){
 
 async function createWindow(){
   tabs=loadConfig();
+  migrateHiddenPin();
   await autheliaAuthenticate();
   
   mainWindow=new BrowserWindow({
@@ -1552,27 +1602,30 @@ async function createWindow(){
   // hash (how the menu and Web UI store it). After every 5 wrong codes in
   // a row the screen refuses input for a while - 30s, doubling up to 5
   // minutes - so a 4-digit PIN can't simply be tried through.
+  // The lock screen sends the code as typed; compared here as a SHA-256
+  // hash (how the menu and Web UI store it), with the wrong-code slowdown
+  // (see createCodeThrottle).
   ipcMain.on('check-lockout-password',(event,code)=>{
     if(!lockoutWindow||lockoutWindow.isDestroyed()||event.sender!==lockoutWindow.webContents)return;
-    if(Date.now()<lockoutBlockedUntil){
-      event.sender.send('password-incorrect',{waitSeconds:Math.ceil((lockoutBlockedUntil-Date.now())/1000)});
+    const blocked=throttleWaitSeconds(lockoutThrottle);
+    if(blocked){
+      event.sender.send('password-incorrect',{waitSeconds:blocked});
       return;
     }
     const expected=(lockoutMode==='boot'&&bootPassword)?bootPassword:lockoutPassword;
-    const hash=crypto.createHash('sha256').update(String(code||'')).digest('hex');
-    if(hash===expected){
-      lockoutFailures=0;
+    if(sha256Hex(code)===expected){
+      lockoutThrottle.failures=0;
       unlockScreen();
       return;
     }
-    lockoutFailures++;
-    console.log('[LOCKOUT] Wrong code, attempt',lockoutFailures);
-    let waitSeconds=0;
-    if(lockoutFailures%5===0){
-      waitSeconds=Math.min(300,30*Math.pow(2,lockoutFailures/5-1));
-      lockoutBlockedUntil=Date.now()+waitSeconds*1000;
-    }
+    const waitSeconds=throttleFail(lockoutThrottle);
+    console.log('[LOCKOUT] Wrong code, attempt',lockoutThrottle.failures);
     event.sender.send('password-incorrect',{waitSeconds});
+  });
+
+  ipcMain.handle('check-hidden-pin',(event,pin)=>{
+    if(!pinWindow||pinWindow.isDestroyed()||event.sender!==pinWindow.webContents)return{ok:false,error:'Not allowed'};
+    return checkHiddenPin(pin);
   });
 
   ipcMain.on('get-config',(event)=>{

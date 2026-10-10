@@ -78,20 +78,13 @@
       <button class="btn" id="submit" onclick="submitPin()">✓ Submit</button>
       <button class="btn" id="cancel" onclick="cancel()">✗ Cancel</button>
     </div>
-    <div class="info">Default PIN: 1234 (4-8 digits)</div>
+    <div class="info">4-8 digits</div>
   </div>
   <script>
     const {ipcRenderer} = require('electron');
-    const fs = require('fs');
-    const path = require('path');
-    const pinFile = path.join(__dirname, '.jitsi-pin');
-    let correctPin = '1234';
     let enteredPin = '';
-    try {
-      const stored = fs.readFileSync(pinFile, 'utf8').trim();
-      if (stored !== 'NOPIN') correctPin = stored;
-      else correctPin = null;
-    } catch(e) {}
+    let blockedUntil = 0;
+    let blockTimer = null;
     function updateDisplay() {
       const display = document.getElementById('pin-display');
       if (enteredPin.length === 0) {
@@ -103,6 +96,7 @@
       }
     }
     function addDigit(digit) {
+      if (Date.now() < blockedUntil) return;
       if (enteredPin.length < 8) {
         enteredPin += digit;
         updateDisplay();
@@ -111,20 +105,40 @@
     }
     function backspace() { enteredPin = enteredPin.slice(0, -1); updateDisplay(); }
     function clearPin() { enteredPin = ''; updateDisplay(); document.getElementById('error').style.display = 'none'; }
-    function submitPin() {
+    function showError(text) {
+      document.getElementById('error').textContent = '❌ ' + text;
+      document.getElementById('error').style.display = 'block';
+    }
+    // Checked in the main process (the stored PIN is hashed), which also
+    // refuses input for a while after repeated wrong PINs.
+    async function submitPin() {
+      if (Date.now() < blockedUntil) return;
       if (enteredPin.length < 4) {
-        document.getElementById('error').textContent = '❌ PIN must be 4-8 digits';
-        document.getElementById('error').style.display = 'block';
+        showError('PIN must be 4-8 digits');
         return;
       }
-      if (correctPin === null || enteredPin === correctPin) {
+      const r = await ipcRenderer.invoke('check-hidden-pin', enteredPin)
+        .catch(() => ({ok: false, error: 'PIN check failed'}));
+      enteredPin = '';
+      updateDisplay();
+      if (r.ok) {
         ipcRenderer.send('pin-correct');
-      } else {
-        document.getElementById('error').textContent = '❌ Incorrect PIN';
-        document.getElementById('error').style.display = 'block';
-        enteredPin = '';
-        updateDisplay();
+        return;
       }
+      if (!r.waitSeconds) { showError(r.error || 'Incorrect PIN'); return; }
+      blockedUntil = Date.now() + r.waitSeconds * 1000;
+      clearInterval(blockTimer);
+      const tick = () => {
+        const left = Math.ceil((blockedUntil - Date.now()) / 1000);
+        if (left <= 0) {
+          clearInterval(blockTimer);
+          document.getElementById('error').style.display = 'none';
+          return;
+        }
+        showError('Too many wrong tries - wait ' + left + 's');
+      };
+      tick();
+      blockTimer = setInterval(tick, 500);
     }
     function cancel() { ipcRenderer.send('pin-cancelled'); }
     document.addEventListener('keydown', (e) => {

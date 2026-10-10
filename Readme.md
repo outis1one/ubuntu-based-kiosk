@@ -903,11 +903,14 @@ The PIN file controls access to hidden sites (duration = -1):
 - **Default:** `1234`
 - **Configure via:** Main Menu → Core Settings → Sites → Configure Hidden Sites PIN
 - **Disable PIN:** Set content to `NOPIN` to allow any entry
-- **Custom PIN:** 4-8 digits
+- **Custom PIN:** 4-8 digits, independent of the lock screen's password/PIN (same or different, as you like)
+- **Stored hashed:** the file holds `sha256:<hash>`, never the digits. A file with plain digits (set by hand, or from before this) still works and is converted to the hashed form when the kiosk app starts.
+- **Wrong-PIN slowdown:** after 5 wrong PINs in a row, PIN entry is refused for 30 seconds, doubling up to 5 minutes. The hidden-sites PIN box and the WiFi screen share this count.
+- Also guards the WiFi screen (Shift+W+S+F+H).
 
 ```bash
-# Set custom PIN
-echo "5678" | sudo -u kiosk tee /home/kiosk/kiosk-app/.jitsi-pin
+# Set custom PIN (the menu does this for you)
+echo "sha256:$(echo -n 5678 | sha256sum | cut -d' ' -f1)" | sudo -u kiosk tee /home/kiosk/kiosk-app/.jitsi-pin
 
 # Disable PIN protection
 echo "NOPIN" | sudo -u kiosk tee /home/kiosk/kiosk-app/.jitsi-pin
@@ -1528,6 +1531,7 @@ full migration pass.
 - **Local files as sites:** an absolute path (`/home/kiosk/docs/menu.pdf`) shows a local page, PDF or image; a folder (`/home/kiosk/photos/`) plays as a full-screen **image slideshow** that picks up added/removed images within a minute. Works in both the Sites menu and the Web UI.
 - **Fix: the first-boot kiosk setup never started on 26.04.** Its service was ordered after cloud-init's final stage, which itself runs after `multi-user.target` - an ordering cycle that systemd broke by dropping the kiosk setup. It also "conflicted" with the tty1 login prompt, which systemd can resolve the same way. Both removed; checked with `systemd-analyze verify` against 26.04's own units. Rebuild the ISO to pick this up.
 - **WiFi tools in the base install:** `wpasupplicant` and `iw` are now installed (and bundled offline). A default Ubuntu Server install only has them if WiFi was set up in the installer; without them, Core Settings → WiFi couldn't connect an offline kiosk. The WiFi menu also installs them itself if missing.
+- **Hidden-sites PIN hashed, with the same slowdown:** the F10 PIN is now stored as a SHA-256 hash (existing PIN files convert automatically) and repeated wrong PINs pause entry (30s, doubling to 5 min), shared with the WiFi screen. The PIN pad no longer shows "Default PIN: 1234" on screen.
 - **Lock screen PINs and a separate boot code:** the unlock code and the boot code can each be a password or a 4-8 digit PIN (on-screen number pad, works on touch screens), and the boot lock can have its own code. Repeated wrong codes now pause the lock screen (30s, doubling to 5 min). Set in Core Settings → Password Protection & Lockout or the Web UI's Lockout page. Existing settings keep working unchanged (password, same code at boot).
 - **New: WiFi from the kiosk screen** - hold Shift+W+S+F+H (or Ctrl+Alt+Shift+Super+W) to scan for and join a WiFi network right on the kiosk, PIN-protected, for kiosks with the consoles turned off. Reverts to the previous WiFi if the new one doesn't connect. See "WiFi from the kiosk screen".
 - **New: `iso/e2b-contig.sh`** - makes a file on an Easy2Boot (or any NTFS/FAT32/exFAT) USB drive contiguous from Linux, so ISOs that need to be in one piece boot.
