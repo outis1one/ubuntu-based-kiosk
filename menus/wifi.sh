@@ -57,15 +57,89 @@ try:
             del w[n]
         if not w:
             del d["network"]["wifis"]
+    # Not "optional" = the boot waits (up to ~2 min) for it to get an address.
+    opt = [n for n, v in w.items() if isinstance(v, dict) and not v.get("optional")]
+    for n in opt:
+        w[n]["optional"] = True
+    if stale or opt:
+        if not stale:
+            shutil.copy2(p, p + ".kiosk-bak")
         mode = os.stat(p).st_mode & 0o777
         with open(p, "w") as fh:
             yaml.safe_dump(d, fh, default_flow_style=False)
         os.chmod(p, mode)
-        print("Removed stale WiFi entries from %s: %s" % (p, ", ".join(map(str, stale))))
+        print("Fixed WiFi entries in %s (removed: %s)" % (p, ", ".join(map(str, stale)) or "none"))
 except Exception:
     pass
 PYEOF
     done
+}
+
+# Why a connect attempt failed, from wpa_supplicant's own log lines in
+# the journal (netplan runs it as netplan-wpa-<iface>.service). Prints a
+# short human-readable reason, or nothing if the log says nothing useful.
+wifi_diagnose() {
+    local log
+    log=$(journalctl -b -u "netplan-wpa-$1" -n 150 --no-pager 2>/dev/null) || return 0
+    if grep -q "reason=WRONG_KEY\|pre-shared key may be incorrect" <<< "$log"; then
+        echo "wrong password (the network rejected the key)"
+    elif grep -q "CTRL-EVENT-NETWORK-NOT-FOUND" <<< "$log"; then
+        echo "network not found - wrong name, or out of range of this adapter"
+    elif grep -q "CTRL-EVENT-ASSOC-REJECT\|CTRL-EVENT-AUTH-REJECT" <<< "$log"; then
+        echo "the access point refused the connection (MAC filter, or WPA3-only/unsupported security)"
+    fi
+}
+
+# Every wireless interface, one per line.
+wifi_list_ifaces() {
+    local d
+    for d in /sys/class/net/*; do
+        if [[ -d "$d/wireless" || -e "$d/phy80211" ]]; then
+            basename "$d"
+        fi
+    done
+}
+
+# "USB" / "PCI" / "" - what an interface hangs off, to tell a dongle
+# from a built-in card when there are two.
+wifi_iface_bus() {
+    local sub
+    sub=$(readlink -f "/sys/class/net/$1/device/subsystem" 2>/dev/null) || return 0
+    case "$sub" in
+        */usb) echo "USB" ;;
+        */pci) echo "PCI" ;;
+    esac
+}
+
+# The interface to configure: the only one, or the user's pick when there
+# are several (e.g. built-in card plus a USB dongle).
+wifi_choose_iface() {
+    local -a ifaces
+    mapfile -t ifaces < <(wifi_list_ifaces)
+    if (( ${#ifaces[@]} == 0 )); then
+        wifi_detect_iface
+        return
+    fi
+    if (( ${#ifaces[@]} == 1 )); then
+        echo "${ifaces[0]}"
+        return 0
+    fi
+    {
+        echo "Several WiFi adapters found:"
+        local i bus
+        for i in "${!ifaces[@]}"; do
+            bus=$(wifi_iface_bus "${ifaces[$i]}")
+            printf '  %d. %s%s\n' "$((i + 1))" "${ifaces[$i]}" "${bus:+ ($bus)}"
+        done
+    } >&2
+    local choice
+    read -r -p "Which one? [1]: " choice </dev/tty >&2
+    choice=${choice:-1}
+    if [[ "$choice" =~ ^[0-9]+$ ]] && (( choice >= 1 && choice <= ${#ifaces[@]} )); then
+        echo "${ifaces[$((choice - 1))]}"
+    else
+        echo "${ifaces[0]}"
+    fi
 }
 
 wifi_menu() {
@@ -165,7 +239,7 @@ wifi_configure() {
     fi
 
     local wifi_iface
-    if ! wifi_iface=$(wifi_detect_iface); then
+    if ! wifi_iface=$(wifi_choose_iface); then
         log_warning "No WiFi hardware detected"
         echo "Network interfaces found: $(ls /sys/class/net 2>/dev/null | tr '\n' ' ')"
         echo "If you have a USB WiFi adapter, make sure it's plugged in. A built-in"
@@ -344,7 +418,14 @@ WATCHEOF
             [[ -n "${SSH_CONNECTION:-}" ]] && echo "Connection successful - watchdog will not revert"
         else
             log_warning "Config applied but $wifi_iface has no address yet"
-            echo "Wrong password or network name is the usual cause. Details:"
+            local why
+            why=$(wifi_diagnose "$wifi_iface")
+            if [[ -n "$why" ]]; then
+                log_error "Couldn't connect to $ssid: $why"
+            else
+                echo "Wrong password or network name is the usual cause."
+            fi
+            echo "Details:"
             echo "  sudo journalctl -b -u 'netplan-wpa-*' -u systemd-networkd -n 30 --no-pager"
         fi
     else

@@ -1,0 +1,11 @@
+# Keep WiFi adapters awake. Power saving (the adapter dozing between
+# packets, and the USB port suspending an idle dongle) is what makes
+# cheap dongles like the Realtek RTL8188CUS drop or stall a connection.
+# Both are ordinary software settings, so nothing here can harm the
+# hardware: the cost is a fraction of a watt.
+
+# Radio power save off on every WiFi interface as it appears.
+ACTION=="add", SUBSYSTEM=="net", KERNEL=="wl*", RUN+="/usr/sbin/iw dev $name set power_save off"
+
+# No USB autosuspend for the common RTL8188/8192 CU/CUS/RU dongles.
+ACTION=="add", SUBSYSTEM=="usb", ATTR{idVendor}=="0bda", ATTR{idProduct}=="8176|8177|8178|8179|817a|817b|817c|817d|817e|8191", TEST=="power/control", ATTR{power/control}="on"
