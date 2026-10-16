@@ -242,6 +242,9 @@ provision_install_wifi_helper() {
         log_warning "Couldn't set up the kiosk WiFi screen's permission - Ctrl+Alt+Super+W won't be able to connect"
     fi
     rm -f "$tmp"
+    # Flaky cheap dongles (RTL8188CUS...) need WiFi power saving off.
+    provision_install_file "etc/udev/rules.d/70-kiosk-wifi-power.rules" /etc/udev/rules.d/70-kiosk-wifi-power.rules
+    sudo udevadm control --reload-rules 2>/dev/null || true
 }
 
 provision_configure_firewall() {
