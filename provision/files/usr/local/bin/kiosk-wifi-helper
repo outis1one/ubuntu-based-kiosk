@@ -139,6 +139,25 @@ except Exception:
 sys.exit(1)' "$WIFI_NETPLAN_FILE" "$SYS_CLASS" 2>/dev/null
 }
 
+
+# Two-letter country code for the WiFi regulatory domain: the one already
+# in our netplan file, else from the system locale (en_US.UTF-8 -> US).
+# Without a country set, Linux uses the restrictive "world" domain: many
+# 5 GHz channels become listen-only, so a network shows up in scans but
+# the adapter can't join it.
+default_country() {
+    local c=""
+    if [[ -f "$WIFI_NETPLAN_FILE" ]]; then
+        c=$(sed -n 's/^[[:space:]]*regulatory-domain:[[:space:]]*["'"'"']\{0,1\}\([A-Za-z][A-Za-z]\).*/\1/p' "$WIFI_NETPLAN_FILE" | head -1)
+    fi
+    if [[ -z "$c" ]]; then
+        local loc="${LANG:-}"
+        [[ -r /etc/default/locale ]] && loc=$(sed -n 's/^LANG=["'"'"']\{0,1\}\([^"'"'"']*\).*/\1/p' /etc/default/locale | head -1)
+        [[ "$loc" =~ _([A-Z][A-Z])[.@]?  ]] && c="${BASH_REMATCH[1]}"
+    fi
+    echo "${c^^}"
+}
+
 need_iface() {
     IFACE=$(prefer_configured_iface || detect_iface) || reply_error "No WiFi adapter found. If it's a USB adapter, check it's plugged in."
     command -v iw >/dev/null || reply_error "WiFi support (iw, wpasupplicant) isn't installed - run Core Settings -> WiFi once from the admin menu"
@@ -264,7 +283,9 @@ do_connect() {
     unblock
     hard_blocked && reply_error "WiFi is switched off by a hardware switch or in the BIOS/UEFI"
 
-    local backup="" new
+    local country backup="" new
+    country=$(default_country)
+    [[ -n "$country" ]] && iw reg set "$country" 2>/dev/null
     mkdir -p "$NETPLAN_DIR"
     if [[ -f "$WIFI_NETPLAN_FILE" ]]; then
         backup="${WIFI_NETPLAN_FILE}.backup-$(date +%Y%m%d-%H%M%S)"
@@ -281,6 +302,7 @@ do_connect() {
         echo "      dhcp4: true"
         echo "      dhcp6: false"
         echo "      optional: true"
+        [[ -n "$country" ]] && echo "      regulatory-domain: \"$country\""
         echo "      access-points:"
         if [[ -n "$password" ]]; then
             echo "        $(yaml_quote "$ssid"):"

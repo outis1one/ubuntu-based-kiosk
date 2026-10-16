@@ -157,6 +157,24 @@ wifi_debug_dump() {
     echo "(full log: /var/lib/kiosk-firstboot/install.log, or journalctl -b -u 'netplan-wpa-*')"
 }
 
+# Two-letter country code for the WiFi regulatory domain: the one already
+# in our netplan file, else from the system locale (en_US.UTF-8 -> US).
+# Without a country set, Linux uses the restrictive "world" domain: many
+# 5 GHz channels become listen-only, so a network shows up in scans but
+# the adapter can't join it.
+wifi_default_country() {
+    local c=""
+    if [[ -f "$WIFI_NETPLAN_FILE" ]]; then
+        c=$(sed -n 's/^[[:space:]]*regulatory-domain:[[:space:]]*["'"'"']\{0,1\}\([A-Za-z][A-Za-z]\).*/\1/p' "$WIFI_NETPLAN_FILE" | head -1)
+    fi
+    if [[ -z "$c" ]]; then
+        local loc="${LANG:-}"
+        [[ -r /etc/default/locale ]] && loc=$(sed -n 's/^LANG=["'"'"']\{0,1\}\([^"'"'"']*\).*/\1/p' /etc/default/locale | head -1)
+        [[ "$loc" =~ _([A-Z][A-Z])[.@]?  ]] && c="${BASH_REMATCH[1]}"
+    fi
+    echo "${c^^}"
+}
+
 wifi_menu() {
     local rc=0
     wifi_configure || rc=$?
@@ -351,7 +369,17 @@ wifi_configure() {
         return 1
     fi
 
-    apply_wifi_config "$wifi_iface" "$ssid" "$password"
+    local country c_in
+    country=$(wifi_default_country)
+    read -r -p "Country code for WiFi regulations (2 letters, e.g. US) [${country:-none}]: " c_in
+    c_in=${c_in:-$country}
+    c_in=${c_in^^}
+    if [[ -n "$c_in" && ! "$c_in" =~ ^[A-Z]{2}$ ]]; then
+        log_warning "'$c_in' isn't a 2-letter country code - skipping it"
+        c_in=""
+    fi
+
+    apply_wifi_config "$wifi_iface" "$ssid" "$password" "$c_in"
 }
 
 # apply_wifi_config IFACE SSID PASSWORD
@@ -361,6 +389,7 @@ apply_wifi_config() {
     local wifi_iface="$1"
     local ssid="$2"
     local password="$3"
+    local country="${4:-}"
 
     # Our own file, merged by netplan with the others (wired config etc).
     local netplan_file="$WIFI_NETPLAN_FILE"
@@ -384,7 +413,8 @@ network:
       dhcp4: true
       dhcp6: false
       optional: true
-      access-points:
+${country:+      regulatory-domain: \"$country\"
+}      access-points:
         $(wifi_yaml_quote "$ssid"):
           password: $(wifi_yaml_quote "$password")
 EOF
@@ -417,6 +447,7 @@ WATCHEOF
     rm -f "$temp_plan"
 
     sudo bash -c "$(declare -f wifi_drop_stale_entries); NETPLAN_DIR='$NETPLAN_DIR' WIFI_NETPLAN_FILE='$netplan_file' wifi_drop_stale_entries"
+    [[ -n "$country" ]] && sudo iw reg set "$country" 2>/dev/null
     echo "Applying configuration..."
     local netplan_log
     netplan_log=$(mktemp)
