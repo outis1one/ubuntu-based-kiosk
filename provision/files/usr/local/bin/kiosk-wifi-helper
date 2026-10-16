@@ -11,6 +11,11 @@
 #   kiosk-wifi-helper status     {"iface","connected","ssid","ip","configured"}
 #   kiosk-wifi-helper scan       {"iface","networks":[{"ssid","signal","secure"}]}
 #   kiosk-wifi-helper connect    stdin {"ssid","password"} -> {"ok","ip"|"error"}
+#   kiosk-wifi-helper region-status
+#                                {"country","locale","keyboard","locales":[],"keyboards":[]}
+#   kiosk-wifi-helper region-set stdin {"country"?,"locale"?,"keyboard"?} -> {"ok",...}
+#                                WiFi country (regulatory domain), system
+#                                locale and keyboard layout; every field optional
 #
 # Every reply is one JSON line on stdout, exit 0 on success. connect
 # writes the same netplan file as Core Settings -> WiFi (menus/wifi.sh,
@@ -24,6 +29,8 @@ set -uo pipefail
 NETPLAN_DIR="${NETPLAN_DIR:-/etc/netplan}"
 SYS_CLASS="${KIOSK_WIFI_SYS_CLASS:-/sys/class}"   # overridable for tests
 WIFI_NETPLAN_FILE="$NETPLAN_DIR/60-kiosk-wifi.yaml"
+REGDOM_CONF="${KIOSK_REGDOM_CONF:-/etc/modprobe.d/kiosk-regdom.conf}"
+LOCALE_FILE="${KIOSK_LOCALE_FILE:-/etc/default/locale}"
 LOCK_FILE="${KIOSK_WIFI_LOCK:-/run/kiosk-wifi-helper.lock}"
 CONNECT_WAIT="${KIOSK_WIFI_CONNECT_WAIT:-30}"
 
@@ -150,9 +157,12 @@ default_country() {
     if [[ -f "$WIFI_NETPLAN_FILE" ]]; then
         c=$(sed -n 's/^[[:space:]]*regulatory-domain:[[:space:]]*["'"'"']\{0,1\}\([A-Za-z][A-Za-z]\).*/\1/p' "$WIFI_NETPLAN_FILE" | head -1)
     fi
+    if [[ -z "$c" && -f "$REGDOM_CONF" ]]; then
+        c=$(sed -n 's/.*ieee80211_regdom=\([A-Za-z][A-Za-z]\).*/\1/p' "$REGDOM_CONF" | head -1)
+    fi
     if [[ -z "$c" ]]; then
         local loc="${LANG:-}"
-        [[ -r /etc/default/locale ]] && loc=$(sed -n 's/^LANG=["'"'"']\{0,1\}\([^"'"'"']*\).*/\1/p' /etc/default/locale | head -1)
+        [[ -r "$LOCALE_FILE" ]] && loc=$(sed -n 's/^LANG=["'"'"']\{0,1\}\([^"'"'"']*\).*/\1/p' "$LOCALE_FILE" | head -1)
         [[ "$loc" =~ _([A-Z][A-Z])[.@]?  ]] && c="${BASH_REMATCH[1]}"
     fi
     echo "${c^^}"
@@ -161,6 +171,84 @@ default_country() {
 need_iface() {
     IFACE=$(prefer_configured_iface || detect_iface) || reply_error "No WiFi adapter found. If it's a USB adapter, check it's plugged in."
     command -v iw >/dev/null || reply_error "WiFi support (iw, wpasupplicant) isn't installed - run Core Settings -> WiFi once from the admin menu"
+}
+
+# ---- Region: WiFi country, system locale, keyboard layout -----------------
+
+current_locale() {
+    [[ -r "$LOCALE_FILE" ]] || return 0
+    sed -n 's/^LANG=["'"'"']\{0,1\}\([^"'"'"']*\).*/\1/p' "$LOCALE_FILE" | head -1
+}
+
+current_keyboard() {
+    localectl status 2>/dev/null | sed -n 's/^[[:space:]]*X11 Layout:[[:space:]]*//p' | head -1
+}
+
+# Locales that are generated on this system (setting any other one would
+# leave the whole system on a locale that doesn't exist).
+list_locales() {
+    locale -a 2>/dev/null | grep -i 'utf-\?8' | sed 's/\.[Uu][Tt][Ff]-\?8$/.UTF-8/' | sort -u
+}
+
+list_keyboards() {
+    localectl list-x11-keymap-layouts 2>/dev/null
+}
+
+do_region_status() {
+    jq -cn --arg c "$(default_country)" --arg l "$(current_locale)" --arg k "$(current_keyboard)" \
+        --argjson ls "$(list_locales | jq -R . | jq -cs .)" \
+        --argjson ks "$(list_keyboards | jq -R . | jq -cs .)" \
+        '{ok:true,country:$c,locale:$l,keyboard:$k,locales:$ls,keyboards:$ks}'
+}
+
+# Persist the WiFi country: kernel option for the regulatory domain (so it
+# applies from boot, before any WiFi config exists), the netplan file if
+# there is one (so wpa_supplicant gets it too), and now via iw.
+set_country() {
+    local c="$1"
+    printf '# Written by kiosk-wifi-helper (Region setting)\noptions cfg80211 ieee80211_regdom=%s\n' "$c" > "$REGDOM_CONF"
+    if [[ -f "$WIFI_NETPLAN_FILE" ]]; then
+        sed -i '/^[[:space:]]*regulatory-domain:/d' "$WIFI_NETPLAN_FILE"
+        sed -i "s/^\([[:space:]]*\)optional: true\$/&\n\1regulatory-domain: \"$c\"/" "$WIFI_NETPLAN_FILE"
+    fi
+    iw reg set "$c" 2>/dev/null || true
+}
+
+do_region_set() {
+    local input country locale keyboard
+    input=$(head -c 4096)
+    country=$(jq -r '.country // "" | strings' <<< "$input" 2>/dev/null) || reply_error "Bad request"
+    locale=$(jq -r '.locale // "" | strings' <<< "$input" 2>/dev/null) || reply_error "Bad request"
+    keyboard=$(jq -r '.keyboard // "" | strings' <<< "$input" 2>/dev/null) || reply_error "Bad request"
+    country=${country^^}
+
+    if [[ -n "$country" ]]; then
+        [[ "$country" =~ ^[A-Z]{2}$ ]] || reply_error "A country code is 2 letters, e.g. US"
+        # Reject codes that aren't real countries when the tz database is here.
+        if [[ -r /usr/share/zoneinfo/iso3166.tab ]] && ! grep -q "^$country[[:space:]]" /usr/share/zoneinfo/iso3166.tab; then
+            reply_error "$country isn't a known country code"
+        fi
+    fi
+    if [[ -n "$locale" ]]; then
+        list_locales | grep -qxF -- "$locale" || reply_error "Locale $locale isn't installed on this system"
+    fi
+    if [[ -n "$keyboard" ]]; then
+        list_keyboards | grep -qxF -- "$keyboard" || reply_error "Unknown keyboard layout: $keyboard"
+    fi
+
+    local err
+    [[ -n "$country" ]] && set_country "$country"
+    if [[ -n "$locale" ]]; then
+        err=$(localectl set-locale "LANG=$locale" 2>&1) || reply_error "Couldn't set the locale: ${err:0:200}"
+    fi
+    if [[ -n "$keyboard" ]]; then
+        err=$(localectl set-x11-keymap "$keyboard" 2>&1) || reply_error "Couldn't set the keyboard: ${err:0:200}"
+        # Console layout too, when there's a console map of the same name.
+        localectl list-keymaps 2>/dev/null | grep -qxF -- "$keyboard" && localectl set-keymap "$keyboard" >/dev/null 2>&1
+    fi
+    jq -cn --arg c "$(default_country)" --arg l "$(current_locale)" --arg k "$(current_keyboard)" \
+        --argjson restart "$([[ -n "$locale$keyboard" ]] && echo true || echo false)" \
+        '{ok:true,country:$c,locale:$l,keyboard:$k,restart:$restart}'
 }
 
 do_status() {
@@ -370,5 +458,7 @@ case "${1:-}" in
     status)  do_status ;;
     scan)    do_scan ;;
     connect) do_connect ;;
+    region-status) do_region_status ;;
+    region-set)    do_region_set ;;
     *)       reply_error "unknown action: ${1:-}" ;;
 esac

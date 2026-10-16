@@ -167,6 +167,9 @@ wifi_default_country() {
     if [[ -f "$WIFI_NETPLAN_FILE" ]]; then
         c=$(sed -n 's/^[[:space:]]*regulatory-domain:[[:space:]]*["'"'"']\{0,1\}\([A-Za-z][A-Za-z]\).*/\1/p' "$WIFI_NETPLAN_FILE" | head -1)
     fi
+    if [[ -z "$c" && -r /etc/modprobe.d/kiosk-regdom.conf ]]; then
+        c=$(sed -n 's/.*ieee80211_regdom=\([A-Za-z][A-Za-z]\).*/\1/p' /etc/modprobe.d/kiosk-regdom.conf | head -1)
+    fi
     if [[ -z "$c" ]]; then
         local loc="${LANG:-}"
         [[ -r /etc/default/locale ]] && loc=$(sed -n 's/^LANG=["'"'"']\{0,1\}\([^"'"'"']*\).*/\1/p' /etc/default/locale | head -1)

@@ -644,6 +644,63 @@ document.getElementById('run-upgrade').addEventListener('click', async (e) => {
 });
 
 /* ---------------------------------------------------------------------- */
+/* Region                                                                  */
+/* ---------------------------------------------------------------------- */
+
+function fillSelect(sel, items, current) {
+    sel.textContent = '';
+    const list = items.slice();
+    if (current && !list.includes(current)) list.unshift(current);
+    for (const v of list) {
+        const o = document.createElement('option');
+        o.value = v;
+        o.textContent = v;
+        o.selected = v === current;
+        sel.appendChild(o);
+    }
+}
+
+async function loadRegion() {
+    try {
+        const res = await fetch('/api/region');
+        const r = await res.json();
+        if (!res.ok) throw new Error(r.error || 'Could not read the region');
+        document.getElementById('region-country').value = r.country || '';
+        fillSelect(document.getElementById('region-locale'), r.locales || [], r.locale);
+        fillSelect(document.getElementById('region-keyboard'), r.keyboards || [], r.keyboard);
+    } catch (e) {
+        showMessage(e.message, true);
+    }
+}
+
+document.getElementById('region-form').addEventListener('submit', async (ev) => {
+    ev.preventDefault();
+    try {
+        const res = await fetch('/api/region', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                country: document.getElementById('region-country').value.trim(),
+                locale: document.getElementById('region-locale').value,
+                keyboard: document.getElementById('region-keyboard').value,
+            }),
+        });
+        const r = await res.json();
+        if (!res.ok) throw new Error(r.error || 'Could not save');
+        showMessage(r.restart ? 'Region saved - restart for the locale and keyboard to apply' : 'Region saved');
+        loadRegion();
+    } catch (e) {
+        showMessage(e.message, true);
+    }
+});
+
+document.getElementById('region-from-locale').addEventListener('click', () => {
+    const m = /_([A-Z]{2})/.exec(document.getElementById('region-locale').value);
+    if (m) document.getElementById('region-country').value = m[1];
+    else showMessage("That locale doesn't name a country", true);
+});
+
+/* ---------------------------------------------------------------------- */
 /* Init                                                                    */
 /* ---------------------------------------------------------------------- */
 
@@ -657,6 +714,7 @@ async function init() {
     }
     await loadAddonStatus();
     renderAddons();
+    loadRegion();
 }
 
 init();

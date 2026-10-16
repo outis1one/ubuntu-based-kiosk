@@ -26,6 +26,10 @@
       color: #ecf0f1;
       outline: none;
     }
+    select {
+      width: 100%; padding: 14px; font-size: 18px; border: 2px solid #34495e;
+      border-radius: 10px; background: #34495e; color: #ecf0f1;
+    }
     input:focus { border-color: #3498db; }
     .row { display: flex; gap: 10px; align-items: center; }
     .row input { flex: 1; }
@@ -114,6 +118,20 @@
     </div>
   </div>
 
+  <details id="region-panel" class="hidden" style="margin-top: 18px">
+    <summary style="font-size: 17px; cursor: pointer; color: #bdc3c7">🌍 Region (country, locale, keyboard)</summary>
+    <label for="country">WiFi country (2 letters, e.g. US) - needed to join many 5 GHz networks</label>
+    <input id="country" type="text" maxlength="2" autocomplete="off" spellcheck="false" style="text-transform: uppercase">
+    <label for="locale">Language / locale</label>
+    <select id="locale"></select>
+    <label for="keyboard">Keyboard layout</label>
+    <select id="keyboard"></select>
+    <div class="actions">
+      <button class="primary" id="region-save">Save region</button>
+      <button id="region-from-locale">Country from locale</button>
+    </div>
+  </details>
+
   <div id="message"></div>
   <div class="hint">Esc closes this screen. Closes by itself after 5 minutes untouched.</div>
 
@@ -135,7 +153,7 @@
 
     function setBusy(on) {
       busy = on;
-      for (const id of ['scan', 'connect', 'pin-ok']) $(id).disabled = on;
+      for (const id of ['scan', 'connect', 'pin-ok', 'region-save']) $(id).disabled = on;
     }
 
     function signalBars(dbm) {
@@ -210,6 +228,52 @@
       refreshStatus();
     }
 
+    function fillSelect(sel, items, current) {
+      sel.textContent = '';
+      const list = items.slice();
+      if (current && !list.includes(current)) list.unshift(current);
+      for (const v of list) {
+        const o = document.createElement('option');
+        o.value = v; o.textContent = v;
+        if (v === current) o.selected = true;
+        sel.appendChild(o);
+      }
+    }
+
+    async function loadRegion() {
+      const r = await request('region-status');
+      if (!r.ok) return;
+      $('country').value = r.country || '';
+      fillSelect($('locale'), r.locales || [], r.locale);
+      fillSelect($('keyboard'), r.keyboards || [], r.keyboard);
+      $('region-panel').classList.remove('hidden');
+    }
+
+    async function saveRegion() {
+      if (busy) return;
+      setBusy(true);
+      message('Saving region…', 'busy');
+      const r = await request('region-set', {
+        country: $('country').value.trim(),
+        locale: $('locale').value,
+        keyboard: $('keyboard').value,
+      });
+      setBusy(false);
+      if (r.ok) {
+        message(r.restart ? '✓ Saved. Locale and keyboard apply after a restart; the country applies now.' : '✓ Saved', 'ok');
+        loadRegion();
+      } else {
+        message(r.error || 'Could not save', 'error');
+      }
+    }
+
+    // en_US.UTF-8 -> US
+    function countryFromLocale() {
+      const m = /_([A-Z]{2})/.exec($('locale').value);
+      if (m) $('country').value = m[1];
+      else message("That locale doesn't name a country", 'error');
+    }
+
     async function unlock() {
       if (busy) return;
       setBusy(true);
@@ -224,12 +288,15 @@
       $('pin-step').classList.add('hidden');
       $('wifi-step').classList.remove('hidden');
       refreshStatus();
+      loadRegion();
       scan();
     }
 
     $('pin-ok').addEventListener('click', unlock);
     $('pin').addEventListener('keydown', e => { if (e.key === 'Enter') unlock(); });
     $('scan').addEventListener('click', scan);
+    $('region-save').addEventListener('click', saveRegion);
+    $('region-from-locale').addEventListener('click', countryFromLocale);
     $('connect').addEventListener('click', connect);
     $('password').addEventListener('keydown', e => { if (e.key === 'Enter') connect(); });
     $('ssid').addEventListener('keydown', e => { if (e.key === 'Enter') $('password').focus(); });
