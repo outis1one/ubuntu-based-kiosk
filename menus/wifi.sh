@@ -142,6 +142,21 @@ wifi_choose_iface() {
     fi
 }
 
+# What the adapter is actually doing, printed after a failed connect so the
+# cause (regulatory domain, weak signal, DHCP, driver) is visible, not guessed.
+wifi_debug_dump() {
+    local i="$1"
+    echo "--- link ---"
+    iw dev "$i" link 2>&1 | head -8
+    echo "--- regulatory domain ---"
+    iw reg get 2>&1 | grep -m2 "country\|global" || true
+    echo "--- wpa_supplicant log (last 15) ---"
+    journalctl -b -u "netplan-wpa-$i" -n 15 --no-pager -o cat 2>&1 | cut -c1-160
+    echo "--- networkd ---"
+    networkctl status "$i" --no-pager 2>&1 | head -12
+    echo "(full log: /var/lib/kiosk-firstboot/install.log, or journalctl -b -u 'netplan-wpa-*')"
+}
+
 wifi_menu() {
     local rc=0
     wifi_configure || rc=$?
@@ -407,9 +422,9 @@ WATCHEOF
     netplan_log=$(mktemp)
     if sudo netplan apply > "$netplan_log" 2>&1; then
         cat "$netplan_log"
-        echo "Waiting for $wifi_iface to connect (up to 30 seconds)..."
+        echo "Waiting for $wifi_iface to connect (up to 45 seconds)..."
         local _
-        for _ in {1..30}; do
+        for _ in {1..45}; do
             wifi_iface_has_ip "$wifi_iface" && break
             sleep 1
         done
@@ -422,11 +437,12 @@ WATCHEOF
             why=$(wifi_diagnose "$wifi_iface")
             if [[ -n "$why" ]]; then
                 log_error "Couldn't connect to $ssid: $why"
+            elif iw dev "$wifi_iface" link 2>/dev/null | grep -q "^Connected"; then
+                log_error "Joined the network but got no address - the router's DHCP isn't answering (or is slow)"
             else
-                echo "Wrong password or network name is the usual cause."
+                echo "Not joined, and the log doesn't say why - not necessarily the password."
             fi
-            echo "Details:"
-            echo "  sudo journalctl -b -u 'netplan-wpa-*' -u systemd-networkd -n 30 --no-pager"
+            wifi_debug_dump "$wifi_iface"
         fi
     else
         log_error "netplan apply failed"
