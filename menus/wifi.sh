@@ -34,6 +34,40 @@
 
 WIFI_NETPLAN_FILE="$NETPLAN_DIR/60-kiosk-wifi.yaml"
 
+# netplan apply starts a netplan-wpa-<iface> unit for every wifis: entry
+# in every file and waits for that device - 90s, then the whole apply
+# fails - if one names an interface this machine doesn't have (the
+# installer's own config can carry e.g. "wlan0" while the adapter here is
+# "wlp1s0"). Take such entries out of the other netplan files first
+# (originals kept as *.kiosk-bak, which netplan ignores).
+wifi_drop_stale_entries() {
+    local f
+    for f in "$NETPLAN_DIR"/*.yaml; do
+        [[ -f "$f" && "$f" != "$WIFI_NETPLAN_FILE" ]] || continue
+        python3 -I - "$f" <<'PYEOF' 2>/dev/null || true
+import os, shutil, sys, yaml
+p = sys.argv[1]
+try:
+    d = yaml.safe_load(open(p)) or {}
+    w = (d.get("network") or {}).get("wifis") or {}
+    stale = [n for n in w if not os.path.exists("/sys/class/net/" + str(n))]
+    if stale:
+        shutil.copy2(p, p + ".kiosk-bak")
+        for n in stale:
+            del w[n]
+        if not w:
+            del d["network"]["wifis"]
+        mode = os.stat(p).st_mode & 0o777
+        with open(p, "w") as fh:
+            yaml.safe_dump(d, fh, default_flow_style=False)
+        os.chmod(p, mode)
+        print("Removed stale WiFi entries from %s: %s" % (p, ", ".join(map(str, stale))))
+except Exception:
+    pass
+PYEOF
+    done
+}
+
 wifi_menu() {
     local rc=0
     wifi_configure || rc=$?
@@ -293,6 +327,7 @@ WATCHEOF
     sudo chmod 0600 "$netplan_file"
     rm -f "$temp_plan"
 
+    sudo bash -c "$(declare -f wifi_drop_stale_entries); NETPLAN_DIR='$NETPLAN_DIR' WIFI_NETPLAN_FILE='$netplan_file' wifi_drop_stale_entries"
     echo "Applying configuration..."
     local netplan_log
     netplan_log=$(mktemp)
