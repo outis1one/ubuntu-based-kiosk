@@ -168,6 +168,40 @@ do_scan() {
         | {ok: true, iface: $i, networks: .}' < "$TMP_SCAN"
 }
 
+# netplan apply starts a netplan-wpa-<iface> unit for every wifis: entry
+# in every file and waits for that device - 90s, then the whole apply
+# fails - if one names an interface this machine doesn't have (the
+# installer's own config can carry e.g. "wlan0" while the adapter here is
+# "wlp1s0"). Take such entries out of the other netplan files first
+# (originals kept as *.kiosk-bak, which netplan ignores).
+drop_stale_entries() {
+    local f
+    for f in "$NETPLAN_DIR"/*.yaml; do
+        [[ -f "$f" && "$f" != "$WIFI_NETPLAN_FILE" ]] || continue
+        python3 -I - "$f" <<'PYEOF' 2>/dev/null || true
+import os, shutil, sys, yaml
+p = sys.argv[1]
+try:
+    d = yaml.safe_load(open(p)) or {}
+    w = (d.get("network") or {}).get("wifis") or {}
+    stale = [n for n in w if not os.path.exists("/sys/class/net/" + str(n))]
+    if stale:
+        shutil.copy2(p, p + ".kiosk-bak")
+        for n in stale:
+            del w[n]
+        if not w:
+            del d["network"]["wifis"]
+        mode = os.stat(p).st_mode & 0o777
+        with open(p, "w") as fh:
+            yaml.safe_dump(d, fh, default_flow_style=False)
+        os.chmod(p, mode)
+        print("Removed stale WiFi entries from %s: %s" % (p, ", ".join(map(str, stale))))
+except Exception:
+    pass
+PYEOF
+    done
+}
+
 do_connect() {
     need_iface
     local input ssid password
@@ -219,6 +253,7 @@ do_connect() {
     chmod 0600 "$new"
     mv -f "$new" "$WIFI_NETPLAN_FILE"
 
+    drop_stale_entries >/dev/null
     local err
     if ! err=$(netplan apply 2>&1); then
         restore "$backup"
