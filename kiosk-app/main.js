@@ -1328,6 +1328,13 @@ ipcMain.handle('wifi-request',async(event,req)=>{
   }
   if(!wifiUnlocked)return{ok:false,error:'Enter the PIN first'};
   if(action==='status'||action==='scan')return runWifiHelper(action);
+  if(action==='region-status')return runWifiHelper('region-status');
+  if(action==='region-set'){
+    const input={};
+    for(const k of['country','locale','keyboard'])if(req[k])input[k]=String(req[k]);
+    console.log('[WIFI] Region set:',JSON.stringify(input));
+    return runWifiHelper('region-set',input);
+  }
   if(action==='connect'){
     console.log('[WIFI] Connecting to',JSON.stringify(String(req.ssid||'')));
     const result=await runWifiHelper('connect',{ssid:String(req.ssid||''),password:String(req.password||'')});

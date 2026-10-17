@@ -13,6 +13,9 @@ const assert = require('assert');
 const scratchDir = fs.mkdtempSync(path.join(os.tmpdir(), 'webui-api-test-'));
 process.env.CONFIG_PATH = path.join(scratchDir, 'config.json');
 
+process.env.SUDO_CMD = ''; // run the fake helper directly, no real sudo
+process.env.WIFI_HELPER_PATH = path.join(__dirname, 'fixtures', 'fake-wifi-helper.sh');
+
 const app = require('../server');
 
 let failures = 0;
@@ -238,6 +241,31 @@ async function main() {
         assert.strictEqual(res.status, 200);
         const body = await res.json();
         assert.strictEqual(body.lockoutTimeout, 20);
+    });
+
+    await check('GET /api/region returns the helper\'s status', async () => {
+        const res = await fetch(`${base}/api/region`);
+        assert.strictEqual(res.status, 200);
+        assert.strictEqual((await res.json()).country, 'US');
+    });
+
+    await check('PUT /api/region passes only the given fields to the helper', async () => {
+        const res = await fetch(`${base}/api/region`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ country: 'DE', locale: '', bogus: 'x' }),
+        });
+        assert.strictEqual(res.status, 200);
+        assert.deepStrictEqual(JSON.parse((await res.json()).echo), { country: 'DE' });
+    });
+
+    await check('PUT /api/region with nothing to change is a 400', async () => {
+        const res = await fetch(`${base}/api/region`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: '{}',
+        });
+        assert.strictEqual(res.status, 400);
     });
 
     server.close();

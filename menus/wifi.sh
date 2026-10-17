@@ -142,6 +142,42 @@ wifi_choose_iface() {
     fi
 }
 
+# What the adapter is actually doing, printed after a failed connect so the
+# cause (regulatory domain, weak signal, DHCP, driver) is visible, not guessed.
+wifi_debug_dump() {
+    local i="$1"
+    echo "--- link ---"
+    iw dev "$i" link 2>&1 | head -8
+    echo "--- regulatory domain ---"
+    iw reg get 2>&1 | grep -m2 "country\|global" || true
+    echo "--- wpa_supplicant log (last 15) ---"
+    journalctl -b -u "netplan-wpa-$i" -n 15 --no-pager -o cat 2>&1 | cut -c1-160
+    echo "--- networkd ---"
+    networkctl status "$i" --no-pager 2>&1 | head -12
+    echo "(full log: /var/lib/kiosk-firstboot/install.log, or journalctl -b -u 'netplan-wpa-*')"
+}
+
+# Two-letter country code for the WiFi regulatory domain: the one already
+# in our netplan file, else from the system locale (en_US.UTF-8 -> US).
+# Without a country set, Linux uses the restrictive "world" domain: many
+# 5 GHz channels become listen-only, so a network shows up in scans but
+# the adapter can't join it.
+wifi_default_country() {
+    local c=""
+    if [[ -f "$WIFI_NETPLAN_FILE" ]]; then
+        c=$(sed -n 's/^[[:space:]]*regulatory-domain:[[:space:]]*["'"'"']\{0,1\}\([A-Za-z][A-Za-z]\).*/\1/p' "$WIFI_NETPLAN_FILE" | head -1)
+    fi
+    if [[ -z "$c" && -r /etc/modprobe.d/kiosk-regdom.conf ]]; then
+        c=$(sed -n 's/.*ieee80211_regdom=\([A-Za-z][A-Za-z]\).*/\1/p' /etc/modprobe.d/kiosk-regdom.conf | head -1)
+    fi
+    if [[ -z "$c" ]]; then
+        local loc="${LANG:-}"
+        [[ -r /etc/default/locale ]] && loc=$(sed -n 's/^LANG=["'"'"']\{0,1\}\([^"'"'"']*\).*/\1/p' /etc/default/locale | head -1)
+        [[ "$loc" =~ _([A-Z][A-Z])[.@]?  ]] && c="${BASH_REMATCH[1]}"
+    fi
+    echo "${c^^}"
+}
+
 wifi_menu() {
     local rc=0
     wifi_configure || rc=$?
@@ -336,7 +372,17 @@ wifi_configure() {
         return 1
     fi
 
-    apply_wifi_config "$wifi_iface" "$ssid" "$password"
+    local country c_in
+    country=$(wifi_default_country)
+    read -r -p "Country code for WiFi regulations (2 letters, e.g. US) [${country:-none}]: " c_in
+    c_in=${c_in:-$country}
+    c_in=${c_in^^}
+    if [[ -n "$c_in" && ! "$c_in" =~ ^[A-Z]{2}$ ]]; then
+        log_warning "'$c_in' isn't a 2-letter country code - skipping it"
+        c_in=""
+    fi
+
+    apply_wifi_config "$wifi_iface" "$ssid" "$password" "$c_in"
 }
 
 # apply_wifi_config IFACE SSID PASSWORD
@@ -346,6 +392,7 @@ apply_wifi_config() {
     local wifi_iface="$1"
     local ssid="$2"
     local password="$3"
+    local country="${4:-}"
 
     # Our own file, merged by netplan with the others (wired config etc).
     local netplan_file="$WIFI_NETPLAN_FILE"
@@ -369,7 +416,8 @@ network:
       dhcp4: true
       dhcp6: false
       optional: true
-      access-points:
+${country:+      regulatory-domain: \"$country\"
+}      access-points:
         $(wifi_yaml_quote "$ssid"):
           password: $(wifi_yaml_quote "$password")
 EOF
@@ -402,14 +450,15 @@ WATCHEOF
     rm -f "$temp_plan"
 
     sudo bash -c "$(declare -f wifi_drop_stale_entries); NETPLAN_DIR='$NETPLAN_DIR' WIFI_NETPLAN_FILE='$netplan_file' wifi_drop_stale_entries"
+    [[ -n "$country" ]] && sudo iw reg set "$country" 2>/dev/null
     echo "Applying configuration..."
     local netplan_log
     netplan_log=$(mktemp)
     if sudo netplan apply > "$netplan_log" 2>&1; then
         cat "$netplan_log"
-        echo "Waiting for $wifi_iface to connect (up to 30 seconds)..."
+        echo "Waiting for $wifi_iface to connect (up to 45 seconds)..."
         local _
-        for _ in {1..30}; do
+        for _ in {1..45}; do
             wifi_iface_has_ip "$wifi_iface" && break
             sleep 1
         done
@@ -422,11 +471,12 @@ WATCHEOF
             why=$(wifi_diagnose "$wifi_iface")
             if [[ -n "$why" ]]; then
                 log_error "Couldn't connect to $ssid: $why"
+            elif iw dev "$wifi_iface" link 2>/dev/null | grep -q "^Connected"; then
+                log_error "Joined the network but got no address - the router's DHCP isn't answering (or is slow)"
             else
-                echo "Wrong password or network name is the usual cause."
+                echo "Not joined, and the log doesn't say why - not necessarily the password."
             fi
-            echo "Details:"
-            echo "  sudo journalctl -b -u 'netplan-wpa-*' -u systemd-networkd -n 30 --no-pager"
+            wifi_debug_dump "$wifi_iface"
         fi
     else
         log_error "netplan apply failed"

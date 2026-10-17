@@ -36,6 +36,10 @@
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2 3 7l9 5 9-5-9-5Z"/><path d="m3 12 9 5 9-5M3 17l9 5 9-5"/></svg>
         Addons
       </button>
+      <button class="nav-item" data-page="region">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
+        Region
+      </button>
       <button class="nav-item" data-page="update">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-2.6-6.4M21 4v5h-5"/></svg>
         Update
@@ -190,6 +194,35 @@
         <p>Install and configure the same addons the terminal menu offers. Uninstall isn't available here yet.</p>
       </div>
       <div id="addons-list"></div>
+    </section>
+
+    <!-- Region -->
+    <section class="page" id="page-region">
+      <div class="page-header">
+        <h1>Region</h1>
+        <p>WiFi country, system language and keyboard layout. The WiFi country decides which channels the adapter may join - without it many 5 GHz networks show up in scans but won't connect.</p>
+      </div>
+      <div class="card">
+        <form id="region-form">
+          <label>
+            WiFi country (2 letters, e.g. US)
+            <input type="text" id="region-country" maxlength="2" autocomplete="off" spellcheck="false" style="text-transform: uppercase">
+          </label>
+          <label>
+            Language / locale
+            <select id="region-locale"></select>
+          </label>
+          <label>
+            Keyboard layout
+            <select id="region-keyboard"></select>
+          </label>
+          <div class="button-row">
+            <button type="submit">Save region</button>
+            <button type="button" id="region-from-locale" class="secondary">Country from locale</button>
+          </div>
+          <p class="hint">Locale and keyboard apply after a restart; the WiFi country applies immediately.</p>
+        </form>
+      </div>
     </section>
 
     <!-- Update -->

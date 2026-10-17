@@ -24,6 +24,7 @@ const { ACTIONS } = require('./lib/actions');
 const { startJob, getJob } = require('./lib/jobs');
 
 const HELPER_PATH = process.env.HELPER_PATH || '/usr/local/bin/kiosk-webui-helper';
+const WIFI_HELPER_PATH = process.env.WIFI_HELPER_PATH || '/usr/local/bin/kiosk-wifi-helper';
 const SUDO_CMD = process.env.SUDO_CMD !== undefined ? process.env.SUDO_CMD : 'sudo';
 
 const app = express();
@@ -251,6 +252,40 @@ app.get('/api/actions/jobs/:jobId/stream', (req, res) => {
     };
     job.listeners.add(listener);
     req.on('close', () => job.listeners.delete(listener));
+});
+
+/* ---------------------------------------------------------------------- */
+/* Region: WiFi country, locale, keyboard (root work in kiosk-wifi-helper) */
+/* ---------------------------------------------------------------------- */
+
+function runRegionHelper(action, input, res) {
+    const cmd = SUDO_CMD || WIFI_HELPER_PATH;
+    const args = SUDO_CMD ? ['-n', WIFI_HELPER_PATH, action] : [action];
+    const child = execFile(cmd, args, { timeout: 30_000 }, (err, stdout, stderr) => {
+        let body = null;
+        try { body = JSON.parse(stdout.trim().split('\n').pop()); } catch (e) { /* not our JSON */ }
+        if (!body) {
+            console.error(`${action} failed:`, stderr || (err && err.message));
+            return res.status(500).json({ error: 'The region helper is not available - run Advanced -> Upgrade from the admin menu' });
+        }
+        res.status(body.ok ? 200 : 400).json(body);
+    });
+    child.stdin.on('error', () => {});
+    child.stdin.end(input ? JSON.stringify(input) : '');
+}
+
+app.get('/api/region', (req, res) => runRegionHelper('region-status', null, res));
+
+app.put('/api/region', (req, res) => {
+    const body = req.body && typeof req.body === 'object' ? req.body : {};
+    const input = {};
+    for (const k of ['country', 'locale', 'keyboard']) {
+        if (body[k] === undefined || body[k] === '') continue;
+        if (typeof body[k] !== 'string' || body[k].length > 64) return badRequest(res, `${k} must be a short string`);
+        input[k] = body[k];
+    }
+    if (!Object.keys(input).length) return badRequest(res, 'Nothing to change');
+    runRegionHelper('region-set', input, res);
 });
 
 const PORT = process.env.PORT || 8090;
