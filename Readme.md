@@ -432,6 +432,11 @@ Both can be used at the same time — they serve different purposes:
 - **WireGuard VPN** - Config paste support
 - **Tailscale VPN** - Auth key support
 - **Netbird VPN** - Setup key support
+  - Headless join, no browser login (get a setup key from the Netbird dashboard):
+    ```bash
+    sudo netbird up --setup-key YOUR_SETUP_KEY --allow-server-ssh
+    ```
+    `--allow-server-ssh` enables Netbird's built-in SSH server (peers also need an SSH policy in the dashboard).
 
 ### Advanced
 - **Emergency WiFi Hotspot** - Auto-starts if no internet after boot (configurable during install)
