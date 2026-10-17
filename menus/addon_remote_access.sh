@@ -414,7 +414,7 @@ action_netbird_connect() {
         return
     fi
 
-    if sudo netbird up --setup-key "$setup_key"; then
+    if sudo netbird up --setup-key "$setup_key" --allow-server-ssh; then
         log_success "Netbird connected"
     else
         log_error "Netbird connection failed"
