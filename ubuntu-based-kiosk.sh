@@ -9323,7 +9323,7 @@ addon_netbird() {
                 echo "Get setup key from Netbird dashboard"
                 read -r -p "Enter setup key: " setup_key
                 if [[ -n "$setup_key" ]]; then
-                    sudo netbird up --setup-key "$setup_key"
+                    sudo netbird up --setup-key "$setup_key" --allow-server-ssh
                     log_success "Netbird connected"
                 fi
                 pause
@@ -9354,7 +9354,7 @@ addon_netbird() {
             if [[ "$do_connect" =~ ^[Yy]$ ]]; then
                 echo "Get setup key from Netbird dashboard"
                 read -r -p "Enter setup key: " setup_key
-                [[ -n "$setup_key" ]] && sudo netbird up --setup-key "$setup_key"
+                [[ -n "$setup_key" ]] && sudo netbird up --setup-key "$setup_key" --allow-server-ssh
             fi
         fi
         pause

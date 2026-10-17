@@ -438,6 +438,17 @@ Both can be used at the same time — they serve different purposes:
     ```
     `--allow-server-ssh` enables Netbird's built-in SSH server (peers also need an SSH policy in the dashboard).
 
+#### SSH Host aliases
+
+`~/.ssh/config` lets you `ssh <alias>` instead of typing `ssh user@1.2.3.4` every time — especially handy once machines are reachable over a VPN/Netbird overlay network where the IP is easy to forget:
+
+```
+Host myserver
+    HostName 100.x.x.x
+    User someuser
+    Port 22
+```
+
 ### Advanced
 - **Emergency WiFi Hotspot** - Auto-starts if no internet after boot (configurable during install)
 - **Virtual Console Access** - Ctrl+Alt+F1-F8 terminal login (can enable/disable during install)
