@@ -22,6 +22,10 @@
 #   KIOSK_OFFLINE_WAIT=N on an ISO built with --offline: seconds to wait
 #                        for internet before installing from the bundled
 #                        packages instead (default 90).
+#   KIOSK_ONLINE_TIMEOUT=N  on an --offline ISO, unattended: if the online
+#                        install hasn't finished after N seconds (a stalled
+#                        download on a flaky link), stop it and finish from
+#                        the bundled packages instead (default 2400).
 ################################################################################
 
 set -uo pipefail
@@ -40,6 +44,7 @@ OFFLINE_FLAG="$STATE_DIR/offline-mode"
 
 KIOSK_UNATTENDED=0
 KIOSK_OFFLINE_WAIT=90
+KIOSK_ONLINE_TIMEOUT=2400
 # shellcheck source=/dev/null
 [[ -f "$CONF" ]] && source "$CONF"
 
@@ -60,6 +65,21 @@ if [[ "${1:-}" == "--cleanup" ]]; then
     cleanup
     exit 0
 fi
+
+have_bundle() { [[ -f "$OFFLINE_BUNDLE/apt/Packages" ]]; }
+
+# Finish this install from the bundled packages instead of the internet
+# (cleanup() turns it back off). install.sh notices via lib/config.sh's
+# offline_mode_active.
+switch_to_offline() {
+    touch "$OFFLINE_FLAG"
+    if ! "$OFFLINE_APT" on; then
+        echo "ERROR: couldn't switch apt to the offline bundle."
+        rm -f "$OFFLINE_FLAG"
+        return 1
+    fi
+    return 0
+}
 
 # Make sure tty1 gets its login prompt back. getty@tty1 is ordered after
 # this unit and normally starts by itself once we exit; this just covers
@@ -83,13 +103,15 @@ banner() {
 # drop to a shell as the admin user to fix it, or give up until next boot.
 # Returns 0 to retry, 1 to give up.
 offer_retry() {
-    local choice
+    local choice offline_opt=""
+    have_bundle && [[ ! -f "$OFFLINE_FLAG" ]] && offline_opt="   [O] Install from the offline bundle on this disk"
     while true; do
         echo
-        echo "  [R] Retry   [S] Shell (as $ADMIN_USER, exit to come back)   [Q] Quit to login prompt"
+        echo "  [R] Retry   [S] Shell (as $ADMIN_USER, exit to come back)   [Q] Quit to login prompt$offline_opt"
         read -r -p "Choice [R]: " choice
         case "${choice,,}" in
             ""|r) return 0 ;;
+            o) [[ -n "$offline_opt" ]] && switch_to_offline && return 0 ;;
             s) runuser -l "$ADMIN_USER" ;;
             q)
                 echo "Setup will run again on next boot, or run it now with:"
@@ -227,7 +249,14 @@ run_install() {
 
     # runuser rather than sudo -u: sudo would set SUDO_USER=root, which
     # config.sh reads as "the admin running this tool".
-    runuser -u "$ADMIN_USER" -- env -i "${envs[@]}" \
+    # A stalled download on a flaky connection would otherwise hang an
+    # unattended install forever: with the offline bundle as a safety net,
+    # cap the online attempt (timeout signals the whole process group).
+    local -a cap=()
+    if [[ "$KIOSK_UNATTENDED" == "1" ]] && have_bundle && [[ ! -f "$OFFLINE_FLAG" ]]; then
+        cap=(timeout --kill-after=30 "$KIOSK_ONLINE_TIMEOUT")
+    fi
+    "${cap[@]}" runuser -u "$ADMIN_USER" -- env -i "${envs[@]}" \
         bash -c 'cd "$1" && exec ./install.sh' _ "$REPO_DEST" \
         2>&1 | tee -a "$LOG"
     return "${PIPESTATUS[0]}"
@@ -249,6 +278,15 @@ while true; do
     echo
     echo "install.sh did not finish (exit code $rc). Full output: $LOG"
     if [[ "$KIOSK_UNATTENDED" == "1" ]]; then
+        # Online attempt failed or stalled: the bundle on this disk is
+        # always going to work, so use it rather than retry the same thing.
+        if have_bundle && [[ ! -f "$OFFLINE_FLAG" ]]; then
+            echo "Online install didn't finish - continuing from the offline bundle on this disk."
+            if switch_to_offline; then
+                attempt=$((attempt + 1))
+                continue
+            fi
+        fi
         if (( attempt >= 3 )); then
             echo "Giving up after $attempt attempts; will try again next boot."
             release_tty

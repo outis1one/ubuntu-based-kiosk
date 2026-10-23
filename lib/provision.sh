@@ -127,7 +127,7 @@ provision_install_nodejs() {
             # The bundle carries NodeSource's own nodejs package.
             sudo apt install -y nodejs
         else
-            curl -fsSL https://deb.nodesource.com/setup_22.x | sudo -E bash -
+            curl -fsSL --connect-timeout 20 --max-time 300 https://deb.nodesource.com/setup_22.x | sudo -E bash -
             sudo apt install -y nodejs
         fi
     fi
