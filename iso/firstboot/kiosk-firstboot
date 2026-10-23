@@ -22,10 +22,10 @@
 #   KIOSK_OFFLINE_WAIT=N on an ISO built with --offline: seconds to wait
 #                        for internet before installing from the bundled
 #                        packages instead (default 90).
-#   KIOSK_ONLINE_TIMEOUT=N  on an --offline ISO, unattended: if the online
-#                        install hasn't finished after N seconds (a stalled
-#                        download on a flaky link), stop it and finish from
-#                        the bundled packages instead (default 2400).
+#   KIOSK_STALL_TIMEOUT=N   on an --offline ISO, unattended: if the install
+#                        prints nothing for N seconds (a stalled download on
+#                        a flaky link), stop it and finish from the bundled
+#                        packages instead (default 600).
 ################################################################################
 
 set -uo pipefail
@@ -44,7 +44,7 @@ OFFLINE_FLAG="$STATE_DIR/offline-mode"
 
 KIOSK_UNATTENDED=0
 KIOSK_OFFLINE_WAIT=90
-KIOSK_ONLINE_TIMEOUT=2400
+KIOSK_STALL_TIMEOUT=600
 # shellcheck source=/dev/null
 [[ -f "$CONF" ]] && source "$CONF"
 
@@ -250,13 +250,39 @@ run_install() {
     # runuser rather than sudo -u: sudo would set SUDO_USER=root, which
     # config.sh reads as "the admin running this tool".
     # A stalled download on a flaky connection would otherwise hang an
-    # unattended install forever: with the offline bundle as a safety net,
-    # cap the online attempt (timeout signals the whole process group).
-    local -a cap=()
+    # unattended install forever. With the offline bundle as a safety net,
+    # watch the log: no new output for KIOSK_STALL_TIMEOUT seconds means
+    # stuck, so the whole process group is stopped (the caller then
+    # finishes from the bundle).
     if [[ "$KIOSK_UNATTENDED" == "1" ]] && have_bundle && [[ ! -f "$OFFLINE_FLAG" ]]; then
-        cap=(timeout --kill-after=30 "$KIOSK_ONLINE_TIMEOUT")
+        touch "$LOG"
+        setsid bash -c '
+            runuser -u "$1" -- env -i "${@:4}" bash -c "cd \"\$1\" && exec ./install.sh" _ "$2" 2>&1 | tee -a "$3"
+            exit "${PIPESTATUS[0]}"
+        ' _ "$ADMIN_USER" "$REPO_DEST" "$LOG" "${envs[@]}" &
+        local pid=$!
+        (
+            while kill -0 "$pid" 2>/dev/null; do
+                sleep 20
+                age=$(( $(date +%s) - $(stat -c %Y "$LOG") ))
+                if (( age > KIOSK_STALL_TIMEOUT )); then
+                    echo
+                    echo "No output for ${age}s - the online install looks stuck; stopping it."
+                    kill -TERM -- "-$pid" 2>/dev/null
+                    sleep 30
+                    kill -KILL -- "-$pid" 2>/dev/null
+                    break
+                fi
+            done
+        ) &
+        local watcher=$!
+        wait "$pid"
+        local rc=$?
+        kill "$watcher" 2>/dev/null
+        wait "$watcher" 2>/dev/null
+        return "$rc"
     fi
-    "${cap[@]}" runuser -u "$ADMIN_USER" -- env -i "${envs[@]}" \
+    runuser -u "$ADMIN_USER" -- env -i "${envs[@]}" \
         bash -c 'cd "$1" && exec ./install.sh' _ "$REPO_DEST" \
         2>&1 | tee -a "$LOG"
     return "${PIPESTATUS[0]}"
