@@ -349,6 +349,10 @@ provision_configure_kiosk_settings() {
         log_info "Configure later: Advanced -> Emergency Hotspot"
     fi
 
+    if [[ "${KIOSK_UNATTENDED:-0}" != "1" ]]; then
+        remote_ssh_first_time_setup
+    fi
+
     echo
     echo "Virtual consoles (Ctrl+Alt+F1-F8) are ENABLED by default."
     if ! ask_yes_no "Keep virtual consoles enabled?" "y"; then
