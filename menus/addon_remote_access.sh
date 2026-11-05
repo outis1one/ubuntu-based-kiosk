@@ -264,7 +264,6 @@ tailscale_status() {
 
     if [[ "$(tailscale_backend_state)" == "Running" ]]; then
         echo "Tailscale: connected"
-        echo "  SSH:      $(tailscale_ssh_enabled && echo "enabled" || echo "disabled")"
         echo "  Hostname: $(tailscale status --json 2>/dev/null | jq -r '.Self.HostName // "unknown"')"
         echo "  IP:       $(tailscale ip -4 2>/dev/null)"
     else
@@ -272,40 +271,10 @@ tailscale_status() {
     fi
 }
 
-# Tailscale SSH: tailscaled itself answers SSH on this machine's tailnet
-# address, authenticated by tailnet identity - no keys to manage. Which
-# users may log in as whom is set by the tailnet's ACL "ssh" rules in the
-# Tailscale admin console (https://login.tailscale.com/admin/acls).
-tailscale_ssh_enabled() {
-    [[ "$(tailscale debug prefs 2>/dev/null | jq -r '.RunSSH // false' 2>/dev/null)" == "true" ]]
-}
-
-# Echoes "--ssh" when the user wants Tailscale SSH, nothing otherwise.
-tailscale_ask_ssh_flag() {
-    if ask_yes_no "Enable Tailscale SSH (log in over the tailnet, no SSH keys)?" "y" >&2; then
-        echo "--ssh"
-    fi
-}
-
-action_tailscale_toggle_ssh() {
-    echo
-    if [[ "$(tailscale_backend_state)" != "Running" ]]; then
-        log_error "Connect Tailscale first (Connect, above)"
-        return 1
-    fi
-    if tailscale_ssh_enabled; then
-        ask_yes_no "Tailscale SSH is ENABLED. Disable it?" "n" || { echo "Cancelled"; return; }
-        sudo tailscale set --ssh=false && log_success "Tailscale SSH disabled"
-    else
-        sudo tailscale set --ssh=true && log_success "Tailscale SSH enabled"
-        echo "Allow it in your tailnet ACL (\"ssh\" rules): https://login.tailscale.com/admin/acls"
-    fi
-}
-
 tailscale_menu_builder() {
     if command -v tailscale &>/dev/null; then
-        MENU_LABELS=("Connect (interactive)" "Connect with auth key" "Enable/disable Tailscale SSH" "Show status" "Uninstall")
-        MENU_HANDLERS=(action_tailscale_connect_interactive action_tailscale_connect_authkey action_tailscale_toggle_ssh action_tailscale_show_status action_tailscale_uninstall)
+        MENU_LABELS=("Connect (interactive)" "Connect with auth key" "Show status" "Uninstall")
+        MENU_HANDLERS=(action_tailscale_connect_interactive action_tailscale_connect_authkey action_tailscale_show_status action_tailscale_uninstall)
     else
         MENU_LABELS=("Install Tailscale")
         MENU_HANDLERS=(action_tailscale_install)
@@ -316,13 +285,9 @@ tailscale_menu() {
     run_menu "TAILSCALE VPN" tailscale_menu_builder tailscale_status
 }
 
-# $1 = "noconfirm" skips the "Install?" question (first-time install
-# has already asked).
 action_tailscale_install() {
     echo
-    if [[ "${1:-}" != "noconfirm" ]]; then
-        ask_yes_no "Install Tailscale?" "n" || { echo "Cancelled"; return; }
-    fi
+    ask_yes_no "Install Tailscale?" "n" || { echo "Cancelled"; return; }
 
     if ! curl -fsSL https://tailscale.com/install.sh | sh; then
         log_error "Tailscale installation failed"
@@ -345,10 +310,7 @@ action_tailscale_install() {
 
 action_tailscale_connect_interactive() {
     echo
-    local ssh_flag
-    ssh_flag=$(tailscale_ask_ssh_flag)
-    # shellcheck disable=SC2086 # ssh_flag is empty or exactly "--ssh"
-    if sudo tailscale up $ssh_flag; then
+    if sudo tailscale up; then
         log_success "Tailscale connected"
     else
         log_error "Tailscale connection failed"
@@ -365,10 +327,7 @@ action_tailscale_connect_authkey() {
         return
     fi
 
-    local ssh_flag
-    ssh_flag=$(tailscale_ask_ssh_flag)
-    # shellcheck disable=SC2086 # ssh_flag is empty or exactly "--ssh"
-    if sudo tailscale up --authkey="$authkey" $ssh_flag; then
+    if sudo tailscale up --authkey="$authkey"; then
         log_success "Tailscale connected"
     else
         log_error "Tailscale connection failed"
@@ -409,48 +368,16 @@ netbird_status() {
 
     if netbird_connected; then
         echo "Netbird: connected"
-        echo "  SSH:      $(netbird_ssh_enabled && echo "enabled" || echo "disabled")"
         netbird status 2>/dev/null | grep -E "NetBird IP:|Public key:" | sed 's/^/  /' || true
     else
         echo "Netbird: installed, not connected"
     fi
 }
 
-# Netbird's built-in SSH server listens on port 22022 on the Netbird
-# interface (wt0). ufw's default-deny-incoming (lib/provision.sh) would
-# block it, so open that port on wt0 only.
-netbird_ssh_enabled() {
-    netbird status 2>/dev/null | grep -qiE '^SSH Server:.*(enabled|true)' ||
-        sudo -n grep -qE '"ServerSSHAllowed": *true' /var/lib/netbird/default.json 2>/dev/null
-}
-
-netbird_open_ssh_firewall() {
-    if command -v ufw &>/dev/null && sudo ufw status 2>/dev/null | grep -q "Status: active"; then
-        sudo ufw allow in on wt0 to any port 22022 proto tcp >/dev/null &&
-            log_info "Firewall: allowed Netbird SSH (22022) on wt0 only"
-    fi
-}
-
-action_netbird_toggle_ssh() {
-    echo
-    if ! netbird_connected; then
-        log_error "Connect Netbird first (Connect, above)"
-        return 1
-    fi
-    if netbird_ssh_enabled; then
-        ask_yes_no "Netbird SSH is ENABLED. Disable it?" "n" || { echo "Cancelled"; return; }
-        sudo netbird up --allow-server-ssh=false && log_success "Netbird SSH disabled"
-    else
-        sudo netbird up --allow-server-ssh && log_success "Netbird SSH enabled" &&
-            netbird_open_ssh_firewall
-        echo "Connect from another Netbird peer: ssh <user>@<netbird-ip> (port 22022 if your client needs it)"
-    fi
-}
-
 netbird_menu_builder() {
     if command -v netbird &>/dev/null; then
-        MENU_LABELS=("Connect with setup key" "Enable/disable Netbird SSH" "Show status" "Uninstall")
-        MENU_HANDLERS=(action_netbird_connect action_netbird_toggle_ssh action_netbird_show_status action_netbird_uninstall)
+        MENU_LABELS=("Connect with setup key" "Show status" "Uninstall")
+        MENU_HANDLERS=(action_netbird_connect action_netbird_show_status action_netbird_uninstall)
     else
         MENU_LABELS=("Install Netbird")
         MENU_HANDLERS=(action_netbird_install)
@@ -461,13 +388,9 @@ netbird_menu() {
     run_menu "NETBIRD VPN" netbird_menu_builder netbird_status
 }
 
-# $1 = "noconfirm" skips the "Install?" question (first-time install
-# has already asked).
 action_netbird_install() {
     echo
-    if [[ "${1:-}" != "noconfirm" ]]; then
-        ask_yes_no "Install Netbird?" "n" || { echo "Cancelled"; return; }
-    fi
+    ask_yes_no "Install Netbird?" "n" || { echo "Cancelled"; return; }
 
     if ! curl -fsSL https://pkgs.netbird.io/install.sh | sh; then
         log_error "Netbird installation failed"
@@ -491,13 +414,8 @@ action_netbird_connect() {
         return
     fi
 
-    local ssh_flag=()
-    if ask_yes_no "Enable Netbird SSH (log in over the Netbird network)?" "y"; then
-        ssh_flag=(--allow-server-ssh)
-    fi
-    if sudo netbird up --setup-key "$setup_key" "${ssh_flag[@]}"; then
+    if sudo netbird up --setup-key "$setup_key" --allow-server-ssh; then
         log_success "Netbird connected"
-        if [[ ${#ssh_flag[@]} -gt 0 ]]; then netbird_open_ssh_firewall; fi
     else
         log_error "Netbird connection failed"
     fi
@@ -519,25 +437,4 @@ netbird_do_uninstall() {
     sudo netbird down 2>/dev/null || true
     sudo apt remove -y netbird 2>/dev/null || true
     log_success "Netbird removed"
-}
-
-################################################################################
-# First-time install hook (called from lib/provision.sh): offer to set up
-# one of the two mesh-VPN providers with SSH enabled, so the kiosk is
-# reachable remotely right after install.
-################################################################################
-remote_ssh_first_time_setup() {
-    echo
-    echo "Remote SSH access over a mesh VPN lets you manage the kiosk from"
-    echo "anywhere with no port forwarding:"
-    echo "  1. Tailscale (with Tailscale SSH)"
-    echo "  2. Netbird   (with Netbird SSH)"
-    echo "  3. Skip (configure later: Addons -> Remote Access)"
-    local choice
-    choice=$(ask_integer "Choose" "3" 1 3)
-    case "$choice" in
-        1) action_tailscale_install noconfirm ;;
-        2) action_netbird_install noconfirm ;;
-        *) log_info "Configure later: Addons -> Remote Access" ;;
-    esac
 }
