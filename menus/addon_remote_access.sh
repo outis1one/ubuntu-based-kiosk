@@ -1,7 +1,7 @@
 #!/bin/bash
 ################################################################################
 # menus/addon_remote_access.sh - "Remote Access" addon (VNC, WireGuard,
-# Tailscale, Netbird).
+# Tailscale, Netbird) plus SSH Access (GitHub/Launchpad key import).
 #
 # Third Addon migrated, and the biggest so far in scope (4 sub-areas).
 # All four genuinely mutate real system state at fixed paths this project
@@ -31,6 +31,7 @@ VNC_APT_PACKAGES=(x11vnc)
 WIREGUARD_APT_PACKAGES=(wireguard wireguard-tools)
 
 remote_access_status() {
+    echo "SSH:       $(ssh_status_line)"
     echo "VNC:       $(is_service_active x11vnc && echo "running" || echo "not installed")"
     echo "WireGuard: $(wireguard_connected && echo "connected" || (command -v wg &>/dev/null && echo "installed, not connected" || echo "not installed"))"
     echo "Tailscale: $(command -v tailscale &>/dev/null && echo "installed" || echo "not installed")"
@@ -38,8 +39,8 @@ remote_access_status() {
 }
 
 remote_access_menu_builder() {
-    MENU_LABELS=("VNC Remote Desktop" "WireGuard VPN" "Tailscale VPN" "Netbird VPN")
-    MENU_HANDLERS=(vnc_menu wireguard_menu tailscale_menu netbird_menu)
+    MENU_LABELS=("SSH Access (GitHub/Launchpad keys)" "VNC Remote Desktop" "WireGuard VPN" "Tailscale VPN" "Netbird VPN")
+    MENU_HANDLERS=(ssh_menu vnc_menu wireguard_menu tailscale_menu netbird_menu)
 }
 
 remote_access_menu() {
@@ -437,4 +438,144 @@ netbird_do_uninstall() {
     sudo netbird down 2>/dev/null || true
     sudo apt remove -y netbird 2>/dev/null || true
     log_success "Netbird removed"
+}
+
+################################################################################
+# SSH Access - openssh-server plus public keys imported from GitHub or
+# Launchpad with ssh-import-id (the same "Import SSH identity" choice
+# Ubuntu's own installer offers). Keys go to the admin user running this
+# menu (~/.ssh/authorized_keys), never to the restricted `kiosk` user.
+# The key sets published by those services are fetched over HTTPS and
+# are public data, so no secret is handled here.
+################################################################################
+
+SSH_KEYS_ONLY_CONF="${SSHD_CONFIG_DIR:-/etc/ssh/sshd_config.d}/10-kiosk-keys-only.conf"
+SSH_AUTH_KEYS="${SSH_AUTH_KEYS:-$HOME/.ssh/authorized_keys}"
+
+ssh_key_count() {
+    [[ -f "$SSH_AUTH_KEYS" ]] && grep -cE '^(ssh-|ecdsa-|sk-)' "$SSH_AUTH_KEYS" || echo 0
+}
+
+ssh_status_line() {
+    local state="not installed"
+    if is_service_active ssh || is_service_active sshd; then
+        state="running"
+    elif dpkg -s openssh-server &>/dev/null; then
+        state="installed, not running"
+    fi
+    local pw="password login on"
+    [[ -f "$SSH_KEYS_ONLY_CONF" ]] && pw="keys only"
+    echo "$state, $(ssh_key_count) key(s), $pw"
+}
+
+ssh_status() {
+    echo "SSH: $(ssh_status_line)"
+    echo "  Keys go to: $SSH_AUTH_KEYS"
+}
+
+ssh_menu_builder() {
+    MENU_LABELS=("Enable SSH server" "Import keys from GitHub" "Import keys from Launchpad" "List authorized keys" "Require keys (disable password login)" "Allow password login again")
+    MENU_HANDLERS=(action_ssh_enable action_ssh_import_github action_ssh_import_launchpad action_ssh_list_keys action_ssh_keys_only action_ssh_allow_passwords)
+}
+
+ssh_menu() {
+    run_menu "SSH ACCESS" ssh_menu_builder ssh_status
+}
+
+action_ssh_enable() {
+    echo
+    sudo apt install -y openssh-server ssh-import-id || { log_error "Could not install openssh-server"; return 1; }
+    sudo systemctl enable --now ssh || { log_error "Could not start the SSH server"; return 1; }
+    # provision_configure_firewall already allows ssh; harmless if repeated.
+    if command -v ufw &>/dev/null && sudo ufw status 2>/dev/null | grep -q "Status: active"; then
+        sudo ufw allow ssh >/dev/null
+    fi
+    log_success "SSH server enabled"
+}
+
+# $1 = "gh" or "lp", $2 = label for messages.
+ssh_import_from() {
+    local prefix="$1" label="$2" user
+    echo
+    if ! command -v ssh-import-id &>/dev/null; then
+        sudo apt install -y ssh-import-id || { log_error "Could not install ssh-import-id"; return 1; }
+    fi
+    read -r -p "$label username (blank to cancel): " user
+    [[ -z "$user" ]] && { echo "Cancelled"; return; }
+    if [[ ! "$user" =~ ^[A-Za-z0-9][A-Za-z0-9._-]*$ ]]; then
+        log_error "That doesn't look like a valid $label username"
+        return 1
+    fi
+    if ssh-import-id "${prefix}:${user}"; then
+        log_success "Imported $label keys for $user ($(ssh_key_count) key(s) now authorized)"
+    else
+        log_error "Import failed - check the username and that this machine can reach $label"
+        return 1
+    fi
+}
+
+action_ssh_import_github()    { ssh_import_from gh "GitHub"; }
+action_ssh_import_launchpad() { ssh_import_from lp "Launchpad"; }
+
+action_ssh_list_keys() {
+    echo
+    if [[ "$(ssh_key_count)" == "0" ]]; then
+        echo "No authorized keys for $USER yet."
+    else
+        ssh-keygen -lf "$SSH_AUTH_KEYS"
+    fi
+}
+
+action_ssh_keys_only() {
+    echo
+    if [[ "$(ssh_key_count)" == "0" ]]; then
+        log_error "No authorized keys yet - import some first, or you'd lock yourself out"
+        return 1
+    fi
+    echo "Log in from another machine with a key BEFORE doing this; password"
+    echo "logins over SSH will stop working."
+    ask_yes_no "Disable SSH password login?" "n" || { echo "Cancelled"; return; }
+    printf 'PasswordAuthentication no\nKbdInteractiveAuthentication no\n' |
+        sudo install -D -m 644 /dev/stdin "$SSH_KEYS_ONLY_CONF"
+    if sudo sshd -t && sudo systemctl reload ssh; then
+        log_success "SSH now requires a key"
+    else
+        sudo rm -f "$SSH_KEYS_ONLY_CONF"
+        log_error "sshd rejected the config - reverted"
+        return 1
+    fi
+}
+
+action_ssh_allow_passwords() {
+    echo
+    sudo rm -f "$SSH_KEYS_ONLY_CONF"
+    sudo systemctl reload ssh 2>/dev/null || true
+    log_success "SSH password login allowed again"
+}
+
+# First-time install hook (called from lib/provision.sh).
+ssh_first_time_setup() {
+    echo
+    echo "SSH lets you manage the kiosk remotely. Ubuntu can import your"
+    echo "public keys from GitHub or Launchpad so you can log in with no password."
+    ask_yes_no "Enable SSH and import keys now?" "y" || { log_info "Configure later: Addons -> Remote Access -> SSH Access"; return; }
+    action_ssh_enable || return 0
+    local choice
+    while true; do
+        echo
+        echo "Import keys from:"
+        echo "  1. GitHub"
+        echo "  2. Launchpad"
+        echo "  3. Done"
+        choice=$(ask_integer "Choose" "3" 1 3)
+        case "$choice" in
+            1) action_ssh_import_github || true ;;
+            2) action_ssh_import_launchpad || true ;;
+            *) break ;;
+        esac
+    done
+    if [[ "$(ssh_key_count)" != "0" ]]; then
+        echo "Tip: Remote Access -> SSH Access can switch SSH to key-only login"
+        echo "once you've confirmed a key works."
+    fi
 }
