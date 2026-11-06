@@ -51,8 +51,19 @@ for many of them.
 The page beeps: high for added, double for a duplicate, low for not found. You can scan a
 stack of books without looking at the screen.
 
-Phone camera scanning is not built in (browsers only allow the camera on HTTPS or
-`localhost`). A scanner-app that "types" the code into the box works.
+### Scanning with a phone camera
+
+Open the Add books page in your phone's browser and tap **Scan with camera**. Your phone's own camera app
+opens; take a photo with the barcode filling the frame, and the book is looked up and added just as if you had
+typed it. In "scan a pre-printed sticker" mode the same button appears on the sticker step.
+
+* It works over plain HTTP on both iPhone and Android: the photo is taken by the phone's camera app, shrunk on
+  the phone, and read on the server (`zbarimg`). Only JPEG and PNG photos are accepted.
+* It reads ISBN-13 and ISBN-10 barcodes, and UPC/EAN codes on discs and games.
+* Tips: get close so the barcode fills most of the frame, keep it flat and well lit, and hold steady. If it
+  can't read the photo you are told, and nothing is added.
+* A live viewfinder that reads continuously would need HTTPS (browsers only allow that for secure pages); a
+  Bluetooth scanner paired to the phone also works, since it types into the page.
 
 ## Barcodes: your choice
 

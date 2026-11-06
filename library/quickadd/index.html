@@ -44,6 +44,7 @@
            padding: 10px 16px; background: var(--card); color: var(--ink); font-weight: 600; }
   button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
   button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+  .cam-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0 0; }
   #status { min-height: 1.5em; margin: 10px 2px; color: var(--muted); }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
           padding: 14px; margin: 10px 0; display: flex; gap: 14px; }
@@ -98,9 +99,14 @@
 
   <form class="scan" id="scan" autocomplete="off">
     <label class="sr" for="code">ISBN or barcode</label>
-    <input id="code" inputmode="numeric" placeholder="Scan or type an ISBN, then Enter" autofocus>
+    <input id="code" inputmode="numeric" placeholder="Scan or type an ISBN" autofocus>
     <button class="primary" type="submit">Add</button>
   </form>
+  <div class="cam-row">
+    <button type="button" id="cam">Scan with camera</button>
+    <input type="file" id="camfile" accept="image/*" capture="environment" hidden>
+    <span class="small">Opens your phone's camera: fill the frame with the barcode and hold steady.</span>
+  </div>
   <div id="status" role="status" aria-live="polite"></div>
   <div id="result"></div>
 
@@ -273,6 +279,49 @@
     }
   }
 
+  // ---- phone camera: take a photo, shrink it, have the server read the barcode
+  async function shrink(file, max = 2400) {
+    let bmp;
+    try { bmp = await createImageBitmap(file, { imageOrientation: 'from-image' }); }
+    catch (e) { bmp = await new Promise((ok, no) => { const i = new Image(); i.onload = () => ok(i); i.onerror = no; i.src = URL.createObjectURL(file); }); }
+    const w = bmp.width, h = bmp.height, k = Math.min(1, max / Math.max(w, h));
+    const c = document.createElement('canvas'); c.width = Math.round(w * k); c.height = Math.round(h * k);
+    c.getContext('2d').drawImage(bmp, 0, 0, c.width, c.height);
+    return new Promise(ok => c.toBlob(ok, 'image/jpeg', 0.9));
+  }
+
+  // Opens the camera, resolves with the codes found ([] if none, null if cancelled).
+  function takePhoto(kind) {
+    return new Promise(resolve => {
+      const input = $('camfile');
+      input.onchange = async () => {
+        const f = input.files[0]; input.value = '';
+        if (!f) return resolve(null);
+        $('status').textContent = 'Reading the barcode…';
+        try {
+          const blob = await shrink(f);
+          const r = await fetch('/api/scan?kind=' + kind, { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob });
+          resolve(r.ok ? (await r.json()).codes : []);
+        } catch (e) { resolve([]); }
+      };
+      input.click();
+    });
+  }
+
+  function noBarcode() {
+    beep(SOUND.notfound);
+    $('status').textContent = '';
+    show('warn', el('div', { className: 'body' }, el('div', { className: 'title' }, "Couldn't read a barcode from that photo"),
+      el('div', { className: 'meta' }, 'Move closer so the barcode fills the frame, keep the phone steady and the barcode flat and well lit, then try again. You can also type the number.')));
+  }
+
+  $('cam').onclick = async () => {
+    const codes = await takePhoto('isbn');
+    if (codes === null) { $('status').textContent = ''; return; }
+    if (!codes.length) return noBarcode();
+    add(codes[0]);
+  };
+
   function stickerPrompt(r) {
     awaiting = true;
     const input = el('input', { placeholder: 'Scan the barcode sticker', autocomplete: 'off', 'aria-label': 'Barcode sticker', inputMode: 'text' });
@@ -280,7 +329,14 @@
     const cancel = el('button', { type: 'button' }, 'Cancel');
     cancel.onclick = async () => { await api('/api/cancel', { token: r.token }); awaiting = false;
       $('result').replaceChildren(); $('code').focus(); };
-    form.append(input, el('div', { className: 'actions' }, el('button', { className: 'primary', type: 'submit' }, 'Add'), cancel));
+    const camBtn = el('button', { type: 'button' }, 'Scan sticker with camera');
+    camBtn.onclick = async () => {
+      const codes = await takePhoto('sticker');
+      if (codes === null) return;
+      if (!codes.length) { beep(SOUND.notfound); $('status').textContent = "Couldn't read a barcode from that photo - move closer and try again."; return; }
+      handle(await api('/api/finish', { token: r.token, barcode: codes[0] }), r.code);
+    };
+    form.append(input, el('div', { className: 'actions' }, el('button', { className: 'primary', type: 'submit' }, 'Add'), camBtn, cancel));
     form.onsubmit = async ev => {
       ev.preventDefault();
       const bc = input.value.trim(); if (!bc) return;

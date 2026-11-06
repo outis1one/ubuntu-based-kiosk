@@ -429,7 +429,7 @@ Both can be used at the same time — they serve different purposes:
 
 ### Library Catalog (Koha)
 - **Public search terminal** - a self-hosted library catalogue shown as one of the kiosk's pages (duration 0: it stays on screen), so visitors can search by title, author or subject and see whether a book is in
-- **Add books by scanning** - a Quick Add page: scan or type an ISBN and the book is looked up (Library of Congress via Z39.50, then Open Library) and added with the next barcode. Duplicates, "add another copy", manual entry and Undo are built in
+- **Add books by scanning** - a Quick Add page: scan or type an ISBN (or tap "Scan with camera" on a phone) and the book is looked up (Library of Congress via Z39.50, then Open Library) and added with the next barcode. Duplicates, "add another copy", manual entry and Undo are built in
 - **Spine labels and barcodes** - Avery 5160/5167 and Demco spine templates, with Dewey call numbers split across lines
 - **Docker is installed for you** if it is missing (`lib/docker.sh`); the stack is deployed from this checkout's `library/` to `/opt/kiosk-library`
 - **Who can reach it** - Addons → Library Catalog → Network access: *this kiosk only* (ports bound to `127.0.0.1`) or *other devices on the network*. Docker bypasses `ufw`, so the bind address, not the firewall, is what limits access

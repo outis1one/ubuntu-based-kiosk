@@ -687,6 +687,58 @@ def op_assign(payload):
                  "last": fmt_barcode(first + len(items) - 1, s)}
 
 
+# ------------------------------------------------------------ photo scanning
+MAX_IMAGE = 12 * 1024 * 1024
+ZBAR_TIMEOUT = 20
+
+
+def image_kind(data):
+    """Only JPEG and PNG are accepted: the decoder goes through ImageMagick, which
+    has a long history of bugs in rarely used formats, so everything else is refused
+    before it gets anywhere near it."""
+    if data[:3] == b"\xff\xd8\xff":
+        return "jpg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "png"
+    return None
+
+
+def decode_photo(data, kind):
+    """Read barcodes from a photo with zbarimg. kind 'isbn' returns codes usable as an
+    ISBN/UPC (ISBNs first); kind 'sticker' returns anything Koha could store as a barcode."""
+    ext = image_kind(data)
+    if not ext:
+        raise ValueError("not a JPEG or PNG image")
+    with tempfile.TemporaryDirectory() as tmp:
+        path = os.path.join(tmp, "photo." + ext)
+        with open(path, "wb") as f:
+            f.write(data)
+        try:
+            out = subprocess.run(["zbarimg", "--raw", "-q", path], capture_output=True, text=True,
+                                 timeout=ZBAR_TIMEOUT).stdout
+        except (subprocess.TimeoutExpired, OSError):
+            return []
+    codes = []
+    for line in out.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        if kind == "sticker":
+            ok = line if STICKER_RE.fullmatch(line) else None
+        else:
+            ok = clean_code(line)
+            # zbar reports a UPC-A (12 digits) as a 13-digit EAN with a leading zero.
+            # Use the 12 digits printed on the item, as a keyboard scanner would type
+            # them, so lookups and duplicate checks match.
+            if ok and len(ok) == 13 and ok[0] == "0":
+                ok = ok[1:]
+        if ok and ok not in codes:
+            codes.append(ok)
+    if kind != "sticker":                       # book ISBNs (978/979) before UPCs and short codes
+        codes.sort(key=lambda c: 0 if (len(c) == 13 and c[:3] in ("978", "979")) else 1 if len(c) == 10 else 2)
+    return codes
+
+
 # ----------------------------------------------------------------------- HTTP
 INDEX = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html"), "rb").read()
 
@@ -755,6 +807,16 @@ class Handler(BaseHTTPRequestHandler):
         if not self._guard():
             return
         try:
+            if self.path.split("?")[0] == "/api/scan":
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= MAX_IMAGE:
+                    return self._send(413, {"status": "error", "message": "That photo is too large."})
+                kind = "sticker" if "kind=sticker" in self.path else "isbn"
+                try:
+                    codes = decode_photo(self.rfile.read(length), kind)
+                except ValueError:
+                    return self._send(415, {"status": "error", "message": "Please send a JPEG or PNG photo."})
+                return self._send(200, {"status": "ok", "codes": codes})
             length = int(self.headers.get("Content-Length", "0"))
             if length > 20000:
                 return self._send(413, {"error": "too large"})
