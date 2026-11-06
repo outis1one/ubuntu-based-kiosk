@@ -1226,6 +1226,19 @@ function historyHome(){
   markActivity();
 }
 
+// Power menu -> Lock now: put up the lock screen right away (the same one
+// the inactivity timeout shows). Only when password protection is on and a
+// code is set - showLockoutScreen refuses otherwise, so a kiosk with no
+// code can't be locked with nothing to unlock it.
+function lockNow(){
+  if(!enablePasswordProtection||!lockoutPassword){
+    console.log('[LOCKOUT] Lock now ignored - password protection is off');
+    return;
+  }
+  console.log('[LOCKOUT] Lock now requested from the power menu');
+  showLockoutScreen('unlock');
+}
+
 function showPinEntry(){
   if(pinWindow&&!pinWindow.isDestroyed()){
     pinWindow.focus();
@@ -1545,7 +1558,7 @@ function showPowerMenu(){
 
   // For normal mode, use custom overlay with 30-second timeout
   console.log('[POWER] Showing custom power menu overlay');
-  const powerInfo={version:VERSION,localIP:localIP,vpnIP:vpnIP.trim()};
+  const powerInfo={version:VERSION,localIP:localIP,vpnIP:vpnIP.trim(),canLock:!!(enablePasswordProtection&&lockoutPassword)};
   // Send to all views (preload.js runs in views, not mainWindow)
   for(const view of views){
     if(view&&view.webContents&&!view.webContents.isDestroyed()){
@@ -1730,6 +1743,7 @@ async function createWindow(){
     if(action==='shutdown')exec('systemctl poweroff');
     else if(action==='restart')exec('systemctl reboot');
     else if(action==='reload'){app.relaunch();app.quit();}
+    else if(action==='lock')lockNow();
   });
   ipcMain.on('toggle-hidden',toggleHidden);
   ipcMain.on('history-nav',(event,direction)=>{
