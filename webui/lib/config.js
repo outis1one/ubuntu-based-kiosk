@@ -40,6 +40,7 @@ const SCALAR_DEFAULTS = {
     enablePauseButton: true,
     enableKeyboardButton: true,
     enableNavButton: true,
+    enableHistoryButtons: false,
     enablePasswordProtection: false,
     lockoutTimeout: 0,
     lockoutAtTime: '',

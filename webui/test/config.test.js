@@ -75,6 +75,14 @@ check('saveConfig merge preserves fields this app never tracks (the previously-f
     assert.strictEqual(onDisk.enableNavButton, false);
 });
 
+check('enableHistoryButtons defaults off and round-trips', () => {
+    fs.rmSync(process.env.CONFIG_PATH, { force: true });
+    assert.strictEqual(loadConfig().enableHistoryButtons, false);
+    saveConfig({ enableHistoryButtons: true });
+    assert.strictEqual(JSON.parse(fs.readFileSync(process.env.CONFIG_PATH, 'utf8')).enableHistoryButtons, true);
+    assert.strictEqual(loadConfig().enableHistoryButtons, true);
+});
+
 check('saveConfig tabs: new password gets hashed, never stored/returned as plaintext', () => {
     const result = saveConfig({
         tabs: [{ url: 'https://a.example.com', duration: 30, name: 'A', username: 'bob', password: 'hunter2' }],

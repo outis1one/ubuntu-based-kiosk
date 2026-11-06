@@ -249,6 +249,7 @@ The kiosk machine still needs a working internet connection (ethernet, or WiFi c
 - **1-finger swipe** (dual mode) - Navigate within page (arrow keys)
 - **On-screen keyboard** - Auto-shows on text fields or click keyboard icon
 - **Navigation menu** - Click key icon (top-left) to access site list and gesture cheat sheet
+- **Back/forward buttons** (optional, off by default) - two half-transparent ◀ ▶ buttons at the top middle of the screen, for kiosks with no keyboard or mouse side buttons. They appear on a tap, click or mouse movement and fade after a few seconds. Turn on in Core Settings → Display & Interaction, or the Web UI.
 
 ### On-Screen Keyboard
 - **HTML-based keyboard** with full QWERTY layout
@@ -775,7 +776,9 @@ smb://WORKGROUP/COMPUTER/PrinterName
 **Keyboard Shortcuts:**
 - `Ctrl+Tab` or `Ctrl+]` - Next tab
 - `Ctrl+Shift+Tab` or `Ctrl+[` - Previous tab
-- `Alt+Right/Left` - Next/Previous tab
+- `Ctrl+PageDown` / `Ctrl+PageUp` - Next/Previous tab (the standard browser keys)
+- `Alt+Right` / `Alt+Left` - Page forward / back within the current site (the standard browser keys; they used to switch tabs)
+- Mouse side buttons (back/forward) - the same page forward/back
 - `F10` or `Ctrl+H` - Toggle hidden tabs
 - `Escape` - Return to normal tabs (from hidden)
 - `Ctrl+Alt+Delete` or `Ctrl+Alt+P` - Power menu

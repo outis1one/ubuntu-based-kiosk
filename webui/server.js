@@ -70,6 +70,7 @@ app.put('/api/config', (req, res) => {
     if (body.enablePauseButton !== undefined) patch.enablePauseButton = !!body.enablePauseButton;
     if (body.enableKeyboardButton !== undefined) patch.enableKeyboardButton = !!body.enableKeyboardButton;
     if (body.enableNavButton !== undefined) patch.enableNavButton = !!body.enableNavButton;
+    if (body.enableHistoryButtons !== undefined) patch.enableHistoryButtons = !!body.enableHistoryButtons;
 
     let tabCount;
     if (body.tabs !== undefined) {
