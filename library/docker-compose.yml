@@ -30,8 +30,11 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      quickadd:
+        condition: service_started
     environment:
       TZ: ${TZ:-UTC}
+      KOHA_QUICKADD_URL: http://quickadd:8082
       KOHA_DB_HOST: db
       KOHA_DB_PASS: ${DB_PASSWORD}
       KOHA_ADMIN_USER: ${ADMIN_USER:-admin}
@@ -53,9 +56,6 @@ services:
     image: library-quickadd:local
     container_name: library-quickadd
     restart: unless-stopped
-    depends_on:
-      koha:
-        condition: service_started
     environment:
       TZ: ${TZ:-UTC}
       KOHA_API: http://koha:8081/api/v1

@@ -168,8 +168,9 @@ check ".env BIND_ADDR back to 127.0.0.1"       test "$(library_env_get BIND_ADDR
 # ============================================================================
 echo "== access screen"
 printf '\n' | action_library_show_access > "$T/access.out" 2>&1
-check "shows the staff login"                  grep -q 'admin  /  s3cretPASS' "$T/access.out"
-check "shows quick-add address"                grep -q 'Add books.*:8082' "$T/access.out"
+check "shows the login"                        grep -q 'admin  /  s3cretPASS' "$T/access.out"
+check "shows the one library address"          grep -q 'sign in here.*:8081/' "$T/access.out"
+check "shows the add-books path on that address" grep -q ':8081/add/' "$T/access.out"
 
 # ============================================================================
 echo "== update"

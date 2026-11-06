@@ -687,6 +687,42 @@ def op_assign(payload):
                  "last": fmt_barcode(first + len(items) - 1, s)}
 
 
+# ------------------------------------------------------------------- search
+def item_status(it):
+    if it.get("lost_status"):
+        return "Lost"
+    if it.get("withdrawn"):
+        return "Withdrawn"
+    if it.get("checked_out_date"):
+        return "Checked out"
+    if it.get("damaged_status"):
+        return "Damaged"
+    return "On shelf"
+
+
+def op_search(term):
+    """Find books by title, author or ISBN; each result lists its copies with shelf and status."""
+    term = re.sub(r"[%_\\]", "", term or "").strip()[:80]
+    if len(term) < 2:
+        return {"results": []}
+    like = {"-like": "%" + term + "%"}
+    q = {"-or": [{"title": like}, {"author": like}, {"isbn": like}, {"ean": like}]}
+    biblios = koha("GET", "/biblios", query={"q": json.dumps(q), "_per_page": "25", "_order_by": "title"}) or []
+    if not biblios:
+        return {"results": []}
+    ids = [b["biblio_id"] for b in biblios]
+    items = koha("GET", "/items", query={"q": json.dumps({"biblio_id": ids}), "_per_page": "500"}) or []
+    where = {l["value"]: l["label"] for l in get_locations()}
+    by_bib = {}
+    for it in items:
+        by_bib.setdefault(it["biblio_id"], []).append({
+            "barcode": it.get("external_id"), "callnumber": it.get("callnumber") or "",
+            "location": where.get(it.get("location"), ""), "status": item_status(it)})
+    return {"results": [{
+        "biblio_id": b["biblio_id"], "title": (b.get("title") or "").rstrip(" /:"), "author": b.get("author") or "",
+        "year": b.get("copyright_date") or "", "copies": by_bib.get(b["biblio_id"], [])} for b in biblios]}
+
+
 # ------------------------------------------------------------ photo scanning
 MAX_IMAGE = 12 * 1024 * 1024
 ZBAR_TIMEOUT = 20
@@ -801,6 +837,13 @@ class Handler(BaseHTTPRequestHandler):
                                     "sources": [s.split(":", 1)[0] if s.startswith("z3950") else s for s in SOURCES]})
         if path == "/api/settings":
             return self._send(200, settings_view())
+        if path == "/api/search":
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            try:
+                return self._send(200, op_search((qs.get("q") or [""])[0]))
+            except KohaError as e:
+                return self._send(502, {"status": "error", "message": "Koha is not answering yet - try again in a minute."
+                                        if e.status == 503 else "Search failed: %s" % e.body[:120]})
         self._send(404, {"error": "not found"})
 
     def do_POST(self):

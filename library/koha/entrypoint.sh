@@ -56,6 +56,20 @@ if [ ! -d "/etc/koha/sites/$INST" ]; then
         -e 's|^#\s*Include /etc/koha/apache-shared-intranet-plack.conf|   Include /etc/koha/apache-shared-intranet-plack.conf|' "$SITE"
     koha-plack --enable "$INST" >/dev/null 2>&1 || true   # koha-create may already have enabled it
 
+    # One address: serve the Add books page (Quick Add) inside the staff site at /add/.
+    # (The staff and public catalogue sites cannot share one address: Koha gives both the
+    # same URL shapes. The staff site is the natural home for a home library.)
+    if [ -n "${KOHA_QUICKADD_URL:-}" ]; then
+        cat > /etc/koha/apache-quickadd.conf << APACHE
+<IfModule mod_proxy_http.c>
+    RedirectMatch ^/add\$ /add/
+    ProxyPass /add/ ${KOHA_QUICKADD_URL%/}/
+    ProxyPassReverse /add/ ${KOHA_QUICKADD_URL%/}/
+</IfModule>
+APACHE
+        sed -i 's|^\(\s*\)Include /etc/koha/apache-shared-intranet.conf|&\n\1Include /etc/koha/apache-quickadd.conf|' "/etc/apache2/sites-available/$INST.conf"
+    fi
+
     # Run Apache itself as the instance user instead of mpm_itk's per-vhost
     # uid switching (which needs extra capabilities and is pointless here:
     # Plack does the real work as that user already).

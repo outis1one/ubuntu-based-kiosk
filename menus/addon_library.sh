@@ -217,10 +217,10 @@ action_library_show_access() {
         ip="localhost"
         echo "(Network access is limited to this kiosk.)"
     fi
-    echo "  Catalogue (public search):  http://${ip}:$(library_env_get OPAC_PORT)/"
-    echo "  Staff interface:            http://${ip}:$(library_env_get STAFF_PORT)/"
-    echo "  Add books (scan ISBNs):     http://${ip}:$(library_env_get QUICKADD_PORT)/"
-    echo "  Login (staff and add books): ${user}  /  ${pass}"
+    echo "  Your library (sign in here):  http://${ip}:$(library_env_get STAFF_PORT)/"
+    echo "      Add books:                http://${ip}:$(library_env_get STAFF_PORT)/add/"
+    echo "  Public catalogue (kiosk):     http://${ip}:$(library_env_get OPAC_PORT)/"
+    echo "  Login: ${user}  /  ${pass}   (Add books asks once more with the same login)"
     echo
     echo "  Passwords live in $LIBRARY_DIR/.env (root only)."
     pause

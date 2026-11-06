@@ -79,10 +79,10 @@ show_status() {
     fi
     dc ps
     echo
-    echo "  Catalogue (public):  http://$ip:$OPAC_PORT"
-    echo "  Staff interface:     http://$ip:$STAFF_PORT"
-    echo "  Add books (scan):    http://$ip:${QUICKADD_PORT:-8082}   (same login)"
-    echo "  Staff login:         $ADMIN_USER  /  $ADMIN_PASSWORD   (also stored in $HERE/.env)"
+    echo "  Your library:        http://$ip:$STAFF_PORT"
+    echo "      sign in here: add books at /add/ (or the 'Add books' button), find a book, lending, labels, people"
+    echo "  Public catalogue:    http://$ip:$OPAC_PORT   (search only - for a kiosk or visitors)"
+    echo "  Login:               $ADMIN_USER  /  $ADMIN_PASSWORD   (also stored in $HERE/.env; Add books asks once more with the same login)"
     echo
 }
 
