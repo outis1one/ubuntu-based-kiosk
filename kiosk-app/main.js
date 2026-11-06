@@ -60,6 +60,7 @@ let allowNavigation='same-origin';
 let enablePauseButton=true;
 let enableKeyboardButton=true;
 let enableNavButton=true;
+let enableHistoryButtons=false;
 let enablePasswordProtection=false;
 let lockoutPassword="";
 let lockoutTimeout=0;
@@ -102,6 +103,7 @@ function loadConfig(){
     enablePauseButton=(config.enablePauseButton!==false);
     enableKeyboardButton=(config.enableKeyboardButton!==false);
     enableNavButton=(config.enableNavButton!==false);
+    enableHistoryButtons=(config.enableHistoryButtons===true);
     enablePasswordProtection=(config.enablePasswordProtection===true);
     lockoutPassword=config.lockoutPassword||"";
     lockoutTimeout=(config.lockoutTimeout||0)*60000; // Convert minutes to ms
@@ -122,6 +124,7 @@ function loadConfig(){
     console.log('[CONFIG] Navigation:',allowNavigation);
     console.log('[CONFIG] Pause button:',enablePauseButton);
     console.log('[CONFIG] Keyboard button:',enableKeyboardButton);
+    console.log('[CONFIG] Back/forward buttons:',enableHistoryButtons);
     console.log('[CONFIG] Password protection:',enablePasswordProtection);
     console.log('[CONFIG] Lockout timeout:',lockoutTimeout/60000,'minutes');
     if(lockoutAtTime)console.log('[CONFIG] Lock at time:',lockoutAtTime);
@@ -1145,6 +1148,27 @@ function returnToTabs(){
   markActivity();
 }
 
+// Page back/forward in the site that's on screen (Alt+Left / Alt+Right, the
+// mouse's side buttons, and the optional on-screen buttons). Not while the
+// screen is locked or a dialog (PIN, WiFi, power...) is open on top - the
+// keys would silently navigate the page hidden behind it.
+function historyGo(direction){
+  if(isLockedOut)return;
+  for(const w of [pinWindow,wifiWindow,promptWindow,pauseWindow]){
+    if(w&&!w.isDestroyed())return;
+  }
+  const view=showingHidden?hiddenViews[currentHiddenIndex]:views[currentIndex];
+  if(!view||!view.webContents||view.webContents.isDestroyed())return;
+  const wc=view.webContents;
+  const nav=wc.navigationHistory;
+  if(direction==='back'){
+    if(nav?nav.canGoBack():wc.canGoBack()){nav?nav.goBack():wc.goBack();}
+  }else{
+    if(nav?nav.canGoForward():wc.canGoForward()){nav?nav.goForward():wc.goForward();}
+  }
+  markActivity();
+}
+
 function showPinEntry(){
   if(pinWindow&&!pinWindow.isDestroyed()){
     pinWindow.focus();
@@ -1526,6 +1550,11 @@ async function createWindow(){
   
   mainWindow.on('focus',()=>markActivity());
   mainWindow.webContents.on('before-input-event',()=>markActivity());
+  // Mouse side buttons (back/forward). Reported by the window on Linux.
+  mainWindow.on('app-command',(event,command)=>{
+    if(command==='browser-backward')historyGo('back');
+    else if(command==='browser-forward')historyGo('forward');
+  });
   
   if(!tabs.length){
     mainWindow.loadURL('data:text/html,<body>No Sites Configured</body>');
@@ -1611,6 +1640,7 @@ async function createWindow(){
       console.log('[MAIN] Page loaded - sending keyboard-button-enabled: '+enableKeyboardButton);
 
       view.webContents.send('nav-button-enabled',enableNavButton);
+      view.webContents.send('history-buttons-enabled',enableHistoryButtons);
       console.log('[MAIN] Page loaded - sending nav-button-enabled: '+enableNavButton);
 
       console.log('[MAIN] Page loaded - resending pause-button-visibility: '+shouldShow+' for '+t.url);
@@ -1654,6 +1684,9 @@ async function createWindow(){
     else if(action==='reload'){app.relaunch();app.quit();}
   });
   ipcMain.on('toggle-hidden',toggleHidden);
+  ipcMain.on('history-nav',(event,direction)=>{
+    if(direction==='back'||direction==='forward')historyGo(direction);
+  });
   ipcMain.on('return-to-tabs',forceReturnToTabs);
   ipcMain.on('user-activity',markActivity);
   ipcMain.on('show-keyboard',()=>{showHTMLKeyboard();});
@@ -1843,9 +1876,15 @@ async function createWindow(){
     globalShortcut.register('Control+Shift+Tab',()=>{prevTab();});
     globalShortcut.register('Control+]',()=>{nextTab();});
     globalShortcut.register('Control+[',()=>{prevTab();});
-    globalShortcut.register('Alt+Right',()=>{nextTab();});
-    globalShortcut.register('Alt+Left',()=>{prevTab();});
+    // The standard browser keys for switching tabs. (Alt+Left/Right used to
+    // switch sites; they are now page back/forward, below.)
+    globalShortcut.register('Control+PageDown',()=>{nextTab();});
+    globalShortcut.register('Control+PageUp',()=>{prevTab();});
   }
+
+  // Standard browser keys for page back/forward.
+  globalShortcut.register('Alt+Left',()=>{historyGo('back');});
+  globalShortcut.register('Alt+Right',()=>{historyGo('forward');});
   
   globalShortcut.register('F10',toggleHidden);
   globalShortcut.register('Control+H',toggleHidden);

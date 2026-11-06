@@ -79,6 +79,7 @@ INACTIVITY_TIMEOUT=120
 ENABLE_PAUSE_BUTTON="true"
 ENABLE_KEYBOARD_BUTTON="true"
 ENABLE_NAV_BUTTON="true"
+ENABLE_HISTORY_BUTTONS="false"
 ENABLE_PASSWORD_PROTECTION="false"
 LOCKOUT_PASSWORD=""
 LOCKOUT_TIMEOUT=0
@@ -203,7 +204,7 @@ load_existing_config() {
     ALLOW_NAVIGATION=$(sudo -u "$KIOSK_USER" jq -r '.allowNavigation // "same-origin"' "$CONFIG_PATH" 2>/dev/null || echo "same-origin")
     SWIPE_MODE=$(sudo -u "$KIOSK_USER" jq -r '.swipeMode // "dual"' "$CONFIG_PATH" 2>/dev/null || echo "dual")
 
-    local pause_btn keyboard_btn nav_btn password_enabled boot_password
+    local pause_btn keyboard_btn nav_btn history_btn password_enabled boot_password
     pause_btn=$(sudo -u "$KIOSK_USER" jq -r '.enablePauseButton // true' "$CONFIG_PATH" 2>/dev/null)
     [[ "$pause_btn" == "true" ]] && ENABLE_PAUSE_BUTTON="true" || ENABLE_PAUSE_BUTTON="false"
 
@@ -212,6 +213,9 @@ load_existing_config() {
 
     nav_btn=$(sudo -u "$KIOSK_USER" jq -r '.enableNavButton // true' "$CONFIG_PATH" 2>/dev/null)
     [[ "$nav_btn" == "true" ]] && ENABLE_NAV_BUTTON="true" || ENABLE_NAV_BUTTON="false"
+
+    history_btn=$(sudo -u "$KIOSK_USER" jq -r '.enableHistoryButtons // false' "$CONFIG_PATH" 2>/dev/null)
+    [[ "$history_btn" == "true" ]] && ENABLE_HISTORY_BUTTONS="true" || ENABLE_HISTORY_BUTTONS="false"
 
     password_enabled=$(sudo -u "$KIOSK_USER" jq -r '.enablePasswordProtection // false' "$CONFIG_PATH" 2>/dev/null)
     [[ "$password_enabled" == "true" ]] && ENABLE_PASSWORD_PROTECTION="true" || ENABLE_PASSWORD_PROTECTION="false"
@@ -263,6 +267,9 @@ save_config() {
     local nav_btn_json="true"
     [[ "$ENABLE_NAV_BUTTON" == "false" ]] && nav_btn_json="false"
 
+    local history_btn_json="false"
+    [[ "$ENABLE_HISTORY_BUTTONS" == "true" ]] && history_btn_json="true"
+
     local password_json="false"
     [[ "$ENABLE_PASSWORD_PROTECTION" == "true" ]] && password_json="true"
 
@@ -301,6 +308,7 @@ save_config() {
         --argjson enablePauseButton "$pause_btn_json" \
         --argjson enableKeyboardButton "$keyboard_btn_json" \
         --argjson enableNavButton "$nav_btn_json" \
+        --argjson enableHistoryButtons "$history_btn_json" \
         --argjson enablePasswordProtection "$password_json" \
         --arg lockoutPassword "${LOCKOUT_PASSWORD:-}" \
         --argjson lockoutTimeout "${LOCKOUT_TIMEOUT:-0}" \
@@ -314,7 +322,7 @@ save_config() {
         --arg autheliaURL "${AUTHELIA_URL:-}" \
         --arg autheliaUsername "${AUTHELIA_USERNAME:-}" \
         --arg autheliaEncryptedPassword "${AUTHELIA_ENCRYPTED_PASSWORD:-}" \
-        '. + {autoswitch:$autoswitch,enableTouch:$enableTouch,dualSwipe:$dualSwipe,swipeMode:$swipeMode,allowNavigation:$allowNavigation,homeTabIndex:$homeTabIndex,inactivityTimeout:$inactivityTimeout,enablePauseButton:$enablePauseButton,enableKeyboardButton:$enableKeyboardButton,enableNavButton:$enableNavButton,enablePasswordProtection:$enablePasswordProtection,lockoutPassword:$lockoutPassword,lockoutTimeout:$lockoutTimeout,lockoutAtTime:$lockoutAtTime,lockoutActiveStart:$lockoutActiveStart,lockoutActiveEnd:$lockoutActiveEnd,requirePasswordOnBoot:$requirePasswordOnBoot,lockoutCodeType:$lockoutCodeType,bootPassword:$bootPassword,bootCodeType:$bootCodeType,autheliaURL:$autheliaURL,autheliaUsername:$autheliaUsername,autheliaEncryptedPassword:$autheliaEncryptedPassword,tabs:[]}' > "$tmp"
+        '. + {autoswitch:$autoswitch,enableTouch:$enableTouch,dualSwipe:$dualSwipe,swipeMode:$swipeMode,allowNavigation:$allowNavigation,homeTabIndex:$homeTabIndex,inactivityTimeout:$inactivityTimeout,enablePauseButton:$enablePauseButton,enableKeyboardButton:$enableKeyboardButton,enableNavButton:$enableNavButton,enableHistoryButtons:$enableHistoryButtons,enablePasswordProtection:$enablePasswordProtection,lockoutPassword:$lockoutPassword,lockoutTimeout:$lockoutTimeout,lockoutAtTime:$lockoutAtTime,lockoutActiveStart:$lockoutActiveStart,lockoutActiveEnd:$lockoutActiveEnd,requirePasswordOnBoot:$requirePasswordOnBoot,lockoutCodeType:$lockoutCodeType,bootPassword:$bootPassword,bootCodeType:$bootCodeType,autheliaURL:$autheliaURL,autheliaUsername:$autheliaUsername,autheliaEncryptedPassword:$autheliaEncryptedPassword,tabs:[]}' > "$tmp"
 
     if [[ ${#URLS[@]} -gt 0 ]]; then
         for idx in "${!URLS[@]}"; do

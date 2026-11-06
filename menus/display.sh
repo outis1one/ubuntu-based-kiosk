@@ -20,6 +20,7 @@ display_status() {
     echo "Pause button:       $(onoff "$ENABLE_PAUSE_BUTTON")"
     echo "Keyboard button:    $(onoff "$ENABLE_KEYBOARD_BUTTON")"
     echo "Navigation button:  $(onoff "$ENABLE_NAV_BUTTON")"
+    echo "Back/forward btns:  $(onoff "$ENABLE_HISTORY_BUTTONS")"
 }
 
 display_menu_builder() {
@@ -29,6 +30,7 @@ display_menu_builder() {
         "Toggle pause button (currently: $(onoff "$ENABLE_PAUSE_BUTTON"))"
         "Toggle on-screen keyboard button (currently: $(onoff "$ENABLE_KEYBOARD_BUTTON"))"
         "Toggle navigation/help button (currently: $(onoff "$ENABLE_NAV_BUTTON"))"
+        "Toggle on-screen back/forward buttons (currently: $(onoff "$ENABLE_HISTORY_BUTTONS"))"
     )
     MENU_HANDLERS=(
         action_set_touch_mode
@@ -36,6 +38,7 @@ display_menu_builder() {
         action_toggle_pause_button
         action_toggle_keyboard_button
         action_toggle_nav_button
+        action_toggle_history_buttons
     )
 }
 
@@ -128,6 +131,21 @@ action_toggle_nav_button() {
     else
         ENABLE_NAV_BUTTON="true"
         log_success "Navigation/help button enabled"
+    fi
+    save_config
+}
+
+# Page back/forward: Alt+Left / Alt+Right and the mouse's side buttons
+# always work; this adds clickable buttons (top middle, half transparent,
+# shown on mouse movement or a tap) for screens with no keyboard or mouse
+# buttons. Off by default.
+action_toggle_history_buttons() {
+    if [[ "$ENABLE_HISTORY_BUTTONS" == "true" ]]; then
+        ENABLE_HISTORY_BUTTONS="false"
+        log_warning "On-screen back/forward buttons disabled"
+    else
+        ENABLE_HISTORY_BUTTONS="true"
+        log_success "On-screen back/forward buttons enabled"
     fi
     save_config
 }

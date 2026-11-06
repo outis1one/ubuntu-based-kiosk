@@ -115,6 +115,19 @@ ipcRenderer.on('keyboard-button-enabled',(event,enabled)=>{
   }
 });
 
+// On-screen back/forward buttons (top middle, half transparent) - an
+// option for screens with no keyboard or mouse side buttons.
+let historyButtonsEnabled=false;
+let historyBar=null;
+let historyBarHideTimer=null;
+ipcRenderer.on('history-buttons-enabled',(event,enabled)=>{
+  historyButtonsEnabled=enabled===true;
+  console.log('[HISTORY-BTN] Back/forward buttons enabled: '+historyButtonsEnabled);
+  if(historyBar&&!historyButtonsEnabled){
+    historyBar.style.display='none';
+  }
+});
+
 ipcRenderer.on('nav-button-enabled',(event,enabled)=>{
   navButtonEnabled=enabled;
   console.log('[NAV-BTN] Navigation button enabled: '+enabled);
@@ -251,6 +264,56 @@ window.addEventListener('DOMContentLoaded',()=>{
     });
 
     document.body.appendChild(navButton);
+  }
+
+  // Back/forward buttons, top middle. The corners are often all taken by the
+  // menu, pause, keyboard and power buttons, so these sit between them.
+  const HISTORY_BAR_HIDE_DELAY=5000;
+  function createHistoryBar(){
+    if(historyBar)return;
+    historyBar=document.createElement('div');
+    historyBar.id='electron-history-bar';
+    historyBar.style.cssText=`
+      position:fixed;top:12px;left:50%;transform:translateX(-50%);
+      display:none;gap:14px;z-index:999999;opacity:0.5;
+      transition:opacity 0.15s;user-select:none;
+    `;
+    const makeButton=(label,direction,path)=>{
+      const b=document.createElement('div');
+      b.title=label;
+      b.innerHTML='<svg width="30" height="30" viewBox="0 0 24 24" fill="white"><path d="'+path+'"/></svg>';
+      b.style.cssText=`
+        width:56px;height:56px;background:rgba(44,62,80,0.9);
+        border:2px solid rgba(255,255,255,0.9);border-radius:50%;
+        display:flex;align-items:center;justify-content:center;cursor:pointer;
+      `;
+      b.addEventListener('click',(e)=>{
+        e.preventDefault();
+        e.stopPropagation();
+        ipcRenderer.send('history-nav',direction);
+        showHistoryBar();
+      });
+      return b;
+    };
+    historyBar.append(
+      makeButton('Back','back','M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z'),
+      makeButton('Forward','forward','M8.59 16.59L10 18l6-6-6-6-1.41 1.41L13.17 12z')
+    );
+    historyBar.addEventListener('mouseenter',()=>{historyBar.style.opacity='0.9';});
+    historyBar.addEventListener('mouseleave',()=>{historyBar.style.opacity='0.5';});
+    document.body.appendChild(historyBar);
+  }
+
+  function showHistoryBar(){
+    if(!historyButtonsEnabled)return;
+    if(!historyBar)createHistoryBar();
+    if(!historyBar)return;
+    historyBar.style.display='flex';
+    if(historyBarHideTimer)clearTimeout(historyBarHideTimer);
+    historyBarHideTimer=setTimeout(()=>{
+      if(historyBar)historyBar.style.display='none';
+      historyBarHideTimer=null;
+    },HISTORY_BAR_HIDE_DELAY);
   }
 
   // Power button in top-right corner (follows same show/hide logic as nav button)
@@ -918,10 +981,22 @@ window.addEventListener('DOMContentLoaded',()=>{
     if(navButtonEnabled){
       showNavButton();
     }
+    showHistoryBar();
 
     // Always show power button on user interaction
     showPowerButton();
   }
+
+  // Back/forward buttons also appear on plain mouse movement, for screens
+  // with a mouse but no touch (the other buttons wait for a click/keypress).
+  let lastHistoryMove=0;
+  document.addEventListener('mousemove',()=>{
+    if(!historyButtonsEnabled)return;
+    const now=Date.now();
+    if(now-lastHistoryMove<300)return;
+    lastHistoryMove=now;
+    showHistoryBar();
+  },{passive:true,capture:true});
 
   // Show pause button on any user interaction
   const pauseButtonTriggers=['mousedown','touchstart','keydown'];

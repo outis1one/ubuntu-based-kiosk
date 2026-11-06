@@ -173,6 +173,7 @@ displayForm.addEventListener('submit', async (e) => {
         enablePauseButton: fd.get('enablePauseButton') === 'on',
         enableKeyboardButton: fd.get('enableKeyboardButton') === 'on',
         enableNavButton: fd.get('enableNavButton') === 'on',
+        enableHistoryButtons: fd.get('enableHistoryButtons') === 'on',
         homeTabIndex: parseInt(fd.get('homeTabIndex'), 10),
         inactivityTimeoutMinutes: parseInt(fd.get('inactivityTimeoutMinutes'), 10),
     };
@@ -282,6 +283,7 @@ function populateAll(config) {
     displayForm.elements.enablePauseButton.checked = !!config.enablePauseButton;
     displayForm.elements.enableKeyboardButton.checked = !!config.enableKeyboardButton;
     displayForm.elements.enableNavButton.checked = !!config.enableNavButton;
+    displayForm.elements.enableHistoryButtons.checked = !!config.enableHistoryButtons;
     updateHomeTabOptions(config.tabs);
     homeTabSelect.value = String(config.homeTabIndex);
     displayForm.elements.inactivityTimeoutMinutes.value = Math.round(config.inactivityTimeout / 60);
