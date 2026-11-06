@@ -65,6 +65,7 @@ clone_detect_addons() {
     command -v netbird &>/dev/null && addons+=("netbird")
     baresip_is_installed 2>/dev/null && addons+=("asterisk_intercom")
     webui_is_installed 2>/dev/null && addons+=("webui")
+    library_is_installed 2>/dev/null && addons+=("library")
 
     if sudo -u "$KIOSK_USER" test -f "$CONFIG_PATH" 2>/dev/null; then
         local authelia_url
@@ -243,6 +244,13 @@ action_apply_clone_settings() {
                 fi ;;
             asterisk_intercom)
                 echo "  [!] Asterisk Intercom - needs its own SIP extension on this device" ;;
+            library)
+                if library_is_installed; then
+                    echo "  [x] Library Catalog - already installed (the books themselves are not cloned)"
+                else
+                    echo "  [ ] Library Catalog - not installed, install via Addons (the catalogue page is cloned, the books are not)"
+                    missing_any=true
+                fi ;;
             authelia)
                 echo "  [!] Authelia - needs a fresh login on this device" ;;
             *)
