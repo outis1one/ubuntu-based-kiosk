@@ -120,11 +120,16 @@ ipcRenderer.on('keyboard-button-enabled',(event,enabled)=>{
 let historyButtonsEnabled=false;
 let historyBar=null;
 let historyBarHideTimer=null;
-ipcRenderer.on('history-buttons-enabled',(event,enabled)=>{
-  historyButtonsEnabled=enabled===true;
-  console.log('[HISTORY-BTN] Back/forward buttons enabled: '+historyButtonsEnabled);
-  if(historyBar&&!historyButtonsEnabled){
-    historyBar.style.display='none';
+let historyOpacity=0.5;   // 0.1 - 1.0, from the "opacity" setting (percent)
+const historyHoverOpacity=()=>Math.min(1,historyOpacity+0.4);
+ipcRenderer.on('history-buttons-config',(event,cfg)=>{
+  historyButtonsEnabled=!!(cfg&&cfg.enabled===true);
+  const pct=Number(cfg&&cfg.opacity);
+  historyOpacity=(pct>=10&&pct<=100)?pct/100:0.5;
+  console.log('[HISTORY-BTN] Back/forward buttons enabled: '+historyButtonsEnabled+', opacity '+historyOpacity);
+  if(historyBar){
+    historyBar.style.opacity=String(historyOpacity);
+    if(!historyButtonsEnabled)historyBar.style.display='none';
   }
 });
 
@@ -275,7 +280,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     historyBar.id='electron-history-bar';
     historyBar.style.cssText=`
       position:fixed;top:12px;left:50%;transform:translateX(-50%);
-      display:none;gap:14px;z-index:999999;opacity:0.5;
+      display:none;gap:14px;z-index:999999;opacity:${historyOpacity};
       transition:opacity 0.15s;user-select:none;
     `;
     const makeButton=(label,direction,path)=>{
@@ -299,8 +304,8 @@ window.addEventListener('DOMContentLoaded',()=>{
       makeButton('Back','back','M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z'),
       makeButton('Forward','forward','M8.59 16.59L10 18l6-6-6-6-1.41 1.41L13.17 12z')
     );
-    historyBar.addEventListener('mouseenter',()=>{historyBar.style.opacity='0.9';});
-    historyBar.addEventListener('mouseleave',()=>{historyBar.style.opacity='0.5';});
+    historyBar.addEventListener('mouseenter',()=>{historyBar.style.opacity=String(historyHoverOpacity());});
+    historyBar.addEventListener('mouseleave',()=>{historyBar.style.opacity=String(historyOpacity);});
     document.body.appendChild(historyBar);
   }
 

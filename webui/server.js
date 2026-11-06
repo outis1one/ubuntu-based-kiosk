@@ -71,6 +71,11 @@ app.put('/api/config', (req, res) => {
     if (body.enableKeyboardButton !== undefined) patch.enableKeyboardButton = !!body.enableKeyboardButton;
     if (body.enableNavButton !== undefined) patch.enableNavButton = !!body.enableNavButton;
     if (body.enableHistoryButtons !== undefined) patch.enableHistoryButtons = !!body.enableHistoryButtons;
+    if (body.historyButtonsOpacity !== undefined) {
+        const pct = Number(body.historyButtonsOpacity);
+        if (!Number.isInteger(pct) || pct < 10 || pct > 100) return badRequest(res, 'Button opacity must be 10-100 percent');
+        patch.historyButtonsOpacity = pct;
+    }
 
     let tabCount;
     if (body.tabs !== undefined) {

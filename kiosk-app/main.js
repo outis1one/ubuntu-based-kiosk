@@ -61,6 +61,7 @@ let enablePauseButton=true;
 let enableKeyboardButton=true;
 let enableNavButton=true;
 let enableHistoryButtons=false;
+let historyButtonsOpacity=50;
 let enablePasswordProtection=false;
 let lockoutPassword="";
 let lockoutTimeout=0;
@@ -104,6 +105,10 @@ function loadConfig(){
     enableKeyboardButton=(config.enableKeyboardButton!==false);
     enableNavButton=(config.enableNavButton!==false);
     enableHistoryButtons=(config.enableHistoryButtons===true);
+    {
+      const pct=Number(config.historyButtonsOpacity);
+      historyButtonsOpacity=(Number.isInteger(pct)&&pct>=10&&pct<=100)?pct:50;
+    }
     enablePasswordProtection=(config.enablePasswordProtection===true);
     lockoutPassword=config.lockoutPassword||"";
     lockoutTimeout=(config.lockoutTimeout||0)*60000; // Convert minutes to ms
@@ -124,7 +129,7 @@ function loadConfig(){
     console.log('[CONFIG] Navigation:',allowNavigation);
     console.log('[CONFIG] Pause button:',enablePauseButton);
     console.log('[CONFIG] Keyboard button:',enableKeyboardButton);
-    console.log('[CONFIG] Back/forward buttons:',enableHistoryButtons);
+    console.log('[CONFIG] Back/forward buttons:',enableHistoryButtons,'opacity',historyButtonsOpacity+'%');
     console.log('[CONFIG] Password protection:',enablePasswordProtection);
     console.log('[CONFIG] Lockout timeout:',lockoutTimeout/60000,'minutes');
     if(lockoutAtTime)console.log('[CONFIG] Lock at time:',lockoutAtTime);
@@ -1640,7 +1645,7 @@ async function createWindow(){
       console.log('[MAIN] Page loaded - sending keyboard-button-enabled: '+enableKeyboardButton);
 
       view.webContents.send('nav-button-enabled',enableNavButton);
-      view.webContents.send('history-buttons-enabled',enableHistoryButtons);
+      view.webContents.send('history-buttons-config',{enabled:enableHistoryButtons,opacity:historyButtonsOpacity});
       console.log('[MAIN] Page loaded - sending nav-button-enabled: '+enableNavButton);
 
       console.log('[MAIN] Page loaded - resending pause-button-visibility: '+shouldShow+' for '+t.url);

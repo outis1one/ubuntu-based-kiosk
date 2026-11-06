@@ -249,7 +249,7 @@ The kiosk machine still needs a working internet connection (ethernet, or WiFi c
 - **1-finger swipe** (dual mode) - Navigate within page (arrow keys)
 - **On-screen keyboard** - Auto-shows on text fields or click keyboard icon
 - **Navigation menu** - Click key icon (top-left) to access site list and gesture cheat sheet
-- **Back/forward buttons** (optional, off by default) - two half-transparent ◀ ▶ buttons at the top middle of the screen, for kiosks with no keyboard or mouse side buttons. They appear on a tap, click or mouse movement and fade after a few seconds. Turn on in Core Settings → Display & Interaction, or the Web UI.
+- **Back/forward buttons** (optional, off by default) - two half-transparent ◀ ▶ buttons at the top middle of the screen, for kiosks with no keyboard or mouse side buttons. They appear on a tap, click or mouse movement and fade after a few seconds. Turn on in Core Settings → Display & Interaction, or the Web UI, where you can also set how solid they look (opacity 10–100%, default 50).
 
 ### On-Screen Keyboard
 - **HTML-based keyboard** with full QWERTY layout

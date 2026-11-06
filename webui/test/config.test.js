@@ -81,6 +81,9 @@ check('enableHistoryButtons defaults off and round-trips', () => {
     saveConfig({ enableHistoryButtons: true });
     assert.strictEqual(JSON.parse(fs.readFileSync(process.env.CONFIG_PATH, 'utf8')).enableHistoryButtons, true);
     assert.strictEqual(loadConfig().enableHistoryButtons, true);
+    assert.strictEqual(loadConfig().historyButtonsOpacity, 50);
+    saveConfig({ historyButtonsOpacity: 80 });
+    assert.strictEqual(loadConfig().historyButtonsOpacity, 80);
 });
 
 check('saveConfig tabs: new password gets hashed, never stored/returned as plaintext', () => {
