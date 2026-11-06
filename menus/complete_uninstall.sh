@@ -7,7 +7,7 @@
 # (cups_do_uninstall, vnc_do_uninstall, wireguard_do_uninstall,
 # tailscale_do_uninstall, netbird_do_uninstall, lms_do_uninstall,
 # squeezelite_do_uninstall, asterisk_intercom_do_uninstall,
-# webui_do_uninstall, power_schedule_do_remove_all,
+# webui_do_uninstall, library_do_uninstall, power_schedule_do_remove_all,
 # emergency_hotspot_do_disable, time_sync_do_reset) instead of
 # re-implementing removal logic for each addon a second time here - if an
 # addon's uninstall logic changes, this picks it up automatically. Only
@@ -59,6 +59,7 @@ action_complete_uninstall() {
     echo "  • Remote access (VNC, WireGuard, Tailscale, Netbird)"
     echo "  • Asterisk Intercom (Baresip)"
     echo "  • Web UI"
+    echo "  • Library Catalog (Koha) and ALL the books in it"
     echo "  • LightDM and Openbox"
     echo "  • All kiosk schedules and services"
     echo "  • Emergency hotspot configuration"
@@ -90,6 +91,7 @@ action_complete_uninstall() {
     squeezelite_do_uninstall
     asterisk_intercom_do_uninstall purge
     webui_do_uninstall
+    library_do_uninstall purge
 
     echo "[3/12] Removing schedules, emergency hotspot and time server setting..."
     power_schedule_do_remove_all

@@ -38,7 +38,11 @@
 #     Display/Lockout, the webui/ Node app installed as a systemd
 #     service; no login of its own, put it behind your own reverse proxy
 #     with Authelia forward-auth if it needs to be reachable beyond a
-#     trusted LAN - see the file header).
+#     trusted LAN - see the file header), Library Catalog (menus/
+#     addon_library.sh - a self-hosted Koha library catalogue in Docker with
+#     Z39.50 lookup, label printing and a scan-to-add page, shown on the
+#     kiosk as a public search terminal; installs Docker on demand via
+#     lib/docker.sh).
 #   Advanced: Diagnostics (menus/diagnostics.sh - system status/logs/
 #     audio/network), Electron Maintenance (menus/advanced_electron.sh -
 #     manual update, fix blank screen), Factory Reset
@@ -67,6 +71,8 @@ source "$SCRIPT_DIR/lib/menu.sh"
 source "$SCRIPT_DIR/lib/config.sh"
 # shellcheck source=lib/electron.sh
 source "$SCRIPT_DIR/lib/electron.sh"
+# shellcheck source=lib/docker.sh
+source "$SCRIPT_DIR/lib/docker.sh"
 # shellcheck source=menus/sites.sh
 source "$SCRIPT_DIR/menus/sites.sh"
 # shellcheck source=menus/display.sh
@@ -97,6 +103,8 @@ source "$SCRIPT_DIR/menus/addon_lms_squeezelite.sh"
 source "$SCRIPT_DIR/menus/addon_asterisk_intercom.sh"
 # shellcheck source=menus/addon_webui.sh
 source "$SCRIPT_DIR/menus/addon_webui.sh"
+# shellcheck source=menus/addon_library.sh
+source "$SCRIPT_DIR/menus/addon_library.sh"
 # shellcheck source=menus/advanced_electron.sh
 source "$SCRIPT_DIR/menus/advanced_electron.sh"
 # shellcheck source=menus/advanced_upgrade.sh
@@ -179,8 +187,8 @@ core_settings_menu() {
 }
 
 addons_menu_builder() {
-    MENU_LABELS=("CUPS Printing" "Authelia Auto-Login" "Remote Access" "LMS Server / Squeezelite Player" "Asterisk Intercom (SIP Extension)" "Web UI")
-    MENU_HANDLERS=(addon_cups_menu addon_authelia_menu remote_access_menu addon_lms_squeezelite_menu addon_asterisk_intercom_menu addon_webui_menu)
+    MENU_LABELS=("CUPS Printing" "Authelia Auto-Login" "Remote Access" "LMS Server / Squeezelite Player" "Asterisk Intercom (SIP Extension)" "Web UI" "Library Catalog (Koha)")
+    MENU_HANDLERS=(addon_cups_menu addon_authelia_menu remote_access_menu addon_lms_squeezelite_menu addon_asterisk_intercom_menu addon_webui_menu addon_library_menu)
 }
 
 addons_menu() {

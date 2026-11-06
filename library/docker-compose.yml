@@ -1,0 +1,78 @@
+name: library
+
+services:
+  db:
+    image: mariadb:10.11
+    container_name: library-db
+    restart: unless-stopped
+    environment:
+      MARIADB_ROOT_PASSWORD: ${DB_ROOT_PASSWORD}
+      MARIADB_DATABASE: koha_library
+      MARIADB_USER: koha_library
+      MARIADB_PASSWORD: ${DB_PASSWORD}
+    command: ["--character-set-server=utf8mb4", "--collation-server=utf8mb4_unicode_ci", "--innodb-buffer-pool-size=128M"]
+    volumes:
+      - db-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "healthcheck.sh", "--connect", "--innodb_initialized"]
+      interval: 10s
+      timeout: 5s
+      retries: 20
+
+  koha:
+    build:
+      context: ./koha
+      args:
+        KOHA_SUITE: ${KOHA_SUITE:-stable}
+    image: library-koha:local
+    container_name: library-koha
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      TZ: ${TZ:-UTC}
+      KOHA_DB_HOST: db
+      KOHA_DB_PASS: ${DB_PASSWORD}
+      KOHA_ADMIN_USER: ${ADMIN_USER:-admin}
+      KOHA_ADMIN_PASS: ${ADMIN_PASSWORD}
+      KOHA_LIBRARY_NAME: ${LIBRARY_NAME:-My Library}
+      KOHA_LIBRARY_CODE: ${LIBRARY_CODE:-HOME}
+      KOHA_SHELVES: ${SHELVES:-}
+      KOHA_ITEM_TYPES: ${ITEM_TYPES:-}
+    ports:
+      - "${BIND_ADDR:-0.0.0.0}:${OPAC_PORT:-8080}:80"
+      - "${BIND_ADDR:-0.0.0.0}:${STAFF_PORT:-8081}:8081"
+    volumes:
+      - koha-data:/var/lib/koha
+
+  # Scan an ISBN -> the book is added (Z39.50 lookup, then Koha's REST API).
+  quickadd:
+    build:
+      context: ./quickadd
+    image: library-quickadd:local
+    container_name: library-quickadd
+    restart: unless-stopped
+    depends_on:
+      koha:
+        condition: service_started
+    environment:
+      TZ: ${TZ:-UTC}
+      KOHA_API: http://koha:8081/api/v1
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      KOHA_LIBRARY: ${LIBRARY_CODE:-HOME}
+      OPAC_PORT: ${OPAC_PORT:-8080}
+      STAFF_PORT: ${STAFF_PORT:-8081}
+      OPAC_URL: ${OPAC_URL:-}
+      STAFF_URL: ${STAFF_URL:-}
+      QUICKADD_SOURCES: ${QUICKADD_SOURCES:-z3950:lx2.loc.gov:210/LCDB,openlibrary}
+    ports:
+      - "${BIND_ADDR:-0.0.0.0}:${QUICKADD_PORT:-8082}:8082"
+    volumes:
+      - quickadd-data:/data
+
+volumes:
+  db-data:
+  koha-data:
+  quickadd-data:

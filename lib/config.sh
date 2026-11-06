@@ -42,6 +42,11 @@
 # other addon's own scripts.
 : "${WEBUI_HELPER_PATH:=$BIN_DIR/kiosk-webui-helper}"
 
+# Library Catalog addon (menus/addon_library.sh): the Koha + Quick Add Docker
+# stack is deployed here from this checkout's library/ directory. Root-owned
+# on purpose - it holds the generated database/admin passwords in .env.
+: "${LIBRARY_DIR:=/opt/kiosk-library}"
+
 # Offline install bundle - only present on systems installed from an ISO
 # built with `iso/build-iso.sh --offline`: a local apt repository (every
 # package provisioning and the CUPS addon install) plus prebuilt
