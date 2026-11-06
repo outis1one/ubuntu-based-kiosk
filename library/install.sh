@@ -68,6 +68,7 @@ show_status() {
     echo
     echo "  Catalogue (public):  http://$ip:$OPAC_PORT"
     echo "  Staff interface:     http://$ip:$STAFF_PORT"
+    echo "  Add books (scan):    http://$ip:${QUICKADD_PORT:-8082}   (same login)"
     echo "  Staff login:         $ADMIN_USER  /  $ADMIN_PASSWORD   (also stored in $HERE/.env)"
     echo
 }
@@ -98,6 +99,7 @@ LIBRARY_NAME="${LIBRARY_NAME:-My Library}"
 TZ=${TZ_NOW}
 OPAC_PORT=$(free_port "${OPAC_PORT:-8080}")
 STAFF_PORT=$(free_port "${STAFF_PORT:-8081}")
+QUICKADD_PORT=$(free_port "${QUICKADD_PORT:-8082}")
 ADMIN_USER=admin
 ADMIN_PASSWORD=$(rand 16)
 DB_ROOT_PASSWORD=$(rand 32)
@@ -108,10 +110,15 @@ ENVEOF
     [ "$RUN_USER" = root ] || chown "$RUN_USER" .env
 else
     c_info "Re-using existing .env"
+    # Settings added in later versions: append them to an older .env.
+    if ! grep -q '^QUICKADD_PORT=' .env; then
+        echo "QUICKADD_PORT=$(free_port 8082)" >> .env
+    fi
 fi
 
 if [ -n "${EXTRA_CA:-}" ]; then
     cp "$EXTRA_CA" koha/certs/extra-ca.crt
+    cp "$EXTRA_CA" quickadd/certs/extra-ca.crt
     c_info "Trusting extra CA during the build: $EXTRA_CA"
 fi
 

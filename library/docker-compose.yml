@@ -43,6 +43,31 @@ services:
     volumes:
       - koha-data:/var/lib/koha
 
+  # Scan an ISBN -> the book is added (Z39.50 lookup, then Koha's REST API).
+  quickadd:
+    build:
+      context: ./quickadd
+    image: library-quickadd:local
+    container_name: library-quickadd
+    restart: unless-stopped
+    depends_on:
+      koha:
+        condition: service_started
+    environment:
+      TZ: ${TZ:-UTC}
+      KOHA_API: http://koha:8081/api/v1
+      ADMIN_USER: ${ADMIN_USER:-admin}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      KOHA_LIBRARY: HOME
+      OPAC_PORT: ${OPAC_PORT:-8080}
+      STAFF_PORT: ${STAFF_PORT:-8081}
+      QUICKADD_SOURCES: ${QUICKADD_SOURCES:-z3950:lx2.loc.gov:210/LCDB,openlibrary}
+    ports:
+      - "${QUICKADD_PORT:-8082}:8082"
+    volumes:
+      - quickadd-data:/data
+
 volumes:
   db-data:
   koha-data:
+  quickadd-data:

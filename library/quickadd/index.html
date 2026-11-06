@@ -1,0 +1,263 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Add to library</title>
+<style>
+  :root {
+    --bg: #f6f5f1; --card: #ffffff; --ink: #1d2320; --muted: #5b655f; --line: #dcdad2;
+    --accent: #2f6b4f; --accent-ink: #ffffff; --ok: #1f7a4a; --warn: #8a5a00; --bad: #a3321f;
+    --ok-bg: #e6f3ec; --warn-bg: #fbf1dc; --bad-bg: #f9e5e1; --focus: #1a5fb4;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #151a17; --card: #1e2521; --ink: #e8ece9; --muted: #a2ada6; --line: #333c36;
+      --accent: #5bb58a; --accent-ink: #0d1a13; --ok: #6fd3a0; --warn: #e8bd6a; --bad: #f08a78;
+      --ok-bg: #1c3226; --warn-bg: #352c15; --bad-bg: #3a2220; --focus: #7ab0ff;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--ink);
+         font: 16px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; }
+  main { max-width: 760px; margin: 0 auto; padding: 16px; }
+  header { display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: baseline; justify-content: space-between; }
+  h1 { font-size: 1.35rem; margin: 8px 0; }
+  nav a { color: var(--accent); margin-right: 14px; text-decoration: none; font-weight: 600; }
+  nav a:hover { text-decoration: underline; }
+  .types { display: flex; gap: 6px; margin: 10px 0 14px; flex-wrap: wrap; }
+  .types label { cursor: pointer; }
+  .types input { position: absolute; opacity: 0; }
+  .types span { display: inline-block; padding: 8px 16px; border: 1px solid var(--line);
+                border-radius: 999px; background: var(--card); font-weight: 600; }
+  .types input:checked + span { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  .types input:focus-visible + span { outline: 3px solid var(--focus); outline-offset: 2px; }
+  .scan { display: flex; gap: 8px; }
+  .scan input { flex: 1; font-size: 1.5rem; padding: 14px 16px; border: 2px solid var(--line);
+                border-radius: 12px; background: var(--card); color: var(--ink); min-width: 0; }
+  .scan input:focus { border-color: var(--accent); outline: none; box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); }
+  button { font: inherit; cursor: pointer; border-radius: 10px; border: 1px solid var(--line);
+           padding: 10px 16px; background: var(--card); color: var(--ink); font-weight: 600; }
+  button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
+  button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+  #status { min-height: 1.5em; margin: 10px 2px; color: var(--muted); }
+  .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
+          padding: 14px; margin: 10px 0; display: flex; gap: 14px; }
+  .card.ok { border-color: var(--ok); background: var(--ok-bg); }
+  .card.warn { border-color: var(--warn); background: var(--warn-bg); }
+  .card.bad { border-color: var(--bad); background: var(--bad-bg); }
+  .cover { width: 64px; height: 92px; border-radius: 4px; background: var(--line); flex: none; object-fit: cover; }
+  .cover[hidden] { display: none; }
+  .body { flex: 1; min-width: 0; }
+  .title { font-weight: 700; font-size: 1.1rem; overflow-wrap: anywhere; }
+  .meta { color: var(--muted); overflow-wrap: anywhere; }
+  .badge { display: inline-block; background: var(--ink); color: var(--bg); border-radius: 6px;
+           padding: 1px 9px; font-weight: 700; font-variant-numeric: tabular-nums; }
+  .actions { margin-top: 10px; display: flex; gap: 8px; flex-wrap: wrap; }
+  form.manual { display: grid; gap: 8px; margin-top: 8px; }
+  form.manual input { padding: 10px; border: 1px solid var(--line); border-radius: 8px;
+                      background: var(--card); color: var(--ink); font: inherit; width: 100%; }
+  h2 { font-size: 1.05rem; margin: 24px 0 6px; }
+  ul.list { list-style: none; margin: 0; padding: 0; }
+  ul.list li { display: flex; gap: 10px; align-items: center; padding: 9px 2px; border-bottom: 1px solid var(--line); }
+  ul.list .t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  ul.list .u { color: var(--muted); font-size: .9rem; }
+  .labels { background: var(--card); border: 1px dashed var(--line); border-radius: 12px; padding: 12px; margin-top: 14px; }
+  .small { color: var(--muted); font-size: .92rem; }
+  .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+</style>
+</head>
+<body>
+<main>
+  <header>
+    <h1>Add to library</h1>
+    <nav aria-label="Library links">
+      <a id="lnk-opac" href="#">Catalogue</a><a id="lnk-staff" href="#">Staff</a>
+    </nav>
+  </header>
+
+  <fieldset class="types" id="types" style="border:0;padding:0" aria-label="What are you adding?"></fieldset>
+
+  <form class="scan" id="scan" autocomplete="off">
+    <label class="sr" for="code">ISBN or barcode</label>
+    <input id="code" inputmode="numeric" placeholder="Scan or type an ISBN, then Enter" autofocus>
+    <button class="primary" type="submit">Add</button>
+  </form>
+  <div id="status" role="status" aria-live="polite"></div>
+  <div id="result"></div>
+
+  <h2>Added this session <span id="count" class="small"></span></h2>
+  <ul class="list" id="session"></ul>
+  <div class="labels" id="labels" hidden>
+    <strong id="range"></strong>
+    <div class="small">Print spine labels and barcodes: open the label creator,
+      choose <em>Print barcode range</em>, and enter these numbers.</div>
+    <div class="actions"><a id="lnk-labels" href="#"><button type="button">Open label creator</button></a></div>
+  </div>
+
+  <h2>Earlier</h2>
+  <ul class="list" id="earlier"></ul>
+</main>
+
+<script>
+(() => {
+  const $ = id => document.getElementById(id);
+  let types = {}, sessionItems = [], busy = false, lastAdded = null, type = localStorage.getItem('qa-type') || 'BOOK';
+
+  // --- small audible feedback so a stack of books can be scanned without looking
+  let actx;
+  function beep(freqs) {
+    try {
+      actx = actx || new (window.AudioContext || window.webkitAudioContext)();
+      let t = actx.currentTime;
+      for (const f of freqs) {
+        const o = actx.createOscillator(), g = actx.createGain();
+        o.frequency.value = f; g.gain.setValueAtTime(0.15, t); g.gain.exponentialRampToValueAtTime(0.001, t + 0.16);
+        o.connect(g); g.connect(actx.destination); o.start(t); o.stop(t + 0.17); t += 0.18;
+      }
+    } catch (e) {}
+  }
+  const SOUND = { added: [880], duplicate: [520, 520], notfound: [300], error: [220, 180] };
+
+  const el = (tag, props = {}, ...kids) => {
+    const n = Object.assign(document.createElement(tag), props);
+    for (const k of kids) n.append(k);
+    return n;
+  };
+
+  async function api(path, body) {
+    const r = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                                         body: JSON.stringify(body) } : {});
+    return r.json();
+  }
+
+  function cover(code) {
+    const img = el('img', { className: 'cover', alt: '', hidden: true });
+    if (code && /^\d{10,13}$/.test(code)) {
+      img.onload = () => { if (img.naturalWidth > 1) img.hidden = false; };
+      img.src = 'https://covers.openlibrary.org/b/isbn/' + code + '-M.jpg?default=false';
+    }
+    return img;
+  }
+
+  function show(kind, ...parts) { $('result').replaceChildren(el('div', { className: 'card ' + kind }, ...parts)); }
+
+  function bookBody(r, extra) {
+    return el('div', { className: 'body' },
+      el('div', { className: 'title' }, r.title || ''),
+      el('div', { className: 'meta' }, [r.author, r.callnumber && ('Call no. ' + r.callnumber)].filter(Boolean).join(' · ')),
+      ...extra);
+  }
+
+  function rowFor(e, withUndo) {
+    const li = el('li', {},
+      el('span', { className: 'badge' }, e.barcode || '–'),
+      el('span', { className: 't' }, el('div', {}, e.title), el('div', { className: 'u' },
+        [e.author, e.callnumber, e.source].filter(Boolean).join(' · '))));
+    if (withUndo) {
+      const b = el('button', { type: 'button' }, 'Undo');
+      b.onclick = async () => {
+        b.disabled = true;
+        const r = await api('/api/undo', { item_id: e.item_id, biblio_id: e.biblio_id });
+        if (r.status === 'undone') {
+          sessionItems = sessionItems.filter(x => x.item_id !== e.item_id); render();
+          if (lastAdded === e.item_id) $('result').replaceChildren();
+          $('status').textContent = 'Removed "' + e.title + '".';
+        } else b.disabled = false;
+      };
+      li.append(b);
+    }
+    return li;
+  }
+
+  function render() {
+    $('session').replaceChildren(...sessionItems.map(e => rowFor(e, true)));
+    $('count').textContent = sessionItems.length ? '(' + sessionItems.length + ')' : '';
+    const nums = sessionItems.map(e => parseInt(e.barcode, 10)).filter(Number.isFinite);
+    $('labels').hidden = nums.length === 0;
+    if (nums.length) {
+      const lo = Math.min(...nums), hi = Math.max(...nums);
+      $('range').textContent = lo === hi ? 'Barcode ' + lo : 'Barcodes ' + lo + ' to ' + hi;
+    }
+  }
+
+  async function add(code, opts = {}) {
+    if (busy) return; busy = true;
+    $('status').textContent = 'Looking up ' + code + '…';
+    try {
+      const r = await api('/api/add', Object.assign({ code, type }, opts));
+      handle(r, code);
+    } catch (e) {
+      beep(SOUND.error); show('bad', el('div', { className: 'body' }, 'Could not reach the quick-add service.'));
+    } finally { busy = false; $('code').focus(); }
+  }
+
+  function handle(r, code) {
+    $('status').textContent = '';
+    if (r.status === 'added') {
+      beep(SOUND.added); sessionItems.unshift(r); lastAdded = r.item_id; render();
+      show('ok', cover(r.code), bookBody(r, [el('div', { className: 'meta' }, 'Added as barcode ',
+        el('span', { className: 'badge' }, r.barcode), (r.source === 'extra copy' ? ' · another copy of a title you already have' : ' · from ' + r.source))]));
+    } else if (r.status === 'duplicate') {
+      beep(SOUND.duplicate);
+      const more = el('button', { className: 'primary', type: 'button' }, 'Add another copy');
+      more.onclick = () => add(code, { copy: true });
+      const skip = el('button', { type: 'button' }, 'Skip');
+      skip.onclick = () => { $('result').replaceChildren(); $('code').focus(); };
+      show('warn', cover(code), bookBody(r, [el('div', { className: 'meta' },
+        'You already have this (' + r.copies + (r.copies === 1 ? ' copy' : ' copies') + ').'),
+        el('div', { className: 'actions' }, more, skip)]));
+    } else if (r.status === 'notfound') {
+      beep(SOUND.notfound); manualForm(code);
+    } else {
+      beep(SOUND.error);
+      show('bad', el('div', { className: 'body' }, r.message || 'Something went wrong.'));
+    }
+  }
+
+  function manualForm(code) {
+    const f = el('form', { className: 'manual' });
+    const field = (name, ph, req) => el('input', { name, placeholder: ph, required: !!req, 'aria-label': ph });
+    const submit = el('button', { className: 'primary', type: 'submit' }, 'Add it anyway');
+    const cancel = el('button', { type: 'button' }, 'Cancel');
+    cancel.onclick = () => { $('result').replaceChildren(); $('code').focus(); };
+    f.append(field('title', 'Title', true), field('author', 'Author'), field('year', 'Year'),
+             field('publisher', 'Publisher'), el('div', { className: 'actions' }, submit, cancel));
+    f.onsubmit = async ev => {
+      ev.preventDefault();
+      const d = Object.fromEntries(new FormData(f));
+      handle(await api('/api/manual', Object.assign(d, { code, type })), code);
+    };
+    show('warn', el('div', { className: 'body' }, el('div', { className: 'title' }, 'Not found: ' + code),
+      el('div', { className: 'meta' }, 'None of the catalogues knew this one. Type the details and it is added anyway.'), f));
+    f.querySelector('input').focus();
+  }
+
+  $('scan').onsubmit = ev => {
+    ev.preventDefault();
+    const code = $('code').value.trim(); $('code').value = '';
+    if (code) add(code);
+  };
+
+  function typeButtons() {
+    $('types').replaceChildren(...Object.entries(types).map(([k, label]) => {
+      const i = el('input', { type: 'radio', name: 'type', value: k, checked: k === type });
+      i.onchange = () => { type = k; localStorage.setItem('qa-type', k); $('code').focus(); };
+      return el('label', {}, i, el('span', {}, label));
+    }));
+  }
+
+  (async () => {
+    const s = await api('/api/state');
+    types = s.types; if (!types[type]) type = 'BOOK'; typeButtons();
+    const host = location.hostname;
+    $('lnk-opac').href = 'http://' + host + ':' + s.opac_port + '/';
+    $('lnk-staff').href = 'http://' + host + ':' + s.staff_port + '/';
+    $('lnk-labels').href = 'http://' + host + ':' + s.staff_port + '/cgi-bin/koha/labels/label-edit-range.pl';
+    $('earlier').replaceChildren(...s.recent.slice(0, 25).map(e => rowFor(e, false)));
+    $('code').focus();
+  })();
+})();
+</script>
+</body>
+</html>

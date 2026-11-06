@@ -96,10 +96,17 @@ $admin->set_password({ password => $env{admin_pass}, skip_validation => 1 });
 $dbh->do(q{UPDATE marc_subfield_structure SET defaultvalue = 'BOOK'
            WHERE tagfield = '942' AND tagsubfield = 'c'});
 
+# UPC/EAN barcodes (DVDs, CDs, games) live in 024$a, which the stock framework
+# leaves unmapped - so Koha can neither search nor de-duplicate on them. Map it
+# to the catalogue's `ean` column (used by the quick-add page's duplicate check).
+$dbh->do(q{UPDATE marc_subfield_structure SET kohafield = 'biblioitems.ean'
+           WHERE tagfield = '024' AND tagsubfield = 'a' AND (kohafield IS NULL OR kohafield = '')});
+
 # ---- Preferences ----------------------------------------------------------
 my %prefs = (
     autoBarcode              => 'incremental',  # new items get a barcode automatically
     itemcallnumber           => '082ab',        # Dewey call number copied from the MARC record
+    RESTBasicAuth            => 1,              # lets the quick-add page use the REST API
     OpenLibraryCovers        => 1,              # cover images in the catalogue
     OPACSearchForTitleIn     => '',
     BiblioDefaultView        => 'normal',

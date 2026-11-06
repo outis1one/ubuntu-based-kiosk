@@ -2,3 +2,4 @@
 .env
 # Extra CA certificates dropped in for building behind a proxy
 koha/certs/*.crt
+quickadd/certs/*.crt
