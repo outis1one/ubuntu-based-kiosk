@@ -32,6 +32,10 @@
                 border-radius: 999px; background: var(--card); font-weight: 600; }
   .types input:checked + span { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
   .types input:focus-visible + span { outline: 3px solid var(--focus); outline-offset: 2px; }
+  .shelf { display: flex; align-items: center; gap: 8px; margin: 0 0 12px; }
+  .shelf label { font-weight: 600; }
+  .shelf select { font: inherit; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px;
+                  background: var(--card); color: var(--ink); max-width: 100%; }
   .scan { display: flex; gap: 8px; }
   .scan input { flex: 1; font-size: 1.5rem; padding: 14px 16px; border: 2px solid var(--line);
                 border-radius: 12px; background: var(--card); color: var(--ink); min-width: 0; }
@@ -77,6 +81,10 @@
   </header>
 
   <fieldset class="types" id="types" style="border:0;padding:0" aria-label="What are you adding?"></fieldset>
+  <div class="shelf" id="shelfbox" hidden>
+    <label for="shelf">Shelf / room</label>
+    <select id="shelf"></select>
+  </div>
 
   <form class="scan" id="scan" autocomplete="off">
     <label class="sr" for="code">ISBN or barcode</label>
@@ -102,7 +110,7 @@
 <script>
 (() => {
   const $ = id => document.getElementById(id);
-  let types = {}, sessionItems = [], busy = false, lastAdded = null, type = localStorage.getItem('qa-type') || 'BOOK';
+  let types = {}, sessionItems = [], busy = false, lastAdded = null, shelf = localStorage.getItem('qa-shelf') || '', type = localStorage.getItem('qa-type') || 'BOOK';
 
   // --- small audible feedback so a stack of books can be scanned without looking
   let actx;
@@ -145,7 +153,7 @@
   function bookBody(r, extra) {
     return el('div', { className: 'body' },
       el('div', { className: 'title' }, r.title || ''),
-      el('div', { className: 'meta' }, [r.author, r.callnumber && ('Call no. ' + r.callnumber)].filter(Boolean).join(' · ')),
+      el('div', { className: 'meta' }, [r.author, r.callnumber && ('Call no. ' + r.callnumber), r.location].filter(Boolean).join(' · ')),
       ...extra);
   }
 
@@ -153,7 +161,7 @@
     const li = el('li', {},
       el('span', { className: 'badge' }, e.barcode || '–'),
       el('span', { className: 't' }, el('div', {}, e.title), el('div', { className: 'u' },
-        [e.author, e.callnumber, e.source].filter(Boolean).join(' · '))));
+        [e.author, e.callnumber, e.location, e.source].filter(Boolean).join(' · '))));
     if (withUndo) {
       const b = el('button', { type: 'button' }, 'Undo');
       b.onclick = async () => {
@@ -185,7 +193,7 @@
     if (busy) return; busy = true;
     $('status').textContent = 'Looking up ' + code + '…';
     try {
-      const r = await api('/api/add', Object.assign({ code, type }, opts));
+      const r = await api('/api/add', Object.assign({ code, type, location: shelf }, opts));
       handle(r, code);
     } catch (e) {
       beep(SOUND.error); show('bad', el('div', { className: 'body' }, 'Could not reach the quick-add service.'));
@@ -226,7 +234,7 @@
     f.onsubmit = async ev => {
       ev.preventDefault();
       const d = Object.fromEntries(new FormData(f));
-      handle(await api('/api/manual', Object.assign(d, { code, type })), code);
+      handle(await api('/api/manual', Object.assign(d, { code, type, location: shelf })), code);
     };
     show('warn', el('div', { className: 'body' }, el('div', { className: 'title' }, 'Not found: ' + code),
       el('div', { className: 'meta' }, 'None of the catalogues knew this one. Type the details and it is added anyway.'), f));
@@ -250,6 +258,15 @@
   (async () => {
     const s = await api('/api/state');
     types = s.types; if (!types[type]) type = 'BOOK'; typeButtons();
+    if (s.locations && s.locations.length) {
+      const sel = $('shelf');
+      sel.replaceChildren(el('option', { value: '' }, '(not set)'),
+        ...s.locations.map(l => el('option', { value: l.value }, l.label)));
+      if (![...sel.options].some(o => o.value === shelf)) shelf = '';
+      sel.value = shelf;
+      sel.onchange = () => { shelf = sel.value; localStorage.setItem('qa-shelf', shelf); $('code').focus(); };
+      $('shelfbox').hidden = false;
+    }
     const host = location.hostname;
     $('lnk-opac').href = 'http://' + host + ':' + s.opac_port + '/';
     $('lnk-staff').href = 'http://' + host + ':' + s.staff_port + '/';

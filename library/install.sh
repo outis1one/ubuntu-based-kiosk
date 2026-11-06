@@ -41,7 +41,13 @@ ensure_docker() {
     docker info >/dev/null 2>&1 || { c_err "The Docker daemon is not running."; exit 1; }
 }
 
-port_in_use() { ss -tlnH "sport = :$1" 2>/dev/null | grep -q .; }
+port_in_use() {
+    if command -v ss >/dev/null 2>&1; then
+        ss -tlnH "sport = :$1" 2>/dev/null | grep -q .
+    else                                   # minimal systems without iproute2
+        (exec 3<>"/dev/tcp/127.0.0.1/$1") 2>/dev/null
+    fi
+}
 free_port()   { local p="$1"; while port_in_use "$p"; do p=$((p + 1)); done; echo "$p"; }
 rand()        { head -c 64 /dev/urandom | base64 | tr -dc 'A-Za-z0-9' | head -c "$1"; }
 lan_ip()      { hostname -I 2>/dev/null | awk '{print $1}'; }
@@ -64,6 +70,10 @@ show_status() {
     # shellcheck disable=SC1091
     . ./.env
     local ip; ip="$(lan_ip)"; ip="${ip:-localhost}"
+    if [ "${BIND_ADDR:-0.0.0.0}" = "127.0.0.1" ]; then
+        ip="localhost"
+        echo "  (Limited to this machine: BIND_ADDR=127.0.0.1 in .env)"
+    fi
     dc ps
     echo
     echo "  Catalogue (public):  http://$ip:$OPAC_PORT"

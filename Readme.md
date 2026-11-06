@@ -427,6 +427,15 @@ Both can be used at the same time — they serve different purposes:
 - **IPP Everywhere support**
 - **PDF printing** via cups-pdf
 
+### Library Catalog (Koha)
+- **Public search terminal** - a self-hosted library catalogue shown as one of the kiosk's pages (duration 0: it stays on screen), so visitors can search by title, author or subject and see whether a book is in
+- **Add books by scanning** - a Quick Add page: scan or type an ISBN and the book is looked up (Library of Congress via Z39.50, then Open Library) and added with the next barcode. Duplicates, "add another copy", manual entry and Undo are built in
+- **Spine labels and barcodes** - Avery 5160/5167 and Demco spine templates, with Dewey call numbers split across lines
+- **Docker is installed for you** if it is missing (`lib/docker.sh`); the stack is deployed from this checkout's `library/` to `/opt/kiosk-library`
+- **Who can reach it** - Addons → Library Catalog → Network access: *this kiosk only* (ports bound to `127.0.0.1`) or *other devices on the network*. Docker bypasses `ufw`, so the bind address, not the firewall, is what limits access
+- **Uninstall keeps your books** unless you also choose to delete the data (typed `DELETE` confirmation); Complete Uninstall removes everything
+- Needs roughly 2 GB RAM and 3 GB disk; the first build takes 5-10 minutes. See [`library/README.md`](library/README.md) for the stack itself, and run `bash tests/addon_library.test.sh` for the add-on's tests
+
 ### Remote Access
 - **VNC** - x11vnc for remote desktop
 - **WireGuard VPN** - Config paste support
@@ -1342,7 +1351,13 @@ This project bundles or installs several open-source components under their resp
 - **Repository:** https://github.com/netbirdio/netbird
 - **Full License:** https://github.com/netbirdio/netbird/blob/main/LICENSE
 
+### Koha (Library Catalog add-on)
+- **License:** GPL-3.0-or-later
+- **Source:** https://koha-community.org
+- **Packages:** installed from the Koha project's own Debian repository (https://debian.koha-community.org) inside a Docker image built on your machine
 
+### MariaDB and Docker (Library Catalog add-on)
+- **MariaDB** - GPL-2.0 (https://mariadb.org); **Docker Engine** - Apache-2.0 (https://www.docker.com)
 
 ---
 

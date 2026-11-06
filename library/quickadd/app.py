@@ -254,6 +254,26 @@ def koha(method, path, body=None, ctype="application/json", headers=None, query=
         raise KohaError(503, str(e))
 
 
+_LOC_CACHE = {"at": 0.0, "value": []}
+
+
+def get_locations():
+    """Shelving locations (Koha authorised-value category LOC), cached for 30 s."""
+    if time.time() - _LOC_CACHE["at"] < 30:
+        return _LOC_CACHE["value"]
+    try:
+        vals = koha("GET", "/authorised_value_categories/LOC/authorised_values") or []
+        _LOC_CACHE["value"] = [{"value": v["value"], "label": v.get("description") or v["value"]} for v in vals]
+        _LOC_CACHE["at"] = time.time()
+    except KohaError:
+        pass
+    return _LOC_CACHE["value"]
+
+
+def valid_location(code):
+    return code if code and any(l["value"] == code for l in get_locations()) else None
+
+
 def find_existing(code):
     variants = {code}
     if len(code) == 13:
@@ -296,7 +316,7 @@ def save_counter(n):
         pass
 
 
-def add_item(biblio_id, itype, callnum):
+def add_item(biblio_id, itype, callnum, location=None):
     """Create an item with the next free barcode (retrying on collisions)."""
     start = next_barcode()
     for attempt in range(10):
@@ -304,7 +324,8 @@ def add_item(biblio_id, itype, callnum):
         try:
             item = koha("POST", "/biblios/%s/items" % biblio_id, {
                 "external_id": bc, "item_type_id": itype, "home_library_id": LIBRARY,
-                "holding_library_id": LIBRARY, "callnumber": callnum or None})
+                "holding_library_id": LIBRARY, "callnumber": callnum or None,
+                "location": location})
             save_counter(start + attempt)
             return item
         except KohaError as e:
@@ -361,6 +382,7 @@ def lookup(code):
 def op_add(payload):
     code = clean_code(payload.get("code"))
     itype = payload.get("type") if payload.get("type") in ITEM_TYPES else "BOOK"
+    location = valid_location(payload.get("location"))
     if not code:
         return 400, {"status": "invalid", "message": "That doesn't look like an ISBN or barcode."}
     with LOCK:
@@ -369,7 +391,7 @@ def op_add(payload):
         return 200, dict(existing, status="duplicate", code=code)
     if existing:                                    # add another copy of a known title
         with LOCK:
-            item = add_item(existing["biblio_id"], itype, None)
+            item = add_item(existing["biblio_id"], itype, None, location)
         entry = entry_for(code, existing["title"], existing["author"], item, existing["biblio_id"], "extra copy")
         remember(entry)
         return 200, dict(entry, status="added")
@@ -383,7 +405,7 @@ def op_add(payload):
     with LOCK:
         bib = koha("POST", "/biblios", ET.tostring(rec, encoding="utf-8"), "application/marcxml+xml",
                    {"x-confirm-not-duplicate": "1"})
-        item = add_item(bib["id"], itype, call_number(rec, info["author"]))
+        item = add_item(bib["id"], itype, call_number(rec, info["author"]), location)
     entry = entry_for(code, info["title"], info["author"], item, bib["id"], source)
     remember(entry)
     return 200, dict(entry, status="added")
@@ -395,13 +417,14 @@ def op_manual(payload):
         return 400, {"status": "invalid", "message": "A title is required."}
     code = clean_code(payload.get("code"))
     itype = payload.get("type") if payload.get("type") in ITEM_TYPES else "BOOK"
+    location = valid_location(payload.get("location"))
     rec = manual_record(code, title[:240], (payload.get("author") or "").strip()[:120],
                         (payload.get("year") or "").strip()[:8], (payload.get("publisher") or "").strip()[:120])
     set_item_type(rec, itype)
     with LOCK:
         bib = koha("POST", "/biblios", ET.tostring(rec, encoding="utf-8"), "application/marcxml+xml",
                    {"x-confirm-not-duplicate": "1"})
-        item = add_item(bib["id"], itype, None)
+        item = add_item(bib["id"], itype, None, location)
     entry = entry_for(code or "", title, payload.get("author") or "", item, bib["id"], "typed in")
     remember(entry)
     return 200, dict(entry, status="added")
@@ -410,7 +433,8 @@ def op_manual(payload):
 def entry_for(code, title, author, item, biblio_id, source):
     return {"time": int(time.time()), "code": code, "title": title, "author": author,
             "barcode": item.get("external_id"), "callnumber": item.get("callnumber") or "",
-            "item_id": item.get("item_id"), "biblio_id": biblio_id, "source": source}
+            "item_id": item.get("item_id"), "biblio_id": biblio_id, "source": source,
+            "location": next((l["label"] for l in get_locations() if l["value"] == item.get("location")), "")}
 
 
 def op_undo(payload):
@@ -488,7 +512,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, INDEX, "text/html; charset=utf-8")
         if path == "/api/state":
             return self._send(200, {"recent": load_recent()[:100], "types": ITEM_TYPES,
-                                    "library": LIBRARY, "staff_port": STAFF_PORT, "opac_port": OPAC_PORT,
+                                    "library": LIBRARY, "locations": get_locations(), "staff_port": STAFF_PORT, "opac_port": OPAC_PORT,
                                     "sources": [s.split(":", 1)[0] if s.startswith("z3950") else s for s in SOURCES]})
         self._send(404, {"error": "not found"})
 
