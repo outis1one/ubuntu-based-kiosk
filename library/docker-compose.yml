@@ -37,6 +37,9 @@ services:
       KOHA_ADMIN_USER: ${ADMIN_USER:-admin}
       KOHA_ADMIN_PASS: ${ADMIN_PASSWORD}
       KOHA_LIBRARY_NAME: ${LIBRARY_NAME:-My Library}
+      KOHA_LIBRARY_CODE: ${LIBRARY_CODE:-HOME}
+      KOHA_SHELVES: ${SHELVES:-}
+      KOHA_ITEM_TYPES: ${ITEM_TYPES:-}
     ports:
       - "${BIND_ADDR:-0.0.0.0}:${OPAC_PORT:-8080}:80"
       - "${BIND_ADDR:-0.0.0.0}:${STAFF_PORT:-8081}:8081"
@@ -58,7 +61,7 @@ services:
       KOHA_API: http://koha:8081/api/v1
       ADMIN_USER: ${ADMIN_USER:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
-      KOHA_LIBRARY: HOME
+      KOHA_LIBRARY: ${LIBRARY_CODE:-HOME}
       OPAC_PORT: ${OPAC_PORT:-8080}
       STAFF_PORT: ${STAFF_PORT:-8081}
       QUICKADD_SOURCES: ${QUICKADD_SOURCES:-z3950:lx2.loc.gov:210/LCDB,openlibrary}

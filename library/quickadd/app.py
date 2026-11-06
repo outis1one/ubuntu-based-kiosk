@@ -13,6 +13,7 @@ import hmac
 import json
 import os
 import re
+import secrets
 import subprocess
 import tempfile
 import threading
@@ -34,12 +35,11 @@ PORT = int(os.environ.get("PORT", "8082"))
 SOURCES = [s.strip() for s in os.environ.get(
     "QUICKADD_SOURCES", "z3950:lx2.loc.gov:210/LCDB,openlibrary").split(",") if s.strip()]
 Z3950_TIMEOUT = int(os.environ.get("Z3950_TIMEOUT", "12"))
-ITEM_TYPES = {"BOOK": "Book", "DVD": "Movie", "CD": "Music", "GAME": "Game", "OTHER": "Other"}
+DEFAULT_TYPES = {"BOOK": "Book", "DVD": "Movie", "CD": "Music", "GAME": "Game", "OTHER": "Other"}
 
 NS = {"m": "http://www.loc.gov/MARC21/slim"}
 ET.register_namespace("", NS["m"])
 RECENT_FILE = os.path.join(DATA_DIR, "recent.json")
-LOCK = threading.Lock()
 
 
 # ---------------------------------------------------------------- identifiers
@@ -254,6 +254,30 @@ def koha(method, path, body=None, ctype="application/json", headers=None, query=
         raise KohaError(503, str(e))
 
 
+_TYPE_CACHE = {"at": 0.0, "value": dict(DEFAULT_TYPES)}
+
+
+def get_item_types():
+    """Item types as Koha has them (so types added at install or later in Koha
+    appear here), cached for 60 s; falls back to the built-in five."""
+    if time.time() - _TYPE_CACHE["at"] < 60:
+        return _TYPE_CACHE["value"]
+    try:
+        vals = koha("GET", "/item_types", query={"_per_page": "100"}) or []
+        found = {v["item_type_id"]: v.get("description") or v["item_type_id"] for v in vals}
+        if found:
+            _TYPE_CACHE["value"] = found
+        _TYPE_CACHE["at"] = time.time()
+    except KohaError:
+        pass
+    return _TYPE_CACHE["value"]
+
+
+def valid_type(code):
+    types = get_item_types()
+    return code if code in types else ("BOOK" if "BOOK" in types else next(iter(types)))
+
+
 _LOC_CACHE = {"at": 0.0, "value": []}
 
 
@@ -293,41 +317,109 @@ def find_existing(code):
     return None
 
 
-def next_barcode():
-    last = koha("GET", "/items", query={"_per_page": "1", "_order_by": "-item_id"})
-    n = 0
-    if last and re.fullmatch(r"\d+", last[0].get("external_id") or ""):
-        n = int(last[0]["external_id"])
-    return max(n, state_counter()) + 1
+# ------------------------------------------------------------------- settings
+SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
+COUNTER_FILE = os.path.join(DATA_DIR, "counter.json")
+MIN_WIDTH, MAX_WIDTH = 7, 10     # 6 all-digit Code 39 symbols can be misread as Code 32 by some scanners
+DEFAULT_SETTINGS = {"barcode_mode": "auto", "width": MIN_WIDTH, "location": ""}
+BARCODE_MODES = ("auto", "scan", "none")
+LOCK = threading.RLock()
 
 
-def state_counter():
+def load_settings():
+    s = dict(DEFAULT_SETTINGS)
     try:
-        return int(open(os.path.join(DATA_DIR, "barcode")).read())
+        s.update(json.load(open(SETTINGS_FILE)))
     except (OSError, ValueError):
-        return 0
-
-
-def save_counter(n):
-    try:
-        os.makedirs(DATA_DIR, exist_ok=True)
-        open(os.path.join(DATA_DIR, "barcode"), "w").write(str(n))
-    except OSError:
         pass
+    try:
+        s["width"] = min(max(int(s["width"]), MIN_WIDTH), MAX_WIDTH)
+    except (TypeError, ValueError):
+        s["width"] = MIN_WIDTH
+    return s
 
 
-def add_item(biblio_id, itype, callnum, location=None):
-    """Create an item with the next free barcode (retrying on collisions)."""
-    start = next_barcode()
-    for attempt in range(10):
-        bc = str(start + attempt)
+def save_json(path, data):
+    os.makedirs(DATA_DIR, exist_ok=True)
+    tmp = path + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(data, f)
+    os.replace(tmp, path)
+
+
+def clean_settings(payload, current):
+    s = dict(current)
+    if payload.get("barcode_mode") in BARCODE_MODES:
+        s["barcode_mode"] = payload["barcode_mode"]
+    if "width" in payload:
         try:
-            item = koha("POST", "/biblios/%s/items" % biblio_id, {
-                "external_id": bc, "item_type_id": itype, "home_library_id": LIBRARY,
-                "holding_library_id": LIBRARY, "callnumber": callnum or None,
-                "location": location})
-            save_counter(start + attempt)
-            return item
+            s["width"] = min(max(int(payload["width"]), MIN_WIDTH), MAX_WIDTH)
+        except (TypeError, ValueError):
+            pass
+    if "location" in payload:
+        loc = payload["location"] or ""
+        if loc == "" or valid_location(loc):
+            s["location"] = loc
+    return s
+
+
+# ------------------------------------------------------------------ barcodes
+# Fixed-width digits ("000042"): Koha's "Print barcode range" needs both ends
+# the same length, and it cannot take a prefix, so neither is offered.
+def fmt_barcode(n, s):
+    return "%0*d" % (s["width"], n)
+
+
+def scan_max():
+    """Highest all-digit barcode already in Koha (paged; only when needed)."""
+    mx, page = 0, 1
+    while True:
+        items = koha("GET", "/items", query={"_per_page": "100", "_page": str(page), "_order_by": "item_id"}) or []
+        for it in items:
+            bc = it.get("external_id") or ""
+            if bc.isdigit():
+                mx = max(mx, int(bc))
+        if len(items) < 100:
+            return mx
+        page += 1
+
+
+def read_counter():
+    try:
+        return int(json.load(open(COUNTER_FILE))["n"])
+    except (OSError, ValueError, KeyError, TypeError):
+        n = scan_max()               # first use (or lost state): start after what exists
+        save_json(COUNTER_FILE, {"n": n})
+        return n
+
+
+def peek_next():
+    with LOCK:
+        return read_counter() + 1
+
+
+def reserve(count):
+    """Reserve `count` consecutive numbers and return the first. Reserved
+    numbers are never handed out again - a label may already be printed."""
+    with LOCK:
+        n = read_counter()
+        save_json(COUNTER_FILE, {"n": n + count})
+        return n + 1
+
+
+def add_item(biblio_id, itype, callnum, location, mode, scanned=None):
+    s = load_settings()
+    base = {"item_type_id": itype, "home_library_id": LIBRARY, "holding_library_id": LIBRARY,
+            "callnumber": callnum or None, "location": location or None}
+    path = "/biblios/%s/items" % biblio_id
+    if mode == "none":
+        return koha("POST", path, base)
+    if mode == "scan":
+        return koha("POST", path, dict(base, external_id=scanned))
+    for _ in range(25):
+        bc = fmt_barcode(reserve(1), s)
+        try:
+            return koha("POST", path, dict(base, external_id=bc))
         except KohaError as e:
             if e.status == 409 or "Duplicate" in e.body:
                 continue
@@ -348,8 +440,7 @@ def remember(entry):
         rec = load_recent()
         rec.insert(0, entry)
         try:
-            os.makedirs(DATA_DIR, exist_ok=True)
-            json.dump(rec[:300], open(RECENT_FILE, "w"))
+            save_json(RECENT_FILE, rec[:300])
         except OSError:
             pass
 
@@ -358,7 +449,7 @@ def forget(item_id):
     with LOCK:
         rec = [r for r in load_recent() if r.get("item_id") != item_id]
         try:
-            json.dump(rec, open(RECENT_FILE, "w"))
+            save_json(RECENT_FILE, rec)
         except OSError:
             pass
 
@@ -379,36 +470,92 @@ def lookup(code):
     return None, None
 
 
-def op_add(payload):
+PENDING = {}            # token -> (expires, plan): waiting for a scanned sticker
+PENDING_TTL = 1800
+
+
+def prune_pending():
+    now = time.time()
+    for k in [k for k, (exp, _) in PENDING.items() if exp < now]:
+        del PENDING[k]
+
+
+def chosen_location(payload):
+    """The shelf for this add: an explicit choice wins, else the saved default."""
+    if "location" in payload:
+        return valid_location(payload.get("location"))
+    return valid_location(load_settings().get("location"))
+
+
+def make_plan(payload):
+    """Look the code up. Returns ("done", http_status, body) or ("plan", plan)."""
     code = clean_code(payload.get("code"))
-    itype = payload.get("type") if payload.get("type") in ITEM_TYPES else "BOOK"
-    location = valid_location(payload.get("location"))
+    itype = valid_type(payload.get("type"))
     if not code:
-        return 400, {"status": "invalid", "message": "That doesn't look like an ISBN or barcode."}
+        return "done", 400, {"status": "invalid", "message": "That doesn't look like an ISBN or barcode."}
+    location = chosen_location(payload)
     with LOCK:
         existing = find_existing(code)
     if existing and not payload.get("copy"):
-        return 200, dict(existing, status="duplicate", code=code)
-    if existing:                                    # add another copy of a known title
-        with LOCK:
-            item = add_item(existing["biblio_id"], itype, None, location)
-        entry = entry_for(code, existing["title"], existing["author"], item, existing["biblio_id"], "extra copy")
-        remember(entry)
-        return 200, dict(entry, status="added")
+        return "done", 200, dict(existing, status="duplicate", code=code)
+    if existing:
+        return "plan", {"code": code, "itype": itype, "location": location, "existing": existing,
+                        "xml": None, "title": existing["title"], "author": existing["author"],
+                        "callnum": None, "source": "extra copy"}
     xml, source = lookup(code)
     if not xml:
-        return 200, {"status": "notfound", "code": code}
+        return "done", 200, {"status": "notfound", "code": code}
     rec = parse_marc(xml)
     info = describe(rec)
     ensure_identifier(rec, code)
     set_item_type(rec, itype)
+    return "plan", {"code": code, "itype": itype, "location": location, "existing": None,
+                    "xml": ET.tostring(rec, encoding="utf-8"), "title": info["title"], "author": info["author"],
+                    "callnum": call_number(rec, info["author"]), "source": source}
+
+
+def commit(plan, scanned=None):
+    mode = load_settings()["barcode_mode"]
     with LOCK:
-        bib = koha("POST", "/biblios", ET.tostring(rec, encoding="utf-8"), "application/marcxml+xml",
-                   {"x-confirm-not-duplicate": "1"})
-        item = add_item(bib["id"], itype, call_number(rec, info["author"]), location)
-    entry = entry_for(code, info["title"], info["author"], item, bib["id"], source)
+        created = None
+        if plan["existing"]:
+            biblio_id = plan["existing"]["biblio_id"]
+        else:
+            bib = koha("POST", "/biblios", plan["xml"], "application/marcxml+xml", {"x-confirm-not-duplicate": "1"})
+            biblio_id = created = bib["id"]
+        try:
+            item = add_item(biblio_id, plan["itype"], plan["callnum"], plan["location"], mode, scanned)
+        except KohaError:
+            if created:                       # don't leave an item-less record behind
+                try:
+                    koha("DELETE", "/biblios/%s" % created)
+                except KohaError:
+                    pass
+            raise
+    entry = entry_for(plan["code"], plan["title"], plan["author"], item, biblio_id, plan["source"])
     remember(entry)
-    return 200, dict(entry, status="added")
+    return dict(entry, status="added")
+
+
+def need_barcode(plan):
+    token = secrets.token_urlsafe(12)
+    prune_pending()
+    PENDING[token] = (time.time() + PENDING_TTL, plan)
+    return 200, {"status": "need_barcode", "token": token, "code": plan["code"],
+                 "title": plan["title"], "author": plan["author"]}
+
+
+def finish_or_ask(plan):
+    if load_settings()["barcode_mode"] == "scan":
+        return need_barcode(plan)
+    return 200, commit(plan)
+
+
+def op_add(payload):
+    kind, *rest = make_plan(payload)
+    if kind == "done":
+        return rest[0], rest[1]
+    return finish_or_ask(rest[0])
 
 
 def op_manual(payload):
@@ -416,18 +563,42 @@ def op_manual(payload):
     if not title:
         return 400, {"status": "invalid", "message": "A title is required."}
     code = clean_code(payload.get("code"))
-    itype = payload.get("type") if payload.get("type") in ITEM_TYPES else "BOOK"
-    location = valid_location(payload.get("location"))
+    itype = valid_type(payload.get("type"))
     rec = manual_record(code, title[:240], (payload.get("author") or "").strip()[:120],
                         (payload.get("year") or "").strip()[:8], (payload.get("publisher") or "").strip()[:120])
     set_item_type(rec, itype)
-    with LOCK:
-        bib = koha("POST", "/biblios", ET.tostring(rec, encoding="utf-8"), "application/marcxml+xml",
-                   {"x-confirm-not-duplicate": "1"})
-        item = add_item(bib["id"], itype, None, location)
-    entry = entry_for(code or "", title, payload.get("author") or "", item, bib["id"], "typed in")
-    remember(entry)
-    return 200, dict(entry, status="added")
+    plan = {"code": code or "", "itype": itype, "location": chosen_location(payload), "existing": None,
+            "xml": ET.tostring(rec, encoding="utf-8"), "title": title, "author": (payload.get("author") or "").strip(),
+            "callnum": None, "source": "typed in"}
+    return finish_or_ask(plan)
+
+
+STICKER_RE = re.compile(r"[A-Za-z0-9.$/+% -]{1,32}")
+
+
+def op_finish(payload):
+    """Second step of 'scan a pre-printed sticker' mode."""
+    token = payload.get("token")
+    barcode = (payload.get("barcode") or "").strip()
+    prune_pending()
+    entry = PENDING.get(token)
+    if not entry:
+        return 200, {"status": "error", "message": "That one timed out - scan the ISBN again."}
+    if not STICKER_RE.fullmatch(barcode):
+        return 200, {"status": "barcode_invalid", "token": token, "message": "That barcode has characters Koha can't use."}
+    try:
+        result = commit(entry[1], barcode)
+    except KohaError as e:
+        if e.status == 409 or "Duplicate" in e.body:
+            return 200, {"status": "barcode_taken", "token": token, "barcode": barcode}
+        raise
+    PENDING.pop(token, None)
+    return 200, result
+
+
+def op_cancel(payload):
+    PENDING.pop(payload.get("token"), None)
+    return 200, {"status": "cancelled"}
 
 
 def entry_for(code, title, author, item, biblio_id, source):
@@ -454,6 +625,65 @@ def op_undo(payload):
     return 200, {"status": "undone"}
 
 
+# ----------------------------------------------------------- settings / tools
+def items_without_barcode():
+    found, page = [], 1
+    while len(found) < 5000:
+        chunk = koha("GET", "/items", query={"q": json.dumps({"external_id": None}), "_per_page": "100",
+                                              "_page": str(page), "_order_by": "item_id"}) or []
+        found += chunk
+        if len(chunk) < 100:
+            break
+        page += 1
+    return found
+
+
+def settings_view():
+    s = load_settings()
+    try:
+        missing = len(items_without_barcode())
+    except KohaError:
+        missing = None
+    return {"settings": s, "next": fmt_barcode(peek_next(), s) if s["barcode_mode"] == "auto" else None,
+            "without_barcode": missing, "locations": get_locations()}
+
+
+def op_settings(payload):
+    with LOCK:
+        s = clean_settings(payload, load_settings())
+        save_json(SETTINGS_FILE, s)
+    return 200, settings_view()
+
+
+def op_reserve(payload):
+    try:
+        count = int(payload.get("count"))
+    except (TypeError, ValueError):
+        count = 0
+    if not 1 <= count <= 2000:
+        return 400, {"status": "invalid", "message": "Choose between 1 and 2000."}
+    s = load_settings()
+    first = reserve(count)
+    return 200, {"status": "reserved", "count": count, "first": fmt_barcode(first, s),
+                 "last": fmt_barcode(first + count - 1, s)}
+
+
+def op_assign(payload):
+    """Give a barcode to every item that has none."""
+    s = load_settings()
+    with LOCK:
+        items = items_without_barcode()
+        if not items:
+            return 200, {"status": "assigned", "count": 0}
+        first = reserve(len(items))
+        for i, it in enumerate(items):
+            koha("PUT", "/biblios/%s/items/%s" % (it["biblio_id"], it["item_id"]), {
+                "external_id": fmt_barcode(first + i, s), "item_type_id": it["item_type_id"],
+                "home_library_id": it["home_library_id"], "holding_library_id": it["holding_library_id"]})
+    return 200, {"status": "assigned", "count": len(items), "first": fmt_barcode(first, s),
+                 "last": fmt_barcode(first + len(items) - 1, s)}
+
+
 # ----------------------------------------------------------------------- HTTP
 INDEX = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html"), "rb").read()
 
@@ -474,7 +704,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("X-Content-Type-Options", "nosniff")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Content-Security-Policy",
-                         "default-src 'self'; img-src 'self' https://covers.openlibrary.org data:; "
+                         "default-src 'self'; img-src 'self' https: data:; "
                          "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'")
         for k, v in (extra or {}).items():
             self.send_header(k, v)
@@ -511,9 +741,11 @@ class Handler(BaseHTTPRequestHandler):
         if path == "/":
             return self._send(200, INDEX, "text/html; charset=utf-8")
         if path == "/api/state":
-            return self._send(200, {"recent": load_recent()[:100], "types": ITEM_TYPES,
-                                    "library": LIBRARY, "locations": get_locations(), "staff_port": STAFF_PORT, "opac_port": OPAC_PORT,
+            return self._send(200, {"recent": load_recent()[:100], "types": get_item_types(),
+                                    "library": LIBRARY, "locations": get_locations(), "settings": load_settings(), "staff_port": STAFF_PORT, "opac_port": OPAC_PORT,
                                     "sources": [s.split(":", 1)[0] if s.startswith("z3950") else s for s in SOURCES]})
+        if path == "/api/settings":
+            return self._send(200, settings_view())
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
@@ -524,7 +756,9 @@ class Handler(BaseHTTPRequestHandler):
             if length > 20000:
                 return self._send(413, {"error": "too large"})
             payload = json.loads(self.rfile.read(length) or b"{}")
-            ops = {"/api/add": op_add, "/api/manual": op_manual, "/api/undo": op_undo}
+            ops = {"/api/add": op_add, "/api/manual": op_manual, "/api/undo": op_undo,
+                   "/api/finish": op_finish, "/api/cancel": op_cancel, "/api/settings": op_settings,
+                   "/api/barcodes/reserve": op_reserve, "/api/barcodes/assign": op_assign}
             fn = ops.get(self.path)
             if not fn:
                 return self._send(404, {"error": "not found"})

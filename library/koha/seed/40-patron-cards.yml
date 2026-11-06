@@ -1,0 +1,52 @@
+---
+description:
+  - "Library card sheet and layout for Tools > Patron card creator"
+tables:
+  - creator_templates:
+      translatable: [ template_desc ]
+      multiline: [ ]
+      rows:
+        # Avery 5371 / 8871 business-card sheet: 10 cards, 2 across x 5 down.
+        - template_code: "Avery 5371 | 2 x 3-1/2 (10 per sheet)"
+          template_desc: "Library cards: 2 columns, 5 rows."
+          page_width: 8.5
+          page_height: 11
+          label_width: 3.5
+          label_height: 2
+          top_text_margin: 0
+          left_text_margin: 0
+          top_margin: 0.5
+          left_margin: 0.75
+          cols: 2
+          rows: 5
+          col_gap: 0
+          row_gap: 0
+          units: "INCH"
+          creator: "Patroncards"
+
+  - creator_layouts:
+      translatable: [ layout_name, layout_xml ]
+      multiline: [ layout_xml ]
+      rows:
+        # Name and library at the top, card number as a scannable barcode.
+        - layout_name: "Library card"
+          barcode_type: CODE39
+          start_label: 1
+          printing_type: BAR
+          guidebox: 0
+          oblique_title: 0
+          font: TR
+          font_size: 10
+          units: POINT
+          callnum_split: 0
+          text_justify: L
+          format_string: "barcode"
+          layout_xml:
+            - "<opt page_side=\"F\" units=\"POINT\">"
+            - "  <text>&lt;firstname&gt; &lt;surname&gt;</text>"
+            - "  <text enable=\"1\" font=\"TB\" font_size=\"14\" llx=\"14\" lly=\"118\" text_alignment=\"L\" />"
+            - "  <text>Library card</text>"
+            - "  <text enable=\"1\" font=\"TR\" font_size=\"9\" llx=\"14\" lly=\"100\" text_alignment=\"L\" />"
+            - "  <barcode print=\"1\" type=\"CODE39\" llx=\"14\" lly=\"30\" height_scale=\"0.012\" width_scale=\"0.6\" text_print=\"1\" />"
+            - "</opt>"
+          creator: "Patroncards"

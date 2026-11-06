@@ -81,7 +81,8 @@ if [ "$TABLES" = "0" ]; then
     runuser -u "$INST-koha" -- env \
         KOHA_CONF="/etc/koha/sites/$INST/koha-conf.xml" PERL5LIB=/usr/share/koha/lib \
         KOHA_ADMIN_USER="${KOHA_ADMIN_USER:-admin}" KOHA_ADMIN_PASS="$KOHA_ADMIN_PASS" \
-        KOHA_LIBRARY_NAME="${KOHA_LIBRARY_NAME:-My Library}" TZ="$TZ" \
+        KOHA_LIBRARY_NAME="${KOHA_LIBRARY_NAME:-My Library}" KOHA_LIBRARY_CODE="${KOHA_LIBRARY_CODE:-HOME}" \
+        KOHA_SHELVES="${KOHA_SHELVES:-}" KOHA_ITEM_TYPES="${KOHA_ITEM_TYPES:-}" TZ="$TZ" \
         perl /opt/koha-init/bootstrap.pl
     TABLES=$(mariadb -N -h "$DB_HOST" -u "$DB_USER" -p"$KOHA_DB_PASS" "$DB_NAME" \
         -e "select count(*) from information_schema.tables where table_schema='$DB_NAME'")

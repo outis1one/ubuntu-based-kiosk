@@ -11,6 +11,9 @@ use Koha;
 use Koha::Libraries;
 use Koha::Patrons;
 use Koha::Patron::Categories;
+use Koha::CirculationRules;
+use Koha::ItemTypes;
+use Koha::AuthorisedValues;
 
 $| = 1;
 my $seed_dir = $ENV{KOHA_SEED_DIR} || '/opt/koha-init/seed';
@@ -20,6 +23,7 @@ my %env = (
     admin_user => $ENV{KOHA_ADMIN_USER} || 'admin',
     admin_pass => $admin_pass,
     library    => $ENV{KOHA_LIBRARY_NAME} || 'My Library',
+    code       => uc( ( $ENV{KOHA_LIBRARY_CODE} || 'HOME' ) =~ s/[^A-Za-z0-9]//gr ) || 'HOME',
 );
 
 my $installer = C4::Installer->new();
@@ -74,8 +78,8 @@ for my $y (sort glob("$seed_dir/*.yml")) {
 
 # ---- Library, patron categories, owner account ----------------------------
 Koha::Library->new({
-    branchcode => 'HOME', branchname => $env{library},
-})->store unless Koha::Libraries->find('HOME');
+    branchcode => $env{code}, branchname => $env{library},
+})->store unless Koha::Libraries->find( $env{code} );
 
 for my $c ( [ 'OWNER', 'Owner / librarian', 'S' ], [ 'FRIEND', 'Friend / borrower', 'A' ] ) {
     Koha::Patron::Category->new({
@@ -85,8 +89,8 @@ for my $c ( [ 'OWNER', 'Owner / librarian', 'S' ], [ 'FRIEND', 'Friend / borrowe
 }
 
 my $admin = Koha::Patron->new({
-    cardnumber => 'ADMIN', surname => 'Librarian', userid => $env{admin_user},
-    branchcode => 'HOME', categorycode => 'OWNER', flags => 1,   # 1 = superlibrarian
+    cardnumber => '1000000', surname => 'Librarian', userid => $env{admin_user},
+    branchcode => $env{code}, categorycode => 'OWNER', flags => 1,   # 1 = superlibrarian
 })->store;
 $admin->set_password({ password => $env{admin_pass}, skip_validation => 1 });
 
@@ -102,9 +106,58 @@ $dbh->do(q{UPDATE marc_subfield_structure SET defaultvalue = 'BOOK'
 $dbh->do(q{UPDATE marc_subfield_structure SET kohafield = 'biblioitems.ean'
            WHERE tagfield = '024' AND tagsubfield = 'a' AND (kohafield IS NULL OR kohafield = '')});
 
+# ---- Extra item types and shelves chosen at install time -------------------
+# KOHA_ITEM_TYPES / KOHA_SHELVES: "CODE=Description;CODE=Description". Koha has no
+# API for adding shelves later, so they are declared here (more can be added in
+# Administration -> Authorized values -> LOC).
+sub pairs {
+    my ($raw) = @_;
+    return map { my ( $c, $d ) = split /=/, $_, 2; $c =~ s/[^A-Za-z0-9_]//g; ( uc $c, ( $d // $c ) =~ s/^\s+|\s+$//gr ) }
+        grep { /\S/ } split /;/, ( $raw // '' );
+}
+{
+    my @t = pairs( $ENV{KOHA_ITEM_TYPES} );
+    while ( my ( $c, $d ) = splice @t, 0, 2 ) {
+        next unless length $c;
+        Koha::ItemType->new( { itemtype => substr( $c, 0, 10 ), description => $d } )->store
+            unless Koha::ItemTypes->find( substr( $c, 0, 10 ) );
+    }
+    my @s = pairs( $ENV{KOHA_SHELVES} );
+    while ( my ( $c, $d ) = splice @s, 0, 2 ) {
+        next unless length $c;
+        Koha::AuthorisedValue->new( { category => 'LOC', authorised_value => substr( $c, 0, 80 ), lib => $d, lib_opac => $d } )->store
+            unless Koha::AuthorisedValues->search( { category => 'LOC', authorised_value => substr( $c, 0, 80 ) } )->count;
+    }
+}
+
+# ---- Lending rules --------------------------------------------------------
+# A fresh Koha refuses every checkout ("No circulation rule is defined for this
+# patron and itemtype combination") until a default rule exists. One catch-all
+# rule for a home library: 3 weeks, 25 items, 3 renewals, no fines.
+Koha::CirculationRules->set_rules({
+    branchcode => undef, categorycode => undef, itemtype => undef,
+    rules => {
+        issuelength => 21, lengthunit => 'days', maxissueqty => 25, maxonsiteissueqty => '',
+        renewalsallowed => 3, renewalperiod => 21, norenewalbefore => '', noautorenewalbefore => '',
+        auto_renew => 0, no_auto_renewal_after => '', no_auto_renewal_after_hard_limit => '',
+        unseen_renewals_allowed => '',
+        fine => 0, finedays => 0, firstremind => 0, chargeperiod => 0, chargeperiod_charge_at => 0,
+        overduefinescap => '', cap_fine_to_replacement_price => 0, rentaldiscount => 0,
+        maxsuspensiondays => '', suspension_chargeperiod => 1,
+        hardduedate => '', hardduedatecompare => -1,
+        reservesallowed => 5, holds_per_record => 1, holds_per_day => '', onshelfholds => 1,
+        opacitemholds => 'N', decreaseloanholds => '', article_requests => 'no',
+        recalls_allowed => undef, recalls_per_record => undef, on_shelf_recalls => undef,
+        recall_due_date_interval => undef, recall_overdue_fine => undef,
+        recall_shelf_time => undef, holds_pickup_period => undef,
+    },
+});
+
 # ---- Preferences ----------------------------------------------------------
 my %prefs = (
-    autoBarcode              => 'incremental',  # new items get a barcode automatically
+    autoBarcode              => 'OFF',          # barcodes are assigned by Quick Add (zero-padded, or none/scanned on request)
+    autoMemberNum            => 1,              # new patrons get the next library-card number automatically
+    finesMode                => 'off',          # a home library does not charge overdue fines
     itemcallnumber           => '082ab',        # Dewey call number copied from the MARC record
     RESTBasicAuth            => 1,              # lets the quick-add page use the REST API
     OpenLibraryCovers        => 1,              # cover images in the catalogue
