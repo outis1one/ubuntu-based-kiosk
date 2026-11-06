@@ -18,7 +18,7 @@
 #      ~/ubuntu-based-kiosk - interactively by default (same prompts as a
 #      manual install), or with --unattended taking every default and
 #      rebooting straight into the kiosk. Configure sites afterwards via
-#      the Web UI (http://<ip>:8090) or ./install.sh.
+#      the Web UI (http://<ip>:8888) or ./install.sh.
 #
 # Nothing in the original ISO is changed except /boot/grub/grub.cfg
 # (menu title, plus the `autoinstall` kernel argument with --no-confirm);

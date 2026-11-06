@@ -91,7 +91,7 @@ Useful options (`iso/build-iso.sh --help` for all):
 
 | Option | Effect |
 |---|---|
-| `--unattended` | First-boot install takes every default with no prompts (skips the Core Settings menu) and reboots into the kiosk. Set sites afterwards in the Web UI (`http://<ip>:8090`) or `./install.sh`. |
+| `--unattended` | First-boot install takes every default with no prompts (skips the Core Settings menu) and reboots into the kiosk. Set sites afterwards in the Web UI (`http://<ip>:8888`) or `./install.sh`. |
 | `--username NAME [--password PASS]` | Pre-set the admin account (password is prompted for if omitted; only a hash goes on the ISO). Not `kiosk`. |
 | `--hostname`, `--ssh-key FILE`, `--locale`, `--keyboard` | Pre-set those. |
 | `--auto-network` / `--auto-storage` | Skip the network screen (DHCP on ethernet) / wipe the largest disk without asking. |
@@ -1585,7 +1585,7 @@ full migration pass.
 - **Fix:** the CUPS menu could report an installed CUPS as "not installed" (`dpkg -l | grep -q` failing under `set -o pipefail`).
 
 **Previous (v2.17.0):**
-- **Web UI now installs by default** during first-time provisioning (fixed port 8090, no prompt) instead of being opt-in — the Addons menu entry still works standalone for reconfiguring the port or reinstalling it on a kiosk provisioned before this change.
+- **Web UI now installs by default** during first-time provisioning (port 8888 for new installs, 8090 on older ones; no prompt) instead of being opt-in — the Addons menu entry still works standalone for reconfiguring the port or reinstalling it on a kiosk provisioned before this change.
 - **The web UI can now install/reconfigure CUPS Printing, LMS Server, Squeezelite Player, and Asterisk Intercom, and check for updates** — the same four addons plus Update named directly. Every one of these is the exact same interactive `action_*` function the terminal menu already uses (no prompt/mutation refactor of any addon file), driven by piping the right answers on stdin — the same technique this project's own bash tests already use to drive these functions.
 - **Privilege model:** the web service itself still runs as `$KIOSK_USER` with zero ambient `sudo`. A new narrow, allow-listed root helper is the only way it ever gains privilege — reachable only via a single-path passwordless sudo rule (generated and validated with `visudo -c -f` before being installed), and it re-checks its own fixed action allow-list before dispatching anything. Chosen over running the whole service as root after asking directly: since this repo has no login of its own by design, a request that reaches the web UI with no reverse proxy in front is effectively unauthenticated, so the allow-list bounds what that can actually do to five vetted actions, never a root shell.
 - Long-running installs stream live output to the browser via Server-Sent Events, one action at a time — a second request while one is in flight gets a clear `409`, never silently queued or dropped.

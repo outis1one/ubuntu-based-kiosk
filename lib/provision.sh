@@ -328,7 +328,7 @@ provision_configure_webui() {
         return 0
     fi
 
-    local port="8090"
+    local port="8888"
     webui_write_env_file "$port"
     webui_write_unit_file
     webui_write_helper_script

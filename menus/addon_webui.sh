@@ -59,9 +59,9 @@ webui_is_active() {
 
 webui_port() {
     if sudo test -f "$WEBUI_ENV_DIR/webui.env" 2>/dev/null; then
-        sudo grep -oP '^PORT=\K.*' "$WEBUI_ENV_DIR/webui.env" 2>/dev/null || echo "8090"
+        sudo grep -oP '^PORT=\K.*' "$WEBUI_ENV_DIR/webui.env" 2>/dev/null || echo "8888"
     else
-        echo "8090"
+        echo "8888"
     fi
 }
 
@@ -281,7 +281,7 @@ action_webui_install() {
     ask_yes_no "Install the Web UI?" "n" || { echo "Cancelled"; return; }
 
     local port
-    port=$(ask_integer "Port to listen on" "8090" 1024 65535)
+    port=$(ask_integer "Port to listen on" "8888" 1024 65535)
 
     echo "Installing app files and npm dependencies..."
     if ! webui_install_app_files; then
@@ -321,6 +321,8 @@ action_webui_reconfigure() {
     webui_write_env_file "$port"
     sudo systemctl restart kiosk-webui
     sudo ufw allow "${port}/tcp" comment 'Kiosk Web UI' 2>/dev/null || true
+    # The old port is no longer used - close it.
+    sudo ufw delete allow "${current_port}/tcp" 2>/dev/null || true
     log_success "Web UI now listening on port ${port}"
 }
 

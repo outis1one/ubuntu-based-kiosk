@@ -666,6 +666,16 @@ window.addEventListener('DOMContentLoaded',()=>{
       ipcRenderer.send('power-action','reload');
     });
 
+    // Only offered when password protection is on (set in showPowerMenu).
+    const lockBtn=document.createElement('button');
+    lockBtn.id='power-menu-lock';
+    lockBtn.textContent='🔒 Lock now';
+    lockBtn.style.cssText=btnStyle+'background:#8e44ad;color:white;display:none;';
+    lockBtn.addEventListener('click',()=>{
+      hidePowerMenu();
+      ipcRenderer.send('power-action','lock');
+    });
+
     const cancelBtn=document.createElement('button');
     cancelBtn.textContent='Cancel';
     cancelBtn.style.cssText=btnStyle+'background:#7f8c8d;color:white;';
@@ -673,6 +683,7 @@ window.addEventListener('DOMContentLoaded',()=>{
       hidePowerMenu();
     });
 
+    buttonsDiv.appendChild(lockBtn);
     buttonsDiv.appendChild(shutdownBtn);
     buttonsDiv.appendChild(restartBtn);
     buttonsDiv.appendChild(reloadBtn);
@@ -708,6 +719,8 @@ window.addEventListener('DOMContentLoaded',()=>{
         }
         infoDiv.innerHTML=infoText;
       }
+      const lockBtn=document.getElementById('power-menu-lock');
+      if(lockBtn)lockBtn.style.display=(info&&info.canLock)?'':'none';
 
       powerMenu.style.display='flex';
       powerMenuVisible=true;

@@ -294,7 +294,7 @@ app.put('/api/region', (req, res) => {
     runRegionHelper('region-set', input, res);
 });
 
-const PORT = process.env.PORT || 8090;
+const PORT = process.env.PORT || 8888;
 const BIND_ADDR = process.env.BIND_ADDR || '0.0.0.0';
 
 if (require.main === module) {
