@@ -1,0 +1,13 @@
+---
+description:
+  - "Item types for a home library: books, movies, music, games"
+tables:
+  - itemtypes:
+      translatable: [ description ]
+      multiline: []
+      rows:
+        - { itemtype: BOOK,  description: "Book",         rentalcharge: 0, notforloan: 0, imageurl: "bridge/book.png",  summary: "" }
+        - { itemtype: DVD,   description: "Movie (DVD/Blu-ray)", rentalcharge: 0, notforloan: 0, imageurl: "bridge/dvd.png",   summary: "" }
+        - { itemtype: CD,    description: "Music (CD/vinyl)",    rentalcharge: 0, notforloan: 0, imageurl: "bridge/sound.png", summary: "" }
+        - { itemtype: GAME,  description: "Game",         rentalcharge: 0, notforloan: 0, imageurl: "bridge/computer_file.png", summary: "" }
+        - { itemtype: OTHER, description: "Other",        rentalcharge: 0, notforloan: 0, imageurl: "bridge/kit.png",   summary: "" }

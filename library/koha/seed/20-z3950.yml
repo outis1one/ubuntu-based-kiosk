@@ -1,0 +1,9 @@
+---
+description:
+  - "Public Z39.50 servers used by Cataloging > Z39.50/SRU search"
+tables:
+  - z3950servers:
+      translatable: [ servername ]
+      multiline: []
+      rows:
+        - { host: "lx2.loc.gov", port: 210, db: LCDB, userid: "", password: "", servername: "LIBRARY OF CONGRESS", checked: 1, rank: 1, syntax: USMARC, encoding: utf8, recordtype: biblio }
