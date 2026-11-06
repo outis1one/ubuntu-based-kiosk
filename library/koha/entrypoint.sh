@@ -45,16 +45,21 @@ if [ ! -d "/etc/koha/sites/$INST" ]; then
 
     # Serve both interfaces through Plack (much faster than plain CGI).
     SITE="/etc/apache2/sites-available/$INST.conf"
+    # The *-plack.conf files add the proxy rules on top of the plain ones (which
+    # still provide static files and rewrites), so enable them in addition.
     sed -i \
-        -e 's|^\(\s*\)Include /etc/koha/apache-shared-opac.conf|\1Include /etc/koha/apache-shared-opac-plack.conf|' \
-        -e 's|^\(\s*\)Include /etc/koha/apache-shared-intranet.conf|\1Include /etc/koha/apache-shared-intranet-plack.conf|' \
-        -e 's|^#\s*Include /etc/koha/apache-shared-opac-plack.conf||' \
-        -e 's|^#\s*Include /etc/koha/apache-shared-intranet-plack.conf||' "$SITE"
+        -e 's|^#\s*Include /etc/koha/apache-shared-opac-plack.conf|   Include /etc/koha/apache-shared-opac-plack.conf|' \
+        -e 's|^#\s*Include /etc/koha/apache-shared-intranet-plack.conf|   Include /etc/koha/apache-shared-intranet-plack.conf|' "$SITE"
     koha-plack --enable "$INST" >/dev/null 2>&1 || true   # koha-create may already have enabled it
 
     # Run Apache itself as the instance user instead of mpm_itk's per-vhost
     # uid switching (which needs extra capabilities and is pointless here:
     # Plack does the real work as that user already).
+    # koha-create insists on mpm_itk being enabled, but inside a container it can
+    # not switch users (initgroups: Operation not permitted -> HTTP 500 on every
+    # page). Now that the instance exists, swap to plain prefork.
+    rm -f /etc/apache2/mods-enabled/mpm_itk.*
+    a2enmod mpm_prefork >/dev/null 2>&1 || true
     sed -i '/AssignUserID/d' "$SITE"
     sed -i -e "s/^export APACHE_RUN_USER=.*/export APACHE_RUN_USER=$INST-koha/" \
            -e "s/^export APACHE_RUN_GROUP=.*/export APACHE_RUN_GROUP=$INST-koha/" /etc/apache2/envvars

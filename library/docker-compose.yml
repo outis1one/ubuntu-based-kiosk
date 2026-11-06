@@ -37,10 +37,6 @@ services:
       KOHA_ADMIN_USER: ${ADMIN_USER:-admin}
       KOHA_ADMIN_PASS: ${ADMIN_PASSWORD}
       KOHA_LIBRARY_NAME: ${LIBRARY_NAME:-My Library}
-    # Koha's Apache uses mpm_itk, which switches users per request.
-    cap_add:
-      - SETUID
-      - SETGID
     ports:
       - "${OPAC_PORT:-8080}:80"
       - "${STAFF_PORT:-8081}:8081"

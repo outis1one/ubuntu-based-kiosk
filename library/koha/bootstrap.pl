@@ -90,6 +90,12 @@ my $admin = Koha::Patron->new({
 })->store;
 $admin->set_password({ password => $env{admin_pass}, skip_validation => 1 });
 
+# ---- Make "add a book" need as few decisions as possible -------------------
+# The item type (942$c) is mandatory in Koha's frameworks; default it to Book so
+# a Z39.50 import can be saved without touching that field.
+$dbh->do(q{UPDATE marc_subfield_structure SET defaultvalue = 'BOOK'
+           WHERE tagfield = '942' AND tagsubfield = 'c'});
+
 # ---- Preferences ----------------------------------------------------------
 my %prefs = (
     autoBarcode              => 'incremental',  # new items get a barcode automatically
