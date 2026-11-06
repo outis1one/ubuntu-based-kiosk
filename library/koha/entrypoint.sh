@@ -70,7 +70,7 @@ if [ "$TABLES" = "0" ]; then
     log "first start: installing Koha (about a minute)..."
     # (not koha-shell -c: it wraps the command in single quotes of its own)
     runuser -u "$INST-koha" -- env \
-        KOHA_CONF="/etc/koha/sites/$INST/koha-conf.xml" \
+        KOHA_CONF="/etc/koha/sites/$INST/koha-conf.xml" PERL5LIB=/usr/share/koha/lib \
         KOHA_ADMIN_USER="${KOHA_ADMIN_USER:-admin}" KOHA_ADMIN_PASS="$KOHA_ADMIN_PASS" \
         KOHA_LIBRARY_NAME="${KOHA_LIBRARY_NAME:-My Library}" TZ="$TZ" \
         perl /opt/koha-init/bootstrap.pl
