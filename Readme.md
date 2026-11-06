@@ -528,7 +528,9 @@ It writes the same netplan file as Core Settings → WiFi (`/etc/netplan/60-kios
 
 **About Fn:** the Fn key is handled inside most keyboards and never reaches the computer, so it isn't part of the combo - holding it too does no harm where Fn+W is still W. On compact keyboards where Fn+W is something else (often Up arrow), leave Fn out.
 
-The root part is `/usr/local/bin/kiosk-wifi-helper` (status/scan/connect only), which the kiosk user may run via sudo through `/etc/sudoers.d/kiosk-wifi` - nothing else. Existing kiosks get it with Advanced → Upgrade.
+**More than one WiFi adapter** (e.g. a built-in card and a USB dongle): a *WiFi adapter* dropdown appears at the top, and the status box lists every adapter with what it's connected to. Status, scan and connect act on the one you pick; by default it's the adapter that's connected right now.
+
+The root part is `/usr/local/bin/kiosk-wifi-helper` (status/scan/connect and region only). The app reaches it through a root-owned socket, `/run/kiosk-wifi-helper.sock` (`kiosk-wifi-helper.socket`, group-restricted to the kiosk user, `0660`), rather than `sudo`: the app can end up running with Linux's "no new privileges" flag, and then sudo refuses with *"The no new privileges flag is set"*. A passwordless-sudo rule (`/etc/sudoers.d/kiosk-wifi`) stays as a fallback. Existing kiosks get both with Advanced → Upgrade.
 
 ---
 

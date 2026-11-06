@@ -1,0 +1,38 @@
+#!/bin/bash
+################################################################################
+# kiosk-wifi-helper-socket - socket front end for kiosk-wifi-helper.
+#
+# Run by systemd (kiosk-wifi-helper@.service, one instance per connection to
+# /run/kiosk-wifi-helper.sock) as root, with the connection as stdin AND
+# stdout. The kiosk app connects, sends
+#
+#     <action>\n<JSON request body>
+#
+# and half-closes; the reply is the helper's one JSON line.
+#
+# Why a socket and not `sudo`: the kiosk app can end up running with the
+# Linux "no new privileges" flag, and sudo then refuses to run as root
+# ("The 'no new privileges' flag is set"). A root service reached through a
+# socket isn't affected by that flag. Who may connect is decided by the
+# socket's owner/group/mode (root:kiosk 0660) - the same people who could
+# run the helper through the old sudoers rule, no more.
+#
+# Only the fixed actions below are passed on; anything else is refused.
+################################################################################
+set -uo pipefail
+
+HELPER="${KIOSK_WIFI_HELPER:-/usr/local/bin/kiosk-wifi-helper}"
+
+# First line only; bash's read doesn't consume past the newline on a
+# socket, so the JSON body stays on stdin for the helper.
+IFS= read -r -t 10 -n 32 action || action=""
+
+case "$action" in
+    ifaces|status|scan|connect|region-status|region-set)
+        exec "$HELPER" "$action"
+        ;;
+    *)
+        echo '{"ok":false,"error":"unknown action"}'
+        exit 1
+        ;;
+esac

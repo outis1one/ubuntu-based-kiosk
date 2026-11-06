@@ -4,10 +4,12 @@
 # (Ctrl+Alt+Super+W), for joining a WiFi network from the kiosk
 # itself when the console (Ctrl+Alt+F1..F6) is switched off.
 #
-# The kiosk user may run this one script via passwordless sudo
-# (/etc/sudoers.d/kiosk-wifi, written by lib/provision.sh) - it does a
+# The kiosk app reaches it through a root-owned socket
+# (kiosk-wifi-helper.socket, group kiosk; see kiosk-wifi-helper-socket) -
+# or, as a fallback, passwordless sudo (/etc/sudoers.d/kiosk-wifi) - it does a
 # fixed set of things and nothing else:
 #
+#   kiosk-wifi-helper ifaces     {"adapters":[{"name","kind","connected","ssid","ip"}],"selected"}
 #   kiosk-wifi-helper status     {"iface","connected","ssid","ip","configured"}
 #   kiosk-wifi-helper scan       {"iface","networks":[{"ssid","signal","secure"}]}
 #   kiosk-wifi-helper connect    stdin {"ssid","password"} -> {"ok","ip"|"error"}
@@ -17,8 +19,10 @@
 #                                WiFi country (regulatory domain), system
 #                                locale and keyboard layout; every field optional
 #
-# Every reply is one JSON line on stdout, exit 0 on success. connect
-# writes the same netplan file as Core Settings -> WiFi (menus/wifi.sh,
+# Every reply is one JSON line on stdout, exit 0 on success. status, scan
+# and connect accept an optional {"iface": "<adapter>"} in the stdin JSON
+# to act on that adapter; without it the connected adapter is used (see
+# pick_iface). connect writes the same netplan file as Core Settings -> WiFi (menus/wifi.sh,
 # 60-kiosk-wifi.yaml) and puts the previous one back if the interface
 # gets no address - a typo in the password doesn't lose a WiFi network
 # that was working. The password comes in on stdin, never argv (argv is
@@ -199,8 +203,45 @@ pick_iface() {
     connected_iface || prefer_configured_iface || detect_iface
 }
 
+# The request body (JSON on stdin), read once in main. REQ_IFACE is the
+# adapter the caller asked for, or empty.
+REQ_INPUT=""
+REQ_IFACE=""
+
+# Only a real wireless interface name is accepted - never pass caller text
+# to a command or a YAML file unchecked.
+valid_iface() {
+    local i
+    [[ "$1" =~ ^[A-Za-z0-9._-]{1,15}$ ]] || return 1
+    for i in $(list_wifi_ifaces); do
+        [[ "$i" == "$1" ]] && return 0
+    done
+    return 1
+}
+
+# "usb" or "built-in", from where the device sits in sysfs.
+iface_kind() {
+    if readlink -f "$SYS_CLASS/net/$1/device" 2>/dev/null | grep -q '/usb'; then
+        echo usb
+    else
+        echo built-in
+    fi
+}
+
+pick_requested_or_default_iface() {
+    if [[ -n "$REQ_IFACE" ]]; then
+        valid_iface "$REQ_IFACE" || return 1
+        echo "$REQ_IFACE"
+    else
+        pick_iface
+    fi
+}
+
 need_iface() {
-    IFACE=$(pick_iface) || reply_error "No WiFi adapter found. If it's a USB adapter, check it's plugged in."
+    if [[ -n "$REQ_IFACE" ]] && ! valid_iface "$REQ_IFACE"; then
+        reply_error "WiFi adapter $REQ_IFACE not found"
+    fi
+    IFACE=$(pick_requested_or_default_iface) || reply_error "No WiFi adapter found. If it's a USB adapter, check it's plugged in."
     command -v iw >/dev/null || reply_error "WiFi support (iw, wpasupplicant) isn't installed - run Core Settings -> WiFi once from the admin menu"
 }
 
@@ -247,7 +288,7 @@ set_country() {
 
 do_region_set() {
     local input country locale keyboard
-    input=$(head -c 4096)
+    input="$REQ_INPUT"
     country=$(jq -r '.country // "" | strings' <<< "$input" 2>/dev/null) || reply_error "Bad request"
     locale=$(jq -r '.locale // "" | strings' <<< "$input" 2>/dev/null) || reply_error "Bad request"
     keyboard=$(jq -r '.keyboard // "" | strings' <<< "$input" 2>/dev/null) || reply_error "Bad request"
@@ -282,10 +323,27 @@ do_region_set() {
         '{ok:true,country:$c,locale:$l,keyboard:$k,restart:$restart}'
 }
 
+do_ifaces() {
+    local i rows="" sel
+    sel=$(pick_iface) || sel=""
+    for i in $(list_wifi_ifaces); do
+        local ssid ip
+        ssid=$(current_ssid "$i")
+        ip=$(iface_ip "$i")
+        rows+=$(jq -cn --arg n "$i" --arg k "$(iface_kind "$i")" --arg s "$ssid" --arg a "$ip" \
+            '{name:$n,kind:$k,connected:($s != "" and $a != ""),ssid:$s,ip:$a}')$'\n'
+    done
+    jq -cn --arg sel "$sel" --argjson a "$(printf '%s' "$rows" | jq -cs .)" \
+        '{ok:true,selected:$sel,adapters:$a}'
+}
+
 do_status() {
     local iface ssid="" ip="" configured
     configured=$(configured_ssid)
-    if ! iface=$(pick_iface); then
+    if [[ -n "$REQ_IFACE" ]] && ! valid_iface "$REQ_IFACE"; then
+        reply_error "WiFi adapter $REQ_IFACE not found"
+    fi
+    if ! iface=$(pick_requested_or_default_iface); then
         jq -cn --arg c "$configured" '{ok:true,iface:"",connected:false,ssid:"",ip:"",configured:$c}'
         return 0
     fi
@@ -382,7 +440,7 @@ PYEOF
 do_connect() {
     need_iface
     local input ssid password
-    input=$(head -c 4096)
+    input="$REQ_INPUT"
     ssid=$(jq -er '.ssid | strings' <<< "$input" 2>/dev/null) || reply_error "No network name given"
     password=$(jq -r '.password // "" | strings' <<< "$input" 2>/dev/null) || reply_error "Bad request"
 
@@ -485,7 +543,14 @@ trap 'rm -f "$TMP_SCAN"' EXIT
 exec 9> "$LOCK_FILE"
 flock -w 60 9 || reply_error "Another WiFi change is still running - try again in a moment"
 
+# One JSON request body on stdin (not when run by hand from a terminal).
+if [[ ! -t 0 ]]; then
+    REQ_INPUT=$(head -c 4096)
+    REQ_IFACE=$(jq -r '.iface // "" | strings' <<< "$REQ_INPUT" 2>/dev/null) || REQ_IFACE=""
+fi
+
 case "${1:-}" in
+    ifaces)  do_ifaces ;;
     status)  do_status ;;
     scan)    do_scan ;;
     connect) do_connect ;;

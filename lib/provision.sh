@@ -242,6 +242,23 @@ provision_install_wifi_helper() {
         log_warning "Couldn't set up the kiosk WiFi screen's permission - Ctrl+Alt+Super+W won't be able to connect"
     fi
     rm -f "$tmp"
+
+    # The same helper through a root-owned socket, which is what the kiosk
+    # app uses first: it can end up running with the "no new privileges"
+    # flag, and sudo then refuses to run as root. The sudoers rule above
+    # stays as a fallback. Socket access is limited to the kiosk user's
+    # group (0660) - the same reach as the sudoers rule.
+    provision_install_file "usr/local/bin/kiosk-wifi-helper-socket" "$BIN_DIR/kiosk-wifi-helper-socket" 755
+    provision_install_file "etc/systemd/system/kiosk-wifi-helper@.service" "$SYSTEMD_DIR/kiosk-wifi-helper@.service"
+    provision_install_file "etc/systemd/system/kiosk-wifi-helper.socket" "$SYSTEMD_DIR/kiosk-wifi-helper.socket"
+    local kiosk_group
+    kiosk_group=$(id -gn "$KIOSK_USER" 2>/dev/null || echo "$KIOSK_USER")
+    sudo sed -i "s/@KIOSK_GROUP@/${kiosk_group}/" "$SYSTEMD_DIR/kiosk-wifi-helper.socket"
+    sudo systemctl daemon-reload
+    if ! sudo systemctl enable kiosk-wifi-helper.socket &>/dev/null || ! sudo systemctl restart kiosk-wifi-helper.socket; then
+        log_warning "Couldn't start the kiosk WiFi helper socket - the WiFi screen will fall back to sudo"
+    fi
+
     # Flaky cheap dongles (RTL8188CUS...) need WiFi power saving off.
     provision_install_file "etc/udev/rules.d/70-kiosk-wifi-power.rules" /etc/udev/rules.d/70-kiosk-wifi-power.rules
     sudo udevadm control --reload-rules 2>/dev/null || true
