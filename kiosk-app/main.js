@@ -1,5 +1,6 @@
 const {app,BrowserWindow,BrowserView,globalShortcut,ipcMain,dialog,session}=require('electron');
 const {exec,spawn}=require('child_process');
+const net=require('net');
 const fs=require('fs');
 const path=require('path');
 const os=require('os');
@@ -1215,7 +1216,56 @@ const WIFI_HELPER='/usr/local/bin/kiosk-wifi-helper';
 const WIFI_IDLE_TIMEOUT=5*60000; // closes after 5 minutes untouched
 let wifiWindow=null,wifiUnlocked=false,wifiIdleTimer=null;
 
-function runWifiHelper(action,input){
+const WIFI_SOCKET='/run/kiosk-wifi-helper.sock';
+
+// Parse the helper's one JSON reply line (the last line of its output).
+function parseWifiReply(out){
+  const line=out.trim().split('\n').pop();
+  return JSON.parse(line);
+}
+
+// Preferred route: a root-owned socket (kiosk-wifi-helper.socket). Unlike
+// sudo it keeps working when this app has the "no new privileges" flag set.
+// Resolves null when the socket isn't usable (not installed yet, or this
+// user isn't allowed), so the caller falls back to sudo.
+function runWifiHelperSocket(action,input){
+  return new Promise(resolve=>{
+    let out='',done=false;
+    const finish=result=>{if(!done){done=true;clearTimeout(killer);resolve(result);}};
+    const sock=net.connect({path:WIFI_SOCKET,allowHalfOpen:true});
+    const killer=setTimeout(()=>{sock.destroy();finish({ok:false,error:'The WiFi helper timed out'});},120000);
+    sock.on('connect',()=>{
+      // Request = action line, then the JSON body; half-close so the
+      // helper sees end of input.
+      sock.end(action+'\n'+(input?JSON.stringify(input):''));
+    });
+    sock.on('data',d=>{out+=d;});
+    sock.on('error',e=>{
+      if(out){
+        // A reset after the reply arrived - use the reply.
+        try{finish(parseWifiReply(out));return;}catch(_){}
+      }
+      if(!out&&['ENOENT','ECONNREFUSED','EACCES','EPERM'].includes(e.code)){
+        console.log('[WIFI] Helper socket unavailable ('+e.code+') - falling back to sudo');
+        finish(null);
+      }else{
+        finish({ok:false,error:'Could not reach the WiFi helper: '+e.message});
+      }
+    });
+    sock.on('close',()=>{
+      if(done)return;
+      try{
+        finish(parseWifiReply(out));
+      }catch(e){
+        console.error('[WIFI] helper socket output:',out);
+        finish({ok:false,error:'The WiFi helper gave no usable answer'});
+      }
+    });
+  });
+}
+
+// Fallback: the helper through passwordless sudo (/etc/sudoers.d/kiosk-wifi).
+function runWifiHelperSudo(action,input){
   return new Promise(resolve=>{
     let out='',err='',done=false;
     const finish=result=>{if(!done){done=true;resolve(result);}};
@@ -1232,12 +1282,11 @@ function runWifiHelper(action,input){
     child.on('error',e=>{clearTimeout(killer);finish({ok:false,error:'Could not run the WiFi helper: '+e.message});});
     child.on('close',()=>{
       clearTimeout(killer);
-      const line=out.trim().split('\n').pop();
       try{
-        finish(JSON.parse(line));
+        finish(parseWifiReply(out));
       }catch(e){
-        // Not our JSON - typically sudo refusing ("a password is required")
-        // on a kiosk set up before this feature: Upgrade installs the rule.
+        // Not our JSON - typically sudo refusing ("a password is required",
+        // or the "no new privileges" flag) - Upgrade installs the socket.
         console.error('[WIFI] helper output:',out,err);
         finish({ok:false,error:(err.trim()||'The WiFi helper is not installed')+' - run Advanced -> Upgrade from the admin menu'});
       }
@@ -1245,6 +1294,12 @@ function runWifiHelper(action,input){
     child.stdin.on('error',()=>{});
     child.stdin.end(input?JSON.stringify(input):'');
   });
+}
+
+async function runWifiHelper(action,input){
+  const viaSocket=await runWifiHelperSocket(action,input);
+  if(viaSocket!==null)return viaSocket;
+  return runWifiHelperSudo(action,input);
 }
 
 function resetWifiIdleTimer(){
@@ -1327,7 +1382,10 @@ ipcMain.handle('wifi-request',async(event,req)=>{
     return result;
   }
   if(!wifiUnlocked)return{ok:false,error:'Enter the PIN first'};
-  if(action==='status'||action==='scan')return runWifiHelper(action);
+  if(action==='ifaces')return runWifiHelper('ifaces');
+  if(action==='status'||action==='scan'){
+    return runWifiHelper(action,req.iface?{iface:String(req.iface)}:null);
+  }
   if(action==='region-status')return runWifiHelper('region-status');
   if(action==='region-set'){
     const input={};
@@ -1337,7 +1395,7 @@ ipcMain.handle('wifi-request',async(event,req)=>{
   }
   if(action==='connect'){
     console.log('[WIFI] Connecting to',JSON.stringify(String(req.ssid||'')));
-    const result=await runWifiHelper('connect',{ssid:String(req.ssid||''),password:String(req.password||'')});
+    const result=await runWifiHelper('connect',{ssid:String(req.ssid||''),password:String(req.password||''),iface:req.iface?String(req.iface):''});
     console.log('[WIFI] Connect result:',result.ok?('ok '+result.ip):result.error);
     return result;
   }

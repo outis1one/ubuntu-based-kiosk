@@ -1,0 +1,14 @@
+[Unit]
+Description=Kiosk WiFi helper socket (used by the kiosk app's WiFi screen)
+
+[Socket]
+ListenStream=/run/kiosk-wifi-helper.sock
+SocketUser=root
+# Replaced with the kiosk user's group when installed (lib/provision.sh).
+SocketGroup=@KIOSK_GROUP@
+SocketMode=0660
+Accept=yes
+MaxConnections=4
+
+[Install]
+WantedBy=sockets.target

@@ -112,6 +112,8 @@ action_complete_uninstall() {
     sudo rm -rf "$KIOSK_HOME"
 
     echo "[6/12] Removing remaining systemd units..."
+    sudo systemctl disable --now kiosk-wifi-helper.socket 2>/dev/null || true
+    sudo rm -f "$SYSTEMD_DIR"/kiosk-*.socket
     sudo rm -f "$SYSTEMD_DIR"/kiosk-*.service
     sudo rm -f "$SYSTEMD_DIR"/kiosk-*.timer
     sudo systemctl daemon-reload 2>/dev/null || true

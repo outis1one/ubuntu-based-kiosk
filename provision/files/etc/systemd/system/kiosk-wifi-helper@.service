@@ -1,0 +1,10 @@
+[Unit]
+Description=Kiosk WiFi helper (one request)
+
+[Service]
+ExecStart=/usr/local/bin/kiosk-wifi-helper-socket
+StandardInput=socket
+StandardOutput=socket
+StandardError=journal
+# A connect waits up to ~30s for an address, plus netplan; never run forever.
+RuntimeMaxSec=180
