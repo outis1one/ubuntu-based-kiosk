@@ -127,6 +127,8 @@ ADMIN_USER=admin
 ADMIN_PASSWORD=$(rand 16)
 VIEWER_USER=guest
 VIEWER_PASSWORD=$(rand 14)
+# Lets the library site vouch for a signed-in staff user to the Add books page (no second login).
+SSO_SECRET=$(rand 40)
 DB_ROOT_PASSWORD=$(rand 32)
 DB_PASSWORD=$(rand 32)
 KOHA_SUITE=stable
@@ -142,6 +144,7 @@ else
     if ! grep -q '^VIEWER_PASSWORD=' .env; then
         { echo "VIEWER_USER=guest"; echo "VIEWER_PASSWORD=$(rand 14)"; } >> .env
     fi
+    grep -q '^SSO_SECRET=' .env || echo "SSO_SECRET=$(rand 40)" >> .env
     # Existing installs keep their current public-catalogue behaviour.
     grep -q '^OPAC_BIND=' .env || echo "OPAC_BIND=0.0.0.0" >> .env
     if ! grep -q '^BIND_ADDR=' .env; then

@@ -203,3 +203,7 @@ koha/                 Dockerfile (Koha from the project's Debian repo), entrypoi
                       servers, label templates/layouts)
 quickadd/             the scan-to-add service (Python standard library + yaz)
 ```
+
+## Signing in once
+
+Staff who are signed in to the library site (and allowed to edit the catalogue) open **Add books** without a second login. Koha itself confirms the sign-in; the shared secret is `SSO_SECRET` in `.env`. The read-only `guest` login still uses the Add books prompt, and the direct Add books port never accepts a Koha sign-in. If `SSO_SECRET` is empty, Add books just asks for its own login as before.

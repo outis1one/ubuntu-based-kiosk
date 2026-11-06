@@ -211,8 +211,10 @@
   };
 
   async function api(path, body) {
-    const r = await fetch(path.replace(/^\//, ''), body ? { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                                         body: JSON.stringify(body) } : {});
+    // X-Quickadd marks our own requests: a staff-site login (cookie) is only accepted for changes
+    // that carry it, which a page on another website cannot add (cross-site request forgery).
+    const r = await fetch(path.replace(/^\//, ''), body ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Quickadd': '1' },
+                                         body: JSON.stringify(body) } : { headers: { 'X-Quickadd': '1' } });
     return r.json();
   }
 
@@ -329,7 +331,7 @@
         $('status').textContent = 'Reading the barcode…';
         try {
           const blob = await shrink(f);
-          const r = await fetch('api/scan?kind=' + kind, { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob });
+          const r = await fetch('api/scan?kind=' + kind, { method: 'POST', headers: { 'Content-Type': 'image/jpeg', 'X-Quickadd': '1' }, body: blob });
           resolve(r.ok ? (await r.json()).codes : []);
         } catch (e) { resolve([]); }
       };

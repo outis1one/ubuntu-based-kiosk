@@ -28,6 +28,11 @@ KOHA_API = os.environ.get("KOHA_API", "http://koha:8081/api/v1").rstrip("/")
 USER = os.environ.get("ADMIN_USER", "admin")
 PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 # Optional read-only login to hand out: may open the page and search, nothing else.
+# Single sign-on: requests that reach us through the staff site's web server carry this secret in
+# X-Quickadd-Proxy; we then ask Koha whether the browser's login cookie is a staff user who may edit
+# the catalogue. Unset = feature off (only the Basic logins below work).
+SSO_SECRET = os.environ.get("SSO_SECRET", "")
+KOHA_SESSION_URL = KOHA_API.rsplit("/api/v1", 1)[0] + "/cgi-bin/koha/svc/quickadd-session"
 VIEWER_USER = os.environ.get("VIEWER_USER", "")
 VIEWER_PASSWORD = os.environ.get("VIEWER_PASSWORD", "")
 LIBRARY = os.environ.get("KOHA_LIBRARY", "HOME")
@@ -782,6 +787,33 @@ def decode_photo(data, kind):
 INDEX = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html"), "rb").read()
 
 
+_SESSION_CACHE = {}
+
+
+def koha_session_user(sid, ip):
+    """Ask Koha whether this staff session may edit the catalogue. Returns the user name or None.
+    Any problem (Koha starting, endpoint missing, odd reply) reads as 'not signed in', which just
+    means Quick Add asks for its own login."""
+    key, now = (sid, ip), time.time()
+    hit = _SESSION_CACHE.get(key)
+    if hit and hit[0] > now:
+        return hit[1]
+    user = None
+    try:
+        req = urllib.request.Request(KOHA_SESSION_URL + "?" + urllib.parse.urlencode({"sid": sid, "ip": ip}),
+                                     headers={"X-Quickadd-Secret": SSO_SECRET})
+        with urllib.request.urlopen(req, timeout=4) as r:
+            data = json.load(r)
+        if data.get("status") == "ok":
+            user = data.get("user") or "staff"
+    except Exception:
+        user = None
+    if len(_SESSION_CACHE) > 500:
+        _SESSION_CACHE.clear()
+    _SESSION_CACHE[key] = (now + (20 if user else 5), user)     # short: logging out takes effect quickly
+    return user
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "QuickAdd/1.0"
 
@@ -806,22 +838,36 @@ class Handler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _role(self):
-        """'admin', 'viewer' (read-only guest) or None."""
+        """'admin', 'viewer' (read-only guest) or None. Sets self.via to 'koha' for a staff-site login."""
+        self.via = None
         if not PASSWORD:
             return None
         header = self.headers.get("Authorization", "")
-        if not header.startswith("Basic "):
-            return None
-        try:
-            u, _, p = base64.b64decode(header[6:]).decode().partition(":")
-        except (ValueError, UnicodeDecodeError):
-            return None
-        ub, pb = u.encode(), p.encode()
-        # Both comparisons always run, so timing does not reveal which account exists.
-        is_admin = hmac.compare_digest(ub, USER.encode()) & hmac.compare_digest(pb, PASSWORD.encode())
-        is_viewer = bool(VIEWER_USER and VIEWER_PASSWORD) & hmac.compare_digest(ub, VIEWER_USER.encode()) \
-            & hmac.compare_digest(pb, VIEWER_PASSWORD.encode())
-        return "admin" if is_admin else "viewer" if is_viewer else None
+        if header.startswith("Basic "):
+            try:
+                u, _, p = base64.b64decode(header[6:]).decode().partition(":")
+            except (ValueError, UnicodeDecodeError):
+                return None
+            ub, pb = u.encode(), p.encode()
+            # Both comparisons always run, so timing does not reveal which account exists.
+            is_admin = hmac.compare_digest(ub, USER.encode()) & hmac.compare_digest(pb, PASSWORD.encode())
+            is_viewer = bool(VIEWER_USER and VIEWER_PASSWORD) & hmac.compare_digest(ub, VIEWER_USER.encode()) \
+                & hmac.compare_digest(pb, VIEWER_PASSWORD.encode())
+            return "admin" if is_admin else "viewer" if is_viewer else None
+        # No Basic login: accept a staff-site login, but only for requests that came through the staff
+        # site's web server (it overwrites X-Quickadd-Proxy with the shared secret on every request).
+        if SSO_SECRET and hmac.compare_digest(self.headers.get("X-Quickadd-Proxy", "").encode(), SSO_SECRET.encode()):
+            sid = ""
+            for part in self.headers.get("Cookie", "").split(";"):
+                k, _, v = part.strip().partition("=")
+                if k == "CGISESSID":
+                    sid = v
+            # the browser's address as the web server saw it: the LAST entry (the one it appended)
+            ip = self.headers.get("X-Forwarded-For", "").split(",")[-1].strip()
+            if sid and ip and koha_session_user(sid, ip):
+                self.via = "koha"
+                return "admin"
+        return None
 
     def _guard(self, need_admin=True):
         role = self._role()
@@ -831,6 +877,9 @@ class Handler(BaseHTTPRequestHandler):
             return False
         if need_admin and role != "admin":
             self._send(403, {"status": "error", "message": "This login can search but not change anything."})
+            return False
+        if self.via == "koha" and self.command == "POST" and self.headers.get("X-Quickadd") != "1":
+            self._send(403, {"status": "error", "message": "Missing request header."})
             return False
         self.role = role
         return True
