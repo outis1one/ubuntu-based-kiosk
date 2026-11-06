@@ -507,6 +507,7 @@ Host myserver
 - **Virtual consoles** (Ctrl+Alt+F1-F8) - Optional, configurable during install
 - **X server key combinations disabled** (Ctrl+Alt+Backspace)
 - **Right-click disabled** in kiosk app
+- **Web UI login** - when password protection is on, the Web UI asks for the same PIN/password as the lock screen
 - **Screen blanking disabled** with schedule awareness
 - **DPMS management** - Aggressive keep-alive with schedule respect
 
@@ -1596,7 +1597,7 @@ full migration pass.
 **Previous (v2.16.0):**
 - **New: Web UI** (Addons → Web UI) — a small Node/Express app (`webui/`) giving a browser-based editor for Sites & Page Timing, Display & Interaction, and Password Protection & Lockout, the three Core Settings menus that are pure `config.json` read/write with no privileged system mutation involved. Runs as a systemd service under `$KIOSK_USER` (the same user Electron runs as), so it never needs `sudo` — it reads/writes `config.json` with normal filesystem permissions.
 - `webui/lib/config.js` re-implements `lib/config.sh`'s exact field list, defaults, and merge-on-save contract in JS — `kiosk-app/main.js` already reads the same `config.json` directly in JS, so this isn't a new pattern — meaning it can never silently clobber fields it doesn't track (Authelia's credentials, the unused quiet-hours fields, etc), the same failure mode previously fixed in `lib/config.sh`'s own history.
-- **No login of its own, by design.** Authelia runs elsewhere; the expectation is a reverse proxy (e.g. Caddy) with Authelia forward-auth in front of it, the same way other self-hosted apps get protected — Authelia integration is explicitly out of scope for this repo. Direct LAN access with no proxy in front has no authentication at all — treat it like SSH access to the kiosk.
+- **Login follows the kiosk's password protection.** With password protection on (Core Settings → Password Protection & Lockout), the Web UI asks for the same PIN/password the lock screen uses (a session lasts 12 hours; 5 wrong tries in a row slow it down like the lock screen does; changing the code signs every browser out). With protection off there is no login, so beyond a trusted LAN turn protection on or put it behind a reverse proxy (e.g. Caddy) with Authelia forward-auth — Authelia integration is out of scope for this repo. Direct LAN access with protection off has no authentication at all — treat it like SSH access to the kiosk.
 - Deliberately narrow scope for this first pass: WiFi, Timezone, Power/Display/Quiet Hours, Complete Uninstall, every other addon, and everything in Advanced remain terminal-only — a network-facing process shouldn't be handed `sudo`-level system mutation (netplan, `timedatectl`, `apt`, systemd timers) without a lot more thought than this pass gives it. A "restart kiosk display" action was left out for the same reason — would need a narrow polkit grant, a follow-up.
 - Wired into Complete Uninstall (`webui_do_uninstall`) and Clone Settings (addon-presence detection) the same way every other addon is.
 - This is the single-kiosk piece of the web-based GUI mentioned in this doc's "Modular Management" notes for a while — a central multi-kiosk fleet dashboard is an intentional follow-up, not part of this pass.

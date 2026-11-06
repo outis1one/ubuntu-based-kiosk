@@ -179,4 +179,17 @@ function saveConfig(patch) {
     return loadConfig();
 }
 
-module.exports = { loadConfig, saveConfig, CONFIG_PATH, SCALAR_DEFAULTS };
+// What the Web UI login needs: whether the kiosk's password protection is
+// on and the stored SHA-256 of its unlock code (the same one the lock screen
+// checks). Only used server-side to verify a login - never sent to a browser.
+function readLockSettings() {
+    const existing = readExisting();
+    const hash = typeof existing.lockoutPassword === 'string' ? existing.lockoutPassword : '';
+    return {
+        enabled: existing.enablePasswordProtection === true && hash.length > 0,
+        hash,
+        codeType: existing.lockoutCodeType === 'pin' ? 'pin' : 'password',
+    };
+}
+
+module.exports = { loadConfig, saveConfig, readLockSettings, hashPassword, CONFIG_PATH, SCALAR_DEFAULTS };

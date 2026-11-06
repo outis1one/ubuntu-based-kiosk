@@ -89,6 +89,8 @@ sites_status() {
     else
         echo "Auto-rotation: off (all pages manual/hidden)"
     fi
+    echo "Keys on the kiosk: Alt+Left back, Alt+Right forward, Alt+Home this page's own address,"
+    echo "                   Ctrl+Tab / Ctrl+PageDown next site, Ctrl+Shift+Tab / Ctrl+PageUp previous"
     if [[ "$HOME_TAB_INDEX" != "-1" ]]; then
         echo "Home page: #$((HOME_TAB_INDEX + 1)), ${INACTIVITY_TIMEOUT}s inactivity timeout"
     else

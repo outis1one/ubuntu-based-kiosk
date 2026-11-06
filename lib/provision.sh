@@ -424,8 +424,8 @@ run_first_time_install() {
     echo "  - Audio support (PipeWire)"
     echo "  - Time synchronization (NTP)"
     echo "  - Web UI (browser-based Sites/Display/Lockout editor, plus"
-    echo "    addon install/reconfigure and Update - no login of its own,"
-    echo "    see Addons -> Web UI)"
+    echo "    addon install/reconfigure and Update - asks for the kiosk's"
+    echo "    PIN/password when password protection is on, see Addons -> Web UI)"
     echo
     echo "OPTIONAL (configure after install, via Addons):"
     echo "  - Lyrion Music Server (LMS) / Squeezelite"

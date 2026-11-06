@@ -6,11 +6,12 @@
 // no privileged system mutation involved (see menus/addon_webui.sh's
 // header for why the rest of Core Settings/Addons/Advanced aren't here).
 //
-// No login of its own by design: Authelia runs elsewhere, and the admin
-// site goes behind the user's own Caddy reverse proxy with Authelia
-// forward-auth in front of it, the same way every other self-hosted app
-// they run is protected. This process only binds where it's told to
-// (BIND_ADDR/PORT below) and trusts whatever's in front of it.
+// Login: when the kiosk's password protection is on, the Web UI asks for the
+// same PIN/password the lock screen uses (lib/auth.js); with it off it is
+// open. Beyond that, no login of its own: Authelia runs elsewhere, and the
+// admin site can go behind the user's own Caddy reverse proxy with Authelia
+// forward-auth in front of it. This process only binds where it's told to
+// (BIND_ADDR/PORT below).
 //
 // Runs as $KIOSK_USER (see the systemd unit menus/addon_webui.sh
 // installs) - the same user Electron runs as, and the owner of
@@ -22,6 +23,7 @@ const express = require('express');
 const { loadConfig, saveConfig } = require('./lib/config');
 const { ACTIONS } = require('./lib/actions');
 const { startJob, getJob } = require('./lib/jobs');
+const auth = require('./lib/auth');
 
 const HELPER_PATH = process.env.HELPER_PATH || '/usr/local/bin/kiosk-webui-helper';
 const WIFI_HELPER_PATH = process.env.WIFI_HELPER_PATH || '/usr/local/bin/kiosk-wifi-helper';
@@ -29,6 +31,14 @@ const SUDO_CMD = process.env.SUDO_CMD !== undefined ? process.env.SUDO_CMD : 'su
 
 const app = express();
 app.use(express.json({ limit: '256kb' }));
+
+// When the kiosk's password protection is on, the Web UI asks for the same
+// PIN/password (see lib/auth.js). With it off, nothing changes.
+app.post('/api/login', auth.login);
+app.post('/api/logout', auth.logout);
+app.get('/api/auth', auth.status);
+app.use(auth.requireLogin(path.join(__dirname, 'public', 'login.html')));
+
 app.use(express.static(path.join(__dirname, 'public')));
 
 const SWIPE_MODES = ['dual', 'standard'];
@@ -179,7 +189,11 @@ app.put('/api/config', (req, res) => {
     }
 
     try {
-        res.json(saveConfig(patch));
+        const saved = saveConfig(patch);
+        // If this save set or changed the kiosk's code, every old session
+        // just stopped working - keep the person who saved it signed in.
+        auth.keepLoggedInAfterSave(res);
+        res.json(saved);
     } catch (e) {
         console.error('saveConfig failed:', e);
         res.status(500).json({ error: 'Failed to save configuration' });
