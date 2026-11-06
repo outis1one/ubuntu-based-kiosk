@@ -30,6 +30,9 @@ PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 LIBRARY = os.environ.get("KOHA_LIBRARY", "HOME")
 STAFF_PORT = os.environ.get("STAFF_PORT", "8081")
 OPAC_PORT = os.environ.get("OPAC_PORT", "8080")
+# Set these when the site is behind a reverse proxy (different hostnames than host:port).
+OPAC_URL = os.environ.get("OPAC_URL", "").rstrip("/")
+STAFF_URL = os.environ.get("STAFF_URL", "").rstrip("/")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
 PORT = int(os.environ.get("PORT", "8082"))
 SOURCES = [s.strip() for s in os.environ.get(
@@ -742,7 +745,7 @@ class Handler(BaseHTTPRequestHandler):
             return self._send(200, INDEX, "text/html; charset=utf-8")
         if path == "/api/state":
             return self._send(200, {"recent": load_recent()[:100], "types": get_item_types(),
-                                    "library": LIBRARY, "locations": get_locations(), "settings": load_settings(), "staff_port": STAFF_PORT, "opac_port": OPAC_PORT,
+                                    "library": LIBRARY, "locations": get_locations(), "settings": load_settings(), "staff_port": STAFF_PORT, "staff_url": STAFF_URL, "opac_url": OPAC_URL, "opac_port": OPAC_PORT,
                                     "sources": [s.split(":", 1)[0] if s.startswith("z3950") else s for s in SOURCES]})
         if path == "/api/settings":
             return self._send(200, settings_view())

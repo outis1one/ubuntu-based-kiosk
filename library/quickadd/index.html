@@ -294,7 +294,9 @@
     input.focus();
   }
 
-  const printLink = (from, to) => 'http://' + location.hostname + ':' + staffPort +
+  let staffBase = '';
+  const staffRoot = () => staffBase || ('http://' + location.hostname + ':' + staffPort);
+  const printLink = (from, to) => staffRoot() +
     '/cgi-bin/koha/labels/label-print.pl?from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to);
 
   function rangeNote(text, from, to) {
@@ -370,6 +372,10 @@
     const s = await api('/api/state');
     types = s.types; if (!types[type]) type = 'BOOK'; typeButtons();
     staffPort = s.staff_port; settings = s.settings || {}; shelf = settings.location || '';
+    staffBase = s.staff_url || '';
+    $('lnk-opac').href = s.opac_url ? s.opac_url + '/' : 'http://' + location.hostname + ':' + s.opac_port + '/';
+    $('lnk-staff').href = staffRoot() + '/';
+    $('lnk-labels').href = staffRoot() + '/cgi-bin/koha/labels/label-edit-range.pl';
     if (s.locations && s.locations.length) {
       const sel = $('shelf');
       sel.replaceChildren(el('option', { value: '' }, '(not set / all in one place)'),
