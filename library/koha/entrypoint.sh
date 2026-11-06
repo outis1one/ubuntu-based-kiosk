@@ -68,7 +68,15 @@ TABLES=$(mariadb -N -h "$DB_HOST" -u "$DB_USER" -p"$KOHA_DB_PASS" "$DB_NAME" \
     -e "select count(*) from information_schema.tables where table_schema='$DB_NAME'")
 if [ "$TABLES" = "0" ]; then
     log "first start: installing Koha (about a minute)..."
-    koha-shell -c "KOHA_ADMIN_USER='${KOHA_ADMIN_USER:-admin}' KOHA_ADMIN_PASS='$KOHA_ADMIN_PASS' KOHA_LIBRARY_NAME='${KOHA_LIBRARY_NAME:-My Library}' TZ='$TZ' perl /opt/koha-init/bootstrap.pl" "$INST"
+    # (not koha-shell -c: it wraps the command in single quotes of its own)
+    runuser -u "$INST-koha" -- env \
+        KOHA_CONF="/etc/koha/sites/$INST/koha-conf.xml" \
+        KOHA_ADMIN_USER="${KOHA_ADMIN_USER:-admin}" KOHA_ADMIN_PASS="$KOHA_ADMIN_PASS" \
+        KOHA_LIBRARY_NAME="${KOHA_LIBRARY_NAME:-My Library}" TZ="$TZ" \
+        perl /opt/koha-init/bootstrap.pl
+    TABLES=$(mariadb -N -h "$DB_HOST" -u "$DB_USER" -p"$KOHA_DB_PASS" "$DB_NAME" \
+        -e "select count(*) from information_schema.tables where table_schema='$DB_NAME'")
+    [ "$TABLES" -gt 0 ] || { log "ERROR: installation did not create the database"; exit 1; }
     FIRST_RUN=1
 else
     log "existing database found - applying any pending upgrades..."
@@ -86,6 +94,11 @@ for svc in koha-zebra koha-indexer koha-worker koha-plack; do
     "$svc" --restart "$INST" >/dev/null 2>&1 || "$svc" --start "$INST" >/dev/null 2>&1 \
         || log "WARNING: could not start $svc"
 done
+
+# koha-create / koha-plack may have started Apache already; run it in the foreground instead.
+apache2ctl -k stop >/dev/null 2>&1 || true
+for i in 1 2 3 4 5; do pgrep -x apache2 >/dev/null || break; sleep 1; done
+rm -f /var/run/apache2/apache2.pid
 
 log "ready - library catalogue on :80, staff interface on :$STAFF_PORT"
 exec apache2ctl -D FOREGROUND
