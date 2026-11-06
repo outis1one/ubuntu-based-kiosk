@@ -121,6 +121,18 @@ action_upgrade() {
             provision_configure_display
             provision_configure_firewall
             provision_configure_power_management
+
+            # The Web UI runs from its own copy (/opt/kiosk-webui), not from
+            # this checkout - refresh it too, or new settings never show up
+            # there. Port, service and sudo rules are left as they are.
+            if [[ -f "$SYSTEMD_DIR/kiosk-webui.service" ]]; then
+                log_info "Refreshing the Web UI..."
+                if webui_install_app_files; then
+                    sudo systemctl restart kiosk-webui || log_warning "Web UI copied but did not restart - run: sudo systemctl restart kiosk-webui"
+                else
+                    log_warning "Couldn't refresh the Web UI - the Web UI keeps its old version"
+                fi
+            fi
             log_success "Setup refreshed"
 
             echo

@@ -20,7 +20,7 @@ display_status() {
     echo "Pause button:       $(onoff "$ENABLE_PAUSE_BUTTON")"
     echo "Keyboard button:    $(onoff "$ENABLE_KEYBOARD_BUTTON")"
     echo "Navigation button:  $(onoff "$ENABLE_NAV_BUTTON")"
-    echo "Back/forward btns:  $(onoff "$ENABLE_HISTORY_BUTTONS")"
+    echo "Back/forward btns:  $(onoff "$ENABLE_HISTORY_BUTTONS") (opacity ${HISTORY_BUTTONS_OPACITY}%)"
 }
 
 display_menu_builder() {
@@ -31,6 +31,7 @@ display_menu_builder() {
         "Toggle on-screen keyboard button (currently: $(onoff "$ENABLE_KEYBOARD_BUTTON"))"
         "Toggle navigation/help button (currently: $(onoff "$ENABLE_NAV_BUTTON"))"
         "Toggle on-screen back/forward buttons (currently: $(onoff "$ENABLE_HISTORY_BUTTONS"))"
+        "Back/forward button opacity (currently: ${HISTORY_BUTTONS_OPACITY}%)"
     )
     MENU_HANDLERS=(
         action_set_touch_mode
@@ -39,6 +40,7 @@ display_menu_builder() {
         action_toggle_keyboard_button
         action_toggle_nav_button
         action_toggle_history_buttons
+        action_set_history_opacity
     )
 }
 
@@ -148,4 +150,17 @@ action_toggle_history_buttons() {
         log_success "On-screen back/forward buttons enabled"
     fi
     save_config
+}
+
+# How see-through the back/forward buttons are: 100 = solid, 10 = faint.
+# They get a little more solid while the mouse is over them.
+action_set_history_opacity() {
+    echo
+    echo "How solid the on-screen back/forward buttons look (10 = faint, 100 = solid)."
+    HISTORY_BUTTONS_OPACITY=$(ask_integer "Opacity percent" "$HISTORY_BUTTONS_OPACITY" 10 100)
+    save_config
+    log_success "Back/forward button opacity: ${HISTORY_BUTTONS_OPACITY}%"
+    if [[ "$ENABLE_HISTORY_BUTTONS" != "true" ]]; then
+        log_info "The buttons are off - turn them on with the entry above."
+    fi
 }
