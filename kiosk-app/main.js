@@ -772,6 +772,23 @@ function rotateToNextSite(){
   }
 }
 
+// The address a site is loaded from: its configured URL, with the site's
+// own login filled in (if it has one) and local files/folders turned into
+// the kiosk's viewer addresses. Used when a site's view is first created
+// and by the home button, so both always agree.
+function buildTabUrl(t){
+  let url=t.url;
+  if(t.username&&t.password){
+    try{
+      const u=new URL(t.url);
+      u.username=t.username;
+      u.password=t.password;
+      url=u.toString();
+    }catch(e){}
+  }
+  return resolveLocalSite(url);
+}
+
 function attachView(i){
   closeHTMLKeyboard();
 
@@ -1157,11 +1174,16 @@ function returnToTabs(){
 // mouse's side buttons, and the optional on-screen buttons). Not while the
 // screen is locked or a dialog (PIN, WiFi, power...) is open on top - the
 // keys would silently navigate the page hidden behind it.
-function historyGo(direction){
-  if(isLockedOut)return;
+function historyBlocked(){
+  if(isLockedOut)return true;
   for(const w of [pinWindow,wifiWindow,promptWindow,pauseWindow]){
-    if(w&&!w.isDestroyed())return;
+    if(w&&!w.isDestroyed())return true;
   }
+  return false;
+}
+
+function historyGo(direction){
+  if(historyBlocked())return;
   const view=showingHidden?hiddenViews[currentHiddenIndex]:views[currentIndex];
   if(!view||!view.webContents||view.webContents.isDestroyed())return;
   const wc=view.webContents;
@@ -1170,6 +1192,36 @@ function historyGo(direction){
     if(nav?nav.canGoBack():wc.canGoBack()){nav?nav.goBack():wc.goBack();}
   }else{
     if(nav?nav.canGoForward():wc.canGoForward()){nav?nav.goForward():wc.goForward();}
+  }
+  markActivity();
+}
+
+// The tab (index into tabs) behind the n-th hidden view: hidden sites are the
+// ones with duration -1, in order.
+function hiddenViewIndexToTabIndex(h){
+  let n=0;
+  for(let i=0;i<tabs.length;i++){
+    if(parseInt(tabs[i].duration)===-1){
+      if(n===h)return i;
+      n++;
+    }
+  }
+  return -1;
+}
+
+// Home button / Alt+Home: back to the address this site was set up with
+// (Core Settings -> Sites & Page Timing), whatever page the user has
+// browsed to since. Acts on the site that's on screen, so with several
+// sites each one goes to its own address.
+function historyHome(){
+  if(historyBlocked())return;
+  const view=showingHidden?hiddenViews[currentHiddenIndex]:views[currentIndex];
+  if(!view||!view.webContents||view.webContents.isDestroyed())return;
+  const tabIdx=showingHidden?hiddenViewIndexToTabIndex(currentHiddenIndex):viewIndexToTabIndex(currentIndex);
+  if(tabIdx<0||!tabs[tabIdx])return;
+  const target=buildTabUrl(tabs[tabIdx]);
+  if(view.webContents.getURL()!==target){
+    view.webContents.loadURL(target).catch(()=>{});
   }
   markActivity();
 }
@@ -1579,16 +1631,7 @@ async function createWindow(){
     
     mainWindow.addBrowserView(view);
     
-    let url=t.url;
-    if(t.username&&t.password){
-      try{
-        const u=new URL(t.url);
-        u.username=t.username;
-        u.password=t.password;
-        url=u.toString();
-      }catch(e){}
-    }
-    url=resolveLocalSite(url);
+    const url=buildTabUrl(t);
     
     const initialOrigin=new URL(t.url).origin;
     
@@ -1691,6 +1734,7 @@ async function createWindow(){
   ipcMain.on('toggle-hidden',toggleHidden);
   ipcMain.on('history-nav',(event,direction)=>{
     if(direction==='back'||direction==='forward')historyGo(direction);
+    else if(direction==='home')historyHome();
   });
   ipcMain.on('return-to-tabs',forceReturnToTabs);
   ipcMain.on('user-activity',markActivity);
@@ -1890,6 +1934,7 @@ async function createWindow(){
   // Standard browser keys for page back/forward.
   globalShortcut.register('Alt+Left',()=>{historyGo('back');});
   globalShortcut.register('Alt+Right',()=>{historyGo('forward');});
+  globalShortcut.register('Alt+Home',()=>{historyHome();});
   
   globalShortcut.register('F10',toggleHidden);
   globalShortcut.register('Control+H',toggleHidden);

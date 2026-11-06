@@ -20,7 +20,7 @@ display_status() {
     echo "Pause button:       $(onoff "$ENABLE_PAUSE_BUTTON")"
     echo "Keyboard button:    $(onoff "$ENABLE_KEYBOARD_BUTTON")"
     echo "Navigation button:  $(onoff "$ENABLE_NAV_BUTTON")"
-    echo "Back/forward btns:  $(onoff "$ENABLE_HISTORY_BUTTONS") (opacity ${HISTORY_BUTTONS_OPACITY}%)"
+    echo "Back/home/fwd btns: $(onoff "$ENABLE_HISTORY_BUTTONS") (opacity ${HISTORY_BUTTONS_OPACITY}%)"
 }
 
 display_menu_builder() {
@@ -30,8 +30,8 @@ display_menu_builder() {
         "Toggle pause button (currently: $(onoff "$ENABLE_PAUSE_BUTTON"))"
         "Toggle on-screen keyboard button (currently: $(onoff "$ENABLE_KEYBOARD_BUTTON"))"
         "Toggle navigation/help button (currently: $(onoff "$ENABLE_NAV_BUTTON"))"
-        "Toggle on-screen back/forward buttons (currently: $(onoff "$ENABLE_HISTORY_BUTTONS"))"
-        "Back/forward button opacity (currently: ${HISTORY_BUTTONS_OPACITY}%)"
+        "Toggle on-screen back/home/forward buttons (currently: $(onoff "$ENABLE_HISTORY_BUTTONS"))"
+        "Back/home/forward button opacity (currently: ${HISTORY_BUTTONS_OPACITY}%)"
     )
     MENU_HANDLERS=(
         action_set_touch_mode
@@ -144,10 +144,10 @@ action_toggle_nav_button() {
 action_toggle_history_buttons() {
     if [[ "$ENABLE_HISTORY_BUTTONS" == "true" ]]; then
         ENABLE_HISTORY_BUTTONS="false"
-        log_warning "On-screen back/forward buttons disabled"
+        log_warning "On-screen back/home/forward buttons disabled"
     else
         ENABLE_HISTORY_BUTTONS="true"
-        log_success "On-screen back/forward buttons enabled"
+        log_success "On-screen back/home/forward buttons enabled"
     fi
     save_config
 }
@@ -156,10 +156,10 @@ action_toggle_history_buttons() {
 # They get a little more solid while the mouse is over them.
 action_set_history_opacity() {
     echo
-    echo "How solid the on-screen back/forward buttons look (10 = faint, 100 = solid)."
+    echo "How solid the on-screen back/home/forward buttons look (10 = faint, 100 = solid)."
     HISTORY_BUTTONS_OPACITY=$(ask_integer "Opacity percent" "$HISTORY_BUTTONS_OPACITY" 10 100)
     save_config
-    log_success "Back/forward button opacity: ${HISTORY_BUTTONS_OPACITY}%"
+    log_success "Back/home/forward button opacity: ${HISTORY_BUTTONS_OPACITY}%"
     if [[ "$ENABLE_HISTORY_BUTTONS" != "true" ]]; then
         log_info "The buttons are off - turn them on with the entry above."
     fi

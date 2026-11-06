@@ -115,7 +115,7 @@ ipcRenderer.on('keyboard-button-enabled',(event,enabled)=>{
   }
 });
 
-// On-screen back/forward buttons (top middle, half transparent) - an
+// On-screen back / home / forward buttons (top middle, half transparent) - an
 // option for screens with no keyboard or mouse side buttons.
 let historyButtonsEnabled=false;
 let historyBar=null;
@@ -280,7 +280,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     historyBar.id='electron-history-bar';
     historyBar.style.cssText=`
       position:fixed;top:12px;left:50%;transform:translateX(-50%);
-      display:none;gap:14px;z-index:999999;opacity:${historyOpacity};
+      display:none;gap:18px;z-index:999999;opacity:${historyOpacity};
       transition:opacity 0.15s;user-select:none;
     `;
     const makeButton=(label,direction,path)=>{
@@ -302,6 +302,7 @@ window.addEventListener('DOMContentLoaded',()=>{
     };
     historyBar.append(
       makeButton('Back','back','M15.41 7.41L14 6l-6 6 6 6 1.41-1.41L10.83 12z'),
+      makeButton('Home (this site\'s start page)','home','M10 20v-6h4v6h5v-8h3L12 3 2 12h3v8z'),
       makeButton('Forward','forward','M8.59 16.59L10 18l6-6-6-6-1.41 1.41L13.17 12z')
     );
     historyBar.addEventListener('mouseenter',()=>{historyBar.style.opacity=String(historyHoverOpacity());});
