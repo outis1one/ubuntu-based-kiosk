@@ -116,7 +116,10 @@ dc up -d
 c_info "First start installs the database - waiting for the staff interface..."
 for i in $(seq 1 120); do
     if curl -fsS -o /dev/null "http://127.0.0.1:$STAFF_PORT/" 2>/dev/null; then READY=1; break; fi
-    if ! docker ps --format '{{.Names}}' | grep -qx library-koha; then c_err "library-koha stopped - see: docker logs library-koha"; exit 1; fi
+    # One restart is tolerated (Docker's restart policy); a crash loop is not.
+    if [ "$(docker inspect -f '{{.RestartCount}}' library-koha 2>/dev/null || echo 99)" -ge 3 ]; then
+        c_err "library-koha keeps crashing - see: docker logs library-koha"; exit 1
+    fi
     sleep 5
 done
 [ "${READY:-0}" = 1 ] || { c_err "Timed out - see: docker logs -f library-koha"; exit 1; }

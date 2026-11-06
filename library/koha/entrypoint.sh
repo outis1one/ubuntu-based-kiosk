@@ -50,7 +50,15 @@ if [ ! -d "/etc/koha/sites/$INST" ]; then
         -e 's|^\(\s*\)Include /etc/koha/apache-shared-intranet.conf|\1Include /etc/koha/apache-shared-intranet-plack.conf|' \
         -e 's|^#\s*Include /etc/koha/apache-shared-opac-plack.conf||' \
         -e 's|^#\s*Include /etc/koha/apache-shared-intranet-plack.conf||' "$SITE"
-    koha-plack --enable "$INST" >/dev/null
+    koha-plack --enable "$INST" >/dev/null 2>&1 || true   # koha-create may already have enabled it
+
+    # Run Apache itself as the instance user instead of mpm_itk's per-vhost
+    # uid switching (which needs extra capabilities and is pointless here:
+    # Plack does the real work as that user already).
+    sed -i '/AssignUserID/d' "$SITE"
+    sed -i -e "s/^export APACHE_RUN_USER=.*/export APACHE_RUN_USER=$INST-koha/" \
+           -e "s/^export APACHE_RUN_GROUP=.*/export APACHE_RUN_GROUP=$INST-koha/" /etc/apache2/envvars
+    grep -q "^Listen $STAFF_PORT\b" /etc/apache2/ports.conf || echo "Listen $STAFF_PORT" >> /etc/apache2/ports.conf
     grep -q '^ServerName' /etc/apache2/apache2.conf || echo 'ServerName localhost' >> /etc/apache2/apache2.conf
 fi
 chown -R "$INST-koha:$INST-koha" "/var/lib/koha/$INST" "/var/log/koha/$INST" 2>/dev/null || true
@@ -68,13 +76,16 @@ else
     FIRST_RUN=0
 fi
 
-# --- 5. search index (Zebra) ------------------------------------------------
-koha-plack --restart "$INST" >/dev/null 2>&1 || koha-plack --start "$INST" >/dev/null 2>&1 || true
-koha-worker --restart "$INST" >/dev/null 2>&1 || true
+# --- 5. background services (their `daemon` processes die with the container,
+#        so they are started explicitly on every start) ------------------------
 if [ "$FIRST_RUN" = 1 ] || [ ! -e "/var/lib/koha/$INST/biblios/register" ]; then
     log "building search index..."
-    koha-rebuild-zebra -f -b -a -v "$INST" >/dev/null 2>&1 || koha-rebuild-zebra -f -v "$INST" || true
+    koha-rebuild-zebra -f -v "$INST" >/dev/null 2>&1 || true
 fi
+for svc in koha-zebra koha-indexer koha-worker koha-plack; do
+    "$svc" --restart "$INST" >/dev/null 2>&1 || "$svc" --start "$INST" >/dev/null 2>&1 \
+        || log "WARNING: could not start $svc"
+done
 
 log "ready - library catalogue on :80, staff interface on :$STAFF_PORT"
 exec apache2ctl -D FOREGROUND
