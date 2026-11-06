@@ -13,6 +13,8 @@ RUN apt-get update \
 COPY certs/ /usr/local/share/ca-certificates/extra/
 RUN update-ca-certificates
 
+RUN command -v yaz-client >/dev/null && command -v yaz-marcdump >/dev/null && command -v python3 >/dev/null
+
 RUN useradd --system --uid 10001 --home-dir /app quickadd \
  && mkdir -p /app /data && chown quickadd /data
 COPY app.py index.html /app/

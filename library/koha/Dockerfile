@@ -19,15 +19,25 @@ RUN apt-get update \
 COPY certs/ /usr/local/share/ca-certificates/extra/
 RUN update-ca-certificates
 
+# Each step stands alone and fails the build on error: a swallowed failure here once produced a
+# "successful" image with no Koha in it. memcached and cron are named explicitly rather than
+# trusted to arrive as dependencies of koha-common.
 RUN curl -fsSL https://debian.koha-community.org/koha/gpg.asc | gpg --dearmor -o /usr/share/keyrings/koha.gpg \
  && echo "deb [signed-by=/usr/share/keyrings/koha.gpg] https://debian.koha-community.org/koha ${KOHA_SUITE} main bookworm" \
       > /etc/apt/sources.list.d/koha.list \
  && apt-get update \
- && apt-get install -y --no-install-recommends koha-common mariadb-client \
- && a2enmod rewrite headers proxy_http cgi deflate >/dev/null \
- && a2dissite 000-default >/dev/null 2>&1 || true \
- && if [ "$KEEP_TRANSLATIONS" != "yes" ]; then rm -rf /usr/share/koha/misc/translator/po; fi \
+ && apt-get install -y --no-install-recommends koha-common mariadb-client memcached cron
+
+RUN a2enmod rewrite headers proxy_http cgi deflate >/dev/null \
+ && (a2dissite 000-default >/dev/null 2>&1 || true)
+
+RUN if [ "$KEEP_TRANSLATIONS" != "yes" ]; then rm -rf /usr/share/koha/misc/translator/po; fi \
  && rm -rf /var/lib/apt/lists/* /usr/share/doc/*
+
+# Refuse to produce an image that cannot run.
+RUN for c in koha-create koha-plack koha-zebra koha-rebuild-zebra koha-upgrade-schema apache2ctl memcached cron mariadb zebrasrv; do \
+      command -v "$c" >/dev/null || { echo "BUILD ERROR: $c is missing from the image" >&2; exit 1; }; \
+    done
 
 COPY bootstrap.pl entrypoint.sh /opt/koha-init/
 COPY seed/ /opt/koha-init/seed/
