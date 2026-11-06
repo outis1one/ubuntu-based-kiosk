@@ -198,7 +198,12 @@ provision_configure_display() {
     # a fresh kiosk ships with; menus/advanced_virtual_consoles.sh can
     # flip this later, and does below if declined at the end of setup.
     provision_install_file "etc/X11/xorg.conf.d/99-finger-libinput.conf" /etc/X11/xorg.conf.d/99-finger-libinput.conf
-    provision_install_file "etc/X11/xorg.conf.d/10-serverflags.conf" /etc/X11/xorg.conf.d/10-serverflags.conf
+    # Only on first install: this file is also where Advanced -> Virtual
+    # Consoles records the admin's choice, and Upgrade re-runs this step -
+    # overwriting it would silently turn consoles back off (or on).
+    if [[ ! -f /etc/X11/xorg.conf.d/10-serverflags.conf ]]; then
+        provision_install_file "etc/X11/xorg.conf.d/10-serverflags.conf" /etc/X11/xorg.conf.d/10-serverflags.conf
+    fi
 
     provision_install_file "usr/local/bin/kiosk-mirror-display.sh" /usr/local/bin/kiosk-mirror-display.sh 755
     provision_install_file "usr/local/bin/kiosk-audio-route.sh" /usr/local/bin/kiosk-audio-route.sh 755
