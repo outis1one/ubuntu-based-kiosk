@@ -168,8 +168,39 @@ default_country() {
     echo "${c^^}"
 }
 
+# Every wireless interface, by what it is (see detect_iface).
+list_wifi_ifaces() {
+    local d
+    for d in $SYS_CLASS/net/*; do
+        if [[ -d "$d/wireless" || -e "$d/phy80211" ]]; then
+            basename "$d"
+        fi
+    done
+}
+
+# The wireless adapter that is connected right now (associated and has an
+# address), if any. With a built-in card plus a USB dongle, the connected
+# one is often not the first in name order - status/scan/connect must act
+# on the adapter that is actually carrying the connection.
+connected_iface() {
+    local i
+    for i in $(list_wifi_ifaces); do
+        if [[ -n "$(current_ssid "$i")" && -n "$(iface_ip "$i")" ]]; then
+            echo "$i"
+            return 0
+        fi
+    done
+    return 1
+}
+
+# Which adapter to use: the connected one, else the one our netplan file
+# configures, else the first found.
+pick_iface() {
+    connected_iface || prefer_configured_iface || detect_iface
+}
+
 need_iface() {
-    IFACE=$(prefer_configured_iface || detect_iface) || reply_error "No WiFi adapter found. If it's a USB adapter, check it's plugged in."
+    IFACE=$(pick_iface) || reply_error "No WiFi adapter found. If it's a USB adapter, check it's plugged in."
     command -v iw >/dev/null || reply_error "WiFi support (iw, wpasupplicant) isn't installed - run Core Settings -> WiFi once from the admin menu"
 }
 
@@ -254,7 +285,7 @@ do_region_set() {
 do_status() {
     local iface ssid="" ip="" configured
     configured=$(configured_ssid)
-    if ! iface=$(detect_iface); then
+    if ! iface=$(pick_iface); then
         jq -cn --arg c "$configured" '{ok:true,iface:"",connected:false,ssid:"",ip:"",configured:$c}'
         return 0
     fi
