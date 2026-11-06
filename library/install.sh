@@ -100,6 +100,7 @@ TZ=${TZ_NOW}
 OPAC_PORT=$(free_port "${OPAC_PORT:-8080}")
 STAFF_PORT=$(free_port "${STAFF_PORT:-8081}")
 QUICKADD_PORT=$(free_port "${QUICKADD_PORT:-8082}")
+BIND_ADDR=${BIND_ADDR:-0.0.0.0}
 ADMIN_USER=admin
 ADMIN_PASSWORD=$(rand 16)
 DB_ROOT_PASSWORD=$(rand 32)
@@ -113,6 +114,9 @@ else
     # Settings added in later versions: append them to an older .env.
     if ! grep -q '^QUICKADD_PORT=' .env; then
         echo "QUICKADD_PORT=$(free_port 8082)" >> .env
+    fi
+    if ! grep -q '^BIND_ADDR=' .env; then
+        echo "BIND_ADDR=${BIND_ADDR:-0.0.0.0}" >> .env
     fi
 fi
 
@@ -131,9 +135,10 @@ with_retry dc up -d
 # --- Wait until the site answers ---------------------------------------------------
 # shellcheck disable=SC1091
 . ./.env
-c_info "First start installs the database - waiting for the staff interface..."
-for i in $(seq 1 120); do
-    if curl -fsS -o /dev/null "http://127.0.0.1:$STAFF_PORT/" 2>/dev/null; then READY=1; break; fi
+c_info "First start installs the database - waiting until Koha reports healthy..."
+for i in $(seq 1 180); do
+    health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' library-koha 2>/dev/null || echo missing)"
+    if [ "$health" = healthy ] && curl -fsS -o /dev/null -m 5 "http://127.0.0.1:${QUICKADD_PORT:-8082}/healthz" 2>/dev/null; then READY=1; break; fi
     # One restart is tolerated (Docker's restart policy); a crash loop is not.
     if [ "$(docker inspect -f '{{.RestartCount}}' library-koha 2>/dev/null || echo 99)" -ge 3 ]; then
         c_err "library-koha keeps crashing - see: docker logs library-koha"; exit 1

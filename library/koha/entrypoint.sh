@@ -15,6 +15,10 @@ export TZ="${TZ:-UTC}"
 
 log() { echo "[koha-init] $*"; }
 
+# Marker the container healthcheck waits for. Before the database exists Koha
+# serves its web-installer page with HTTP 200, so "port answers" is not "ready".
+rm -f /run/koha-ready
+
 # --- 1. memcached (Koha caches sysprefs and sessions in it) -----------------
 memcached -u memcache -m 64 -d
 cron
@@ -105,5 +109,6 @@ apache2ctl -k stop >/dev/null 2>&1 || true
 for i in 1 2 3 4 5; do pgrep -x apache2 >/dev/null || break; sleep 1; done
 rm -f /var/run/apache2/apache2.pid
 
+touch /run/koha-ready
 log "ready - library catalogue on :80, staff interface on :$STAFF_PORT"
 exec apache2ctl -D FOREGROUND
