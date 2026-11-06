@@ -48,6 +48,17 @@ lan_ip()      { hostname -I 2>/dev/null | awk '{print $1}'; }
 
 dc() { docker compose --project-directory "$HERE" "$@"; }
 
+# Docker Hub rate-limits anonymous pulls (HTTP 429), which is common on shared
+# IPs; retry with a growing pause instead of failing the whole install.
+with_retry() {
+    local n=1 max=5 wait=15
+    until "$@"; do
+        [ "$n" -ge "$max" ] && { c_err "Failed after $max attempts: $*"; return 1; }
+        c_warn "Attempt $n failed (Docker Hub rate limit or network?) - retrying in ${wait}s..."
+        sleep "$wait"; n=$((n + 1)); wait=$((wait * 2))
+    done
+}
+
 show_status() {
     [ -f .env ] || { c_err "Not installed yet - run: sudo ./install.sh"; exit 1; }
     # shellcheck disable=SC1091
@@ -67,7 +78,7 @@ case "${1:-}" in
     --start)  dc start; exit 0 ;;
     --update)
         ensure_docker
-        dc build --pull --no-cache koha
+        with_retry dc build --pull --no-cache koha
         dc up -d
         show_status; exit 0 ;;
     "" ) ;;
@@ -106,9 +117,9 @@ fi
 
 # --- Build and start ---------------------------------------------------------------
 c_info "Building the Koha image (first time: 5-10 minutes, downloads ~1 GB)..."
-dc build
+with_retry dc build
 c_info "Starting..."
-dc up -d
+with_retry dc up -d
 
 # --- Wait until the site answers ---------------------------------------------------
 # shellcheck disable=SC1091
