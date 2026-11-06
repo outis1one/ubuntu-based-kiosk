@@ -79,10 +79,14 @@ show_status() {
     fi
     dc ps
     echo
-    echo "  Catalogue (public):  http://$ip:$OPAC_PORT"
-    echo "  Staff interface:     http://$ip:$STAFF_PORT"
-    echo "  Add books (scan):    http://$ip:${QUICKADD_PORT:-8082}   (same login)"
-    echo "  Staff login:         $ADMIN_USER  /  $ADMIN_PASSWORD   (also stored in $HERE/.env)"
+    echo "  Your library:        http://$ip:$STAFF_PORT"
+    echo "      sign in here: find a book, add books (scan an ISBN or use the phone camera), lending, labels, people"
+    echo "  Admin login:         $ADMIN_USER  /  $ADMIN_PASSWORD   (also stored in $HERE/.env)"
+    echo "  Read-only login:     ${VIEWER_USER:-guest}  /  ${VIEWER_PASSWORD:-?}   (to hand out, with this address: http://$ip:$STAFF_PORT/add/)"
+    echo "      It opens the Find a book page: search only, it cannot add or change anything."
+    if [ "${OPAC_BIND:-127.0.0.1}" != "127.0.0.1" ]; then
+        echo "  Public catalogue:    http://$ip:$OPAC_PORT   (search only, asks for a library card login)"
+    fi
     echo
 }
 
@@ -117,8 +121,12 @@ OPAC_PORT=$(free_port "${OPAC_PORT:-8080}")
 STAFF_PORT=$(free_port "${STAFF_PORT:-8081}")
 QUICKADD_PORT=$(free_port "${QUICKADD_PORT:-8082}")
 BIND_ADDR=${BIND_ADDR:-0.0.0.0}
+# The public catalogue is off by default: 127.0.0.1 = not reachable from the network.
+OPAC_BIND=${OPAC_BIND:-127.0.0.1}
 ADMIN_USER=admin
 ADMIN_PASSWORD=$(rand 16)
+VIEWER_USER=guest
+VIEWER_PASSWORD=$(rand 14)
 DB_ROOT_PASSWORD=$(rand 32)
 DB_PASSWORD=$(rand 32)
 KOHA_SUITE=stable
@@ -131,6 +139,11 @@ else
     if ! grep -q '^QUICKADD_PORT=' .env; then
         echo "QUICKADD_PORT=$(free_port 8082)" >> .env
     fi
+    if ! grep -q '^VIEWER_PASSWORD=' .env; then
+        { echo "VIEWER_USER=guest"; echo "VIEWER_PASSWORD=$(rand 14)"; } >> .env
+    fi
+    # Existing installs keep their current public-catalogue behaviour.
+    grep -q '^OPAC_BIND=' .env || echo "OPAC_BIND=0.0.0.0" >> .env
     if ! grep -q '^BIND_ADDR=' .env; then
         echo "BIND_ADDR=${BIND_ADDR:-0.0.0.0}" >> .env
     fi

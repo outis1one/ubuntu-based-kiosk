@@ -30,8 +30,11 @@ services:
     depends_on:
       db:
         condition: service_healthy
+      quickadd:
+        condition: service_started
     environment:
       TZ: ${TZ:-UTC}
+      KOHA_QUICKADD_URL: http://quickadd:8082
       KOHA_DB_HOST: db
       KOHA_DB_PASS: ${DB_PASSWORD}
       KOHA_ADMIN_USER: ${ADMIN_USER:-admin}
@@ -41,7 +44,8 @@ services:
       KOHA_SHELVES: ${SHELVES:-}
       KOHA_ITEM_TYPES: ${ITEM_TYPES:-}
     ports:
-      - "${BIND_ADDR:-0.0.0.0}:${OPAC_PORT:-8080}:80"
+      # The public catalogue is off by default (loopback only); set OPAC_BIND=0.0.0.0 in .env to expose it.
+      - "${OPAC_BIND:-127.0.0.1}:${OPAC_PORT:-8080}:80"
       - "${BIND_ADDR:-0.0.0.0}:${STAFF_PORT:-8081}:8081"
     volumes:
       - koha-data:/var/lib/koha
@@ -53,14 +57,13 @@ services:
     image: library-quickadd:local
     container_name: library-quickadd
     restart: unless-stopped
-    depends_on:
-      koha:
-        condition: service_started
     environment:
       TZ: ${TZ:-UTC}
       KOHA_API: http://koha:8081/api/v1
       ADMIN_USER: ${ADMIN_USER:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
+      VIEWER_USER: ${VIEWER_USER:-guest}
+      VIEWER_PASSWORD: ${VIEWER_PASSWORD:-}
       KOHA_LIBRARY: ${LIBRARY_CODE:-HOME}
       OPAC_PORT: ${OPAC_PORT:-8080}
       STAFF_PORT: ${STAFF_PORT:-8081}

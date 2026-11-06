@@ -74,6 +74,8 @@ STAFF_PORT=8081
 QUICKADD_PORT=8082
 ADMIN_USER=admin
 ADMIN_PASSWORD=s3cretPASS
+VIEWER_USER=guest
+VIEWER_PASSWORD=guestPASS
 BIND_ADDR=${BIND_ADDR:-0.0.0.0}
 ENV
 echo running > "$STUB_STATE"
@@ -98,7 +100,7 @@ source "$REPO/menus/addon_library.sh"
 export KIOSK_UNATTENDED=0
 docker_ensure_installed() { return 0; }   # the stub stands in for a working Docker
 
-tabs() { jq -r '.tabs[] | "\(.url)|\(.duration)|\(.name)"' "$CONFIG_PATH"; }
+tabs() { jq -r '.tabs[] | "\(.url)|\(.duration)|\(.name)|\(.username)"' "$CONFIG_PATH"; }
 
 # ============================================================================
 echo "== lib/docker.sh"
@@ -133,8 +135,10 @@ printf 'Smith Family Library\nn\ny\n\n' | action_library_install >"$T/install.ou
 check "install.sh got the library name"        grep -q 'LIBRARY_NAME=Smith Family Library' "$STUB_LOG"
 check "install.sh got BIND_ADDR=127.0.0.1"     grep -q 'BIND_ADDR=127.0.0.1' "$STUB_LOG"
 check "is_installed is now true"               library_is_installed
-check "catalogue tab added, duration 0"        grep -qx 'http://localhost:8080/|0|Library catalogue' <(tabs)
-check "existing tab preserved"                 grep -qx 'https://example.com|60|Example' <(tabs)
+check "Find a book tab added, duration 0"      grep -qx 'http://localhost:8081/add/#find|0|Find a book|guest' <(tabs)
+check "tab carries the read-only guest password" test "$(jq -r '.tabs[] | select(.name=="Find a book") | .password' "$CONFIG_PATH")" = guestPASS
+check "admin password never goes in kiosk config" bash -c "! grep -q s3cretPASS '$CONFIG_PATH'"
+check "existing tab preserved"                 grep -qx 'https://example.com|60|Example|' <(tabs)
 check "untracked config keys preserved"        test "$(jq -r .somethingUntracked "$CONFIG_PATH")" = keep-me
 addon_library_status > "$T/status.out"
 check "status shows 'this kiosk only'"         grep -q 'this kiosk only' "$T/status.out"
@@ -142,21 +146,29 @@ check "status shows 'this kiosk only'"         grep -q 'this kiosk only' "$T/sta
 # ============================================================================
 echo "== menu while installed"
 addon_library_menu_builder
-check "offers 'stop showing' (tab exists)"     grep -q 'Stop showing the catalogue' <<< "${MENU_LABELS[*]}"
+check "offers 'stop showing' (tab exists)"     grep -q 'Stop showing Find a book' <<< "${MENU_LABELS[*]}"
 check "has Update and Uninstall"               grep -q 'Update.*Uninstall' <<< "${MENU_LABELS[*]}"
 
 echo "== tab toggling is idempotent"
 library_add_tab >/dev/null 2>&1
-check "adding again does not duplicate"        test "$(tabs | grep -c 'localhost:8080')" = 1
+check "adding again does not duplicate"        test "$(tabs | grep -c 'localhost:8081/add/#find')" = 1
 printf '\n' | action_library_toggle_tab >/dev/null 2>&1    # now removes it
-check "toggle removes the catalogue tab"       test "$(tabs | grep -c 'localhost:8080')" = 0
-check "toggle keeps the other tab"             grep -qx 'https://example.com|60|Example' <(tabs)
+check "toggle removes the Find a book tab"       test "$(tabs | grep -c 'localhost:8081/add/#find')" = 0
+check "toggle keeps the other tab"             grep -qx 'https://example.com|60|Example|' <(tabs)
 addon_library_menu_builder
-check "menu now offers 'Show'"                 grep -q 'Show the catalogue on the kiosk' <<< "${MENU_LABELS[*]}"
+check "menu now offers 'Show'"                 grep -q 'Show Find a book on the kiosk' <<< "${MENU_LABELS[*]}"
 printf '\n' | action_library_toggle_tab >/dev/null 2>&1    # and adds it back
-check "toggle adds it back"                    test "$(tabs | grep -c 'localhost:8080')" = 1
+check "toggle adds it back"                    test "$(tabs | grep -c 'localhost:8081/add/#find')" = 1
 
 # ============================================================================
+echo "== an earlier version's tab (public catalogue address) is cleaned up"
+jq '.tabs += [{"url":"http://localhost:8080/","duration":0,"username":"","password":"","name":"Library catalogue"}]' "$CONFIG_PATH" > "$T/cfg.tmp" && cp "$T/cfg.tmp" "$CONFIG_PATH"
+check "old catalogue tab present before"       test "$(tabs | grep -c '^http://localhost:8080/|')" = 1
+library_remove_tab >/dev/null 2>&1
+check "old catalogue tab removed"              test "$(tabs | grep -c '^http://localhost:8080/|')" = 0
+check "other tabs untouched"                   grep -qx 'https://example.com|60|Example|' <(tabs)
+library_add_tab >/dev/null 2>&1
+
 echo "== network access"
 : > "$STUB_LOG"
 printf 'y\n\n' | action_library_network >/dev/null 2>&1       # allow network
@@ -168,8 +180,10 @@ check ".env BIND_ADDR back to 127.0.0.1"       test "$(library_env_get BIND_ADDR
 # ============================================================================
 echo "== access screen"
 printf '\n' | action_library_show_access > "$T/access.out" 2>&1
-check "shows the staff login"                  grep -q 'admin  /  s3cretPASS' "$T/access.out"
-check "shows quick-add address"                grep -q 'Add books.*:8082' "$T/access.out"
+check "shows the admin login"                  grep -q 'admin  /  s3cretPASS' "$T/access.out"
+check "shows the read-only login to share"     grep -q 'guest  /  guestPASS' "$T/access.out"
+check "shows the one library address"          grep -q 'sign in here.*:8081/' "$T/access.out"
+check "shows the add-books path on that address" grep -q ':8081/add/' "$T/access.out"
 
 # ============================================================================
 echo "== update"
@@ -185,7 +199,7 @@ printf 'n\n\n' | action_library_uninstall >/dev/null 2>&1
 check "compose down without -v"                grep -qE 'compose .* down$' "$STUB_LOG"
 check "no volume deletion"                     bash -c "! grep -q -- ' -v' '$STUB_LOG'"
 check "install dir and .env kept"              test -f "$LIBRARY_DIR/.env"
-check "catalogue tab removed"                  test "$(tabs | grep -c 'localhost:8080')" = 0
+check "catalogue tab removed"                  test "$(tabs | grep -c 'localhost:8081/add/#find')" = 0
 
 echo "== purge needs the typed confirmation"
 printf 'y\nnope\n\n' | action_library_uninstall >/dev/null 2>&1
@@ -195,8 +209,8 @@ library_add_tab >/dev/null 2>&1
 printf 'y\nDELETE\n\n' | action_library_uninstall >/dev/null 2>&1
 check "compose down -v --rmi local"            grep -q 'down -v --rmi local' "$STUB_LOG"
 check "install dir removed"                    test ! -e "$LIBRARY_DIR"
-check "tab removed again"                      test "$(tabs | grep -c 'localhost:8080')" = 0
-check "other tab still there"                  grep -qx 'https://example.com|60|Example' <(tabs)
+check "tab removed again"                      test "$(tabs | grep -c 'localhost:8081/add/#find')" = 0
+check "other tab still there"                  grep -qx 'https://example.com|60|Example|' <(tabs)
 
 echo
 echo "passed: $PASS   failed: $FAIL"

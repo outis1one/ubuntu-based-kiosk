@@ -12,12 +12,19 @@ it never overwrites your `.env` (passwords) or your data.
 
 | What | Address | Login |
 |---|---|---|
-| **Catalogue** (public search, no login) | `http://<this machine>:8080` | none |
-| **Staff interface** (cataloguing, labels, Z39.50) | `http://<this machine>:8081` | `admin` and the generated password |
-| **Add books** (scan an ISBN) | `http://<this machine>:8082` | same login |
+| **Your library**: add books, find a book, people, lending, labels, settings | `http://<this machine>:8081` | `admin` and the generated password |
+| **Add books** (scan an ISBN, or use the phone camera) | `http://<this machine>:8081/add/` | same login (asked once more) |
+| **Public catalogue** (search only, for a kiosk or visitors) | `http://<this machine>:8080` | none |
+
+For home use you only need the first address: sign in to **Your library**, and use the **Add books**
+button on its home page. The Add books page has a **Find a book** tab (title, author or ISBN, with the
+shelf and whether it is on the shelf or checked out) and a **Manage** link back to the staff site. The
+public catalogue exists for a kiosk screen or visitors and does not need a login. (Koha gives its public and
+staff sites the same URL shapes, so they cannot share one address; Add books can, and does.)
 
 Ports move up to the next free number if one is taken; the final addresses are printed
-at the end and by `sudo ./install.sh --status`.
+at the end and by `sudo ./install.sh --status`. Add books is also reachable directly on its own port
+(`8082`), which is handy behind a proxy but not needed otherwise.
 
 ## What it is made of
 

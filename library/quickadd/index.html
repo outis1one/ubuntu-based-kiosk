@@ -44,6 +44,20 @@
            padding: 10px 16px; background: var(--card); color: var(--ink); font-weight: 600; }
   button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
   button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+  nav.tabs { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
+  nav.tabs a { color: var(--accent); text-decoration: none; font-weight: 600; padding: 6px 12px; border-radius: 999px; }
+  nav.tabs a.on { background: var(--accent); color: var(--accent-ink); }
+  nav.tabs a.ext::after { content: ' \2197'; font-size: .85em; }
+  .find-form { display: flex; gap: 8px; margin: 10px 0; }
+  .find-form input { flex: 1; font-size: 1.3rem; padding: 12px 14px; border: 2px solid var(--line); border-radius: 12px;
+                     background: var(--card); color: var(--ink); min-width: 0; }
+  .hit { background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 12px 14px; margin: 10px 0; }
+  .hit .t { font-weight: 700; font-size: 1.05rem; overflow-wrap: anywhere; }
+  .hit a { color: var(--accent); }
+  .copy { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; padding: 6px 0 0; }
+  .chip { border-radius: 999px; padding: 1px 10px; font-size: .88rem; font-weight: 600; border: 1px solid var(--line); }
+  .chip.in { background: var(--ok-bg); border-color: var(--ok); color: var(--ok); }
+  .chip.out { background: var(--warn-bg); border-color: var(--warn); color: var(--warn); }
   .cam-row { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; margin: 8px 0 0; }
   #status { min-height: 1.5em; margin: 10px 2px; color: var(--muted); }
   .card { background: var(--card); border: 1px solid var(--line); border-radius: 14px;
@@ -85,11 +99,25 @@
 <body>
 <main>
   <header>
-    <h1>Add to library</h1>
-    <nav aria-label="Library links">
-      <a id="lnk-opac" href="#">Catalogue</a><a id="lnk-staff" href="#">Staff</a>
+    <h1 id="title">Add to library</h1>
+    <nav class="tabs" aria-label="Sections">
+      <a id="tab-add" href="#add" class="on">Add books</a>
+      <a id="tab-find" href="#find">Find a book</a>
+      <a id="lnk-staff" class="ext" href="#" target="_blank" rel="noopener">Manage</a>
+      <a id="lnk-opac" class="ext" href="#" target="_blank" rel="noopener">Public catalogue</a>
     </nav>
   </header>
+
+  <section id="view-find" hidden>
+    <form class="find-form" id="findform" autocomplete="off">
+      <label class="sr" for="q">Title, author or ISBN</label>
+      <input id="q" type="search" placeholder="Title, author or ISBN" enterkeyhint="search">
+      <button class="primary" type="submit">Find</button>
+    </form>
+    <div id="found" aria-live="polite"></div>
+  </section>
+
+  <section id="view-add">
 
   <fieldset class="types" id="types" style="border:0;padding:0" aria-label="What are you adding?"></fieldset>
   <div class="shelf" id="shelfbox" hidden>
@@ -149,6 +177,7 @@
 
   <h2>Earlier</h2>
   <ul class="list" id="earlier"></ul>
+  </section>
 </main>
 
 <script>
@@ -182,7 +211,7 @@
   };
 
   async function api(path, body) {
-    const r = await fetch(path, body ? { method: 'POST', headers: { 'Content-Type': 'application/json' },
+    const r = await fetch(path.replace(/^\//, ''), body ? { method: 'POST', headers: { 'Content-Type': 'application/json' },
                                          body: JSON.stringify(body) } : {});
     return r.json();
   }
@@ -300,7 +329,7 @@
         $('status').textContent = 'Reading the barcode…';
         try {
           const blob = await shrink(f);
-          const r = await fetch('/api/scan?kind=' + kind, { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob });
+          const r = await fetch('api/scan?kind=' + kind, { method: 'POST', headers: { 'Content-Type': 'image/jpeg' }, body: blob });
           resolve(r.ok ? (await r.json()).codes : []);
         } catch (e) { resolve([]); }
       };
@@ -351,7 +380,7 @@
   }
 
   let staffBase = '';
-  const staffRoot = () => staffBase || ('http://' + location.hostname + ':' + staffPort);
+  const staffRoot = () => staffBase || (location.pathname.startsWith('/add/') ? location.origin : 'http://' + location.hostname + ':' + staffPort);
   const printLink = (from, to) => staffRoot() +
     '/cgi-bin/koha/labels/label-print.pl?from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to);
 
@@ -424,13 +453,53 @@
     }));
   }
 
+  // ---- under the staff site (/add/) everything is same-origin
+  const embedded = location.pathname.startsWith('/add/');
+  let viewer = false;                       // the read-only guest login: search only
+
+  // ---- views: Add books / Find a book
+  function showView() {
+    const find = viewer || location.hash === '#find';
+    $('tab-add').hidden = viewer;
+    $('view-add').hidden = find; $('view-find').hidden = !find;
+    $('tab-add').classList.toggle('on', !find); $('tab-find').classList.toggle('on', find);
+    $('title').textContent = find ? 'Find a book' : 'Add to library';
+    document.title = find ? 'Find a book' : 'Add to library';
+    if (find) $('q').focus(); else $('code').focus();
+  }
+  window.addEventListener('hashchange', showView);
+
+  async function find(term) {
+    const box = $('found');
+    if (term.trim().length < 2) { box.replaceChildren(el('div', { className: 'small' }, 'Type at least two letters.')); return; }
+    box.replaceChildren(el('div', { className: 'small' }, 'Searching…'));
+    let r;
+    try { r = await api('/api/search?q=' + encodeURIComponent(term)); } catch (e) { r = { status: 'error' }; }
+    if (!r.results) { box.replaceChildren(el('div', { className: 'card warn' }, el('div', { className: 'body' }, r.message || 'Search failed.'))); return; }
+    if (!r.results.length) { box.replaceChildren(el('div', { className: 'small' }, 'No matches for "' + term + '".')); return; }
+    box.replaceChildren(...r.results.map(b => el('div', { className: 'hit' },
+      el('div', { className: 't' }, b.title), el('div', { className: 'meta' }, [b.author, b.year].filter(Boolean).join(' · ')),
+      ...(b.copies.length ? b.copies.map(c => el('div', { className: 'copy' },
+          c.barcode ? el('span', { className: 'badge' }, c.barcode) : '',
+          el('span', {}, c.location || 'no shelf set'), c.callnumber ? el('span', { className: 'meta' }, c.callnumber) : '',
+          el('span', { className: 'chip ' + (c.status === 'On shelf' ? 'in' : 'out') }, c.status)))
+        : [el('div', { className: 'small' }, 'No copies recorded.')]),
+      viewer ? '' : el('div', { className: 'small', style: 'margin-top:6px' },
+        el('a', { href: staffRoot() + '/cgi-bin/koha/catalogue/detail.pl?biblionumber=' + b.biblio_id, target: '_blank', rel: 'noopener' }, 'Open full record')))));
+  }
+  $('findform').onsubmit = ev => { ev.preventDefault(); find($('q').value); };
+
   (async () => {
     const s = await api('/api/state');
-    types = s.types; if (!types[type]) type = 'BOOK'; typeButtons();
+    viewer = s.role === 'viewer';
+    types = s.types || {}; if (!types[type]) type = 'BOOK'; if (!viewer) typeButtons();
     staffPort = s.staff_port; settings = s.settings || {}; shelf = settings.location || '';
     staffBase = s.staff_url || '';
-    $('lnk-opac').href = s.opac_url ? s.opac_url + '/' : 'http://' + location.hostname + ':' + s.opac_port + '/';
+    // The public catalogue is off by default: only link to it when a public address was configured.
+    $('lnk-opac').hidden = !s.opac_url;
+    if (s.opac_url) $('lnk-opac').href = s.opac_url + '/';
     $('lnk-staff').href = staffRoot() + '/';
+    $('lnk-staff').hidden = viewer;
     $('lnk-labels').href = staffRoot() + '/cgi-bin/koha/labels/label-edit-range.pl';
     if (s.locations && s.locations.length) {
       const sel = $('shelf');
@@ -441,9 +510,9 @@
       sel.onchange = () => { shelf = sel.value; saveSettings({ location: shelf }); $('code').focus(); };
       $('shelfbox').hidden = false;
     }
-    api('/api/settings').then(applySettings);
+    if (!viewer) api('/api/settings').then(applySettings);
     $('earlier').replaceChildren(...s.recent.slice(0, 25).map(e => rowFor(e, false)));
-    $('code').focus();
+    showView();
   })();
 })();
 </script>

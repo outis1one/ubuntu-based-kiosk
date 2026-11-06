@@ -39,7 +39,7 @@ RUN for c in koha-create koha-plack koha-zebra koha-rebuild-zebra koha-upgrade-s
       command -v "$c" >/dev/null || { echo "BUILD ERROR: $c is missing from the image" >&2; exit 1; }; \
     done
 
-COPY bootstrap.pl entrypoint.sh /opt/koha-init/
+COPY bootstrap.pl ensure.pl entrypoint.sh /opt/koha-init/
 COPY seed/ /opt/koha-init/seed/
 RUN chmod 0755 /opt/koha-init/entrypoint.sh && chmod -R a+rX /opt/koha-init
 

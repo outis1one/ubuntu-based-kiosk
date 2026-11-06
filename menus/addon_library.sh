@@ -1,29 +1,30 @@
 #!/bin/bash
 ################################################################################
 # menus/addon_library.sh - "Library Catalog" addon: a self-hosted library
-# catalogue (Koha) running in Docker, shown on the kiosk as a public
-# search terminal.
+# catalogue (Koha) running in Docker, with a "Find a book" page on the kiosk.
 #
 # What gets installed (all from this checkout's library/ directory, deployed to
 # $LIBRARY_DIR - see library/README.md for the stack itself):
-#   - Koha: the catalogue ("OPAC", public search, no login) and the staff
-#     interface (cataloguing, Z39.50 lookup, label printing).
-#   - Quick Add: a one-box "scan an ISBN, the book is added" page.
+#   - Koha: cataloguing, Z39.50 lookup, label printing, people and lending.
+#   - Quick Add: the "scan an ISBN, the book is added" page, with a Find a book tab.
 #   - MariaDB.
 # Docker itself is installed on demand (lib/docker.sh).
 #
-# On the kiosk the catalogue is added as one of the Sites (tabs) with
-# duration 0 (stay put - it's a search terminal, not a rotating display).
-# Staff and Quick Add are meant for the librarian's own device; whether they
-# are reachable from the LAN or only from this kiosk is the "Network access"
-# choice below. NOTE: Docker publishes ports straight through iptables and
-# bypasses ufw, so "this kiosk only" is enforced by binding the published
-# ports to 127.0.0.1 (BIND_ADDR in library/.env), not by firewall rules.
+# Everything needs a login. The kiosk shows the "Find a book" page signed in as a
+# READ-ONLY guest login (Find a book is search only; the guest has no Koha account at
+# all, because Koha's own search permission also allows editing label layouts); the page
+# list stores that guest login like any other Basic Auth site. The admin login never
+# goes into the kiosk's config. The public catalogue (OPAC) is off by default.
+#
+# Whether other devices on the LAN can reach the library site is the "Network access"
+# choice below. NOTE: Docker publishes ports straight through iptables and bypasses
+# ufw, so "this kiosk only" is enforced by binding the published ports to 127.0.0.1
+# (BIND_ADDR in library/.env), not by firewall rules.
 #
 # Depends on: lib/menu.sh, lib/config.sh, lib/docker.sh being sourced first.
 ################################################################################
 
-LIBRARY_CATALOGUE_TAB_NAME="Library catalogue"
+LIBRARY_CATALOGUE_TAB_NAME="Find a book"
 
 ################################################################################
 # Detection / state
@@ -42,7 +43,13 @@ library_is_running() {
     [[ "$(docker_container_state library-koha)" == "running" ]]
 }
 
+# The page the kiosk shows: Quick Add's Find a book view on the library site.
 library_catalogue_url() {
+    echo "http://localhost:$(library_env_get STAFF_PORT)/add/#find"
+}
+
+# Pages from earlier versions of this add-on pointed at the public catalogue.
+library_old_catalogue_url() {
     echo "http://localhost:$(library_env_get OPAC_PORT)/"
 }
 
@@ -66,19 +73,19 @@ addon_library_status() {
     health="$(docker_container_health library-koha)"
     ip="$(get_ip_address)"
     echo "Library Catalog: ${state}${health:+ ($health)}"
-    echo "  Catalogue:  http://localhost:$(library_env_get OPAC_PORT)/ (shown on the kiosk)"
+    echo "  Find a book:  $(library_catalogue_url) (shown on the kiosk, as the read-only guest)"
     if [[ "$(library_env_get BIND_ADDR)" == "127.0.0.1" ]]; then
         echo "  Network:    this kiosk only"
     else
-        echo "  Network:    other devices on the LAN can reach it at http://${ip}:$(library_env_get OPAC_PORT)/"
+        echo "  Network:    other devices on the LAN can reach the library site at http://${ip}:$(library_env_get STAFF_PORT)/"
     fi
 }
 
 addon_library_menu_builder() {
     if library_is_installed; then
         load_existing_config
-        local tab_label="Show the catalogue on the kiosk"
-        library_tab_exists && tab_label="Stop showing the catalogue on the kiosk"
+        local tab_label="Show Find a book on the kiosk"
+        library_tab_exists && tab_label="Stop showing Find a book on the kiosk"
         MENU_LABELS=("Addresses and staff login" "$tab_label" "Network access (this kiosk only / LAN)" "Start" "Stop" "Update" "Uninstall")
         MENU_HANDLERS=(action_library_show_access action_library_toggle_tab action_library_network action_library_start action_library_stop action_library_update action_library_uninstall)
     else
@@ -111,13 +118,13 @@ library_sync_files() {
 library_add_tab() {
     load_existing_config
     if library_tab_exists; then
-        log_info "The catalogue is already one of the kiosk's pages."
+        log_info "Find a book is already one of the kiosk's pages."
         return 0
     fi
     URLS+=("$(library_catalogue_url)")
     DURS+=("0")
-    USERS+=("")
-    PASSES+=("")
+    USERS+=("$(library_env_get VIEWER_USER)")        # read-only guest, never the admin login
+    PASSES+=("$(library_env_get VIEWER_PASSWORD)")
     NAMES+=("$LIBRARY_CATALOGUE_TAB_NAME")
     save_config
 }
@@ -125,11 +132,12 @@ library_add_tab() {
 # Drop every page that points at the catalogue's local address.
 library_remove_tab() {
     load_existing_config
-    local url idx
+    local url old idx
     url="$(library_catalogue_url)"
+    old="$(library_old_catalogue_url)"
     local -a nu=() nd=() nus=() np=() nn=()
     for idx in "${!URLS[@]}"; do
-        [[ "${URLS[$idx]}" == "$url" ]] && continue
+        [[ "${URLS[$idx]}" == "$url" || "${URLS[$idx]}" == "$old" ]] && continue
         nu+=("${URLS[$idx]}"); nd+=("${DURS[$idx]:-0}"); nus+=("${USERS[$idx]:-}")
         np+=("${PASSES[$idx]:-}"); nn+=("${NAMES[$idx]:-}")
     done
@@ -199,7 +207,7 @@ action_library_install() {
         return 1
     fi
 
-    if ask_yes_no "Show the catalogue on the kiosk screen?" "y"; then
+    if ask_yes_no "Show the Find a book page on the kiosk screen (signed in as the read-only guest)?" "y"; then
         library_add_tab
     fi
     echo
@@ -217,10 +225,12 @@ action_library_show_access() {
         ip="localhost"
         echo "(Network access is limited to this kiosk.)"
     fi
-    echo "  Catalogue (public search):  http://${ip}:$(library_env_get OPAC_PORT)/"
-    echo "  Staff interface:            http://${ip}:$(library_env_get STAFF_PORT)/"
-    echo "  Add books (scan ISBNs):     http://${ip}:$(library_env_get QUICKADD_PORT)/"
-    echo "  Login (staff and add books): ${user}  /  ${pass}"
+    echo "  Your library (sign in here):  http://${ip}:$(library_env_get STAFF_PORT)/"
+    echo "      Find a book / Add books:  http://${ip}:$(library_env_get STAFF_PORT)/add/"
+    echo "  Admin login:                  ${user}  /  ${pass}"
+    echo "  Read-only login to share:     $(library_env_get VIEWER_USER)  /  $(library_env_get VIEWER_PASSWORD)"
+    echo "      Give it out with http://${ip}:$(library_env_get STAFF_PORT)/add/ - it opens Find a book: search only,"
+    echo "      it cannot add or change anything (and it has no login on the staff site itself)."
     echo
     echo "  Passwords live in $LIBRARY_DIR/.env (root only)."
     pause
