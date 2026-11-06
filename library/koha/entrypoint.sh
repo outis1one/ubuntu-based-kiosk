@@ -108,6 +108,11 @@ else
     FIRST_RUN=0
 fi
 
+# --- 4b. housekeeping that must hold on every start (staff home block, old guest account cleanup)
+runuser -u "$INST-koha" -- env KOHA_CONF="/etc/koha/sites/$INST/koha-conf.xml" PERL5LIB=/usr/share/koha/lib \
+    perl /opt/koha-init/ensure.pl \
+    || log "WARNING: ensure.pl reported a problem (see above)"
+
 # --- 5. background services (their `daemon` processes die with the container,
 #        so they are started explicitly on every start) ------------------------
 if [ "$FIRST_RUN" = 1 ] || [ ! -e "/var/lib/koha/$INST/biblios/register" ]; then

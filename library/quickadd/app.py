@@ -27,6 +27,9 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 KOHA_API = os.environ.get("KOHA_API", "http://koha:8081/api/v1").rstrip("/")
 USER = os.environ.get("ADMIN_USER", "admin")
 PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
+# Optional read-only login to hand out: may open the page and search, nothing else.
+VIEWER_USER = os.environ.get("VIEWER_USER", "")
+VIEWER_PASSWORD = os.environ.get("VIEWER_PASSWORD", "")
 LIBRARY = os.environ.get("KOHA_LIBRARY", "HOME")
 STAFF_PORT = os.environ.get("STAFF_PORT", "8081")
 OPAC_PORT = os.environ.get("OPAC_PORT", "8080")
@@ -802,37 +805,50 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _authed(self):
+    def _role(self):
+        """'admin', 'viewer' (read-only guest) or None."""
         if not PASSWORD:
-            return False
+            return None
         header = self.headers.get("Authorization", "")
-        if header.startswith("Basic "):
-            try:
-                u, _, p = base64.b64decode(header[6:]).decode().partition(":")
-                ok_u = hmac.compare_digest(u.encode(), USER.encode())
-                ok_p = hmac.compare_digest(p.encode(), PASSWORD.encode())
-                return ok_u and ok_p
-            except (ValueError, UnicodeDecodeError):
-                return False
-        return False
+        if not header.startswith("Basic "):
+            return None
+        try:
+            u, _, p = base64.b64decode(header[6:]).decode().partition(":")
+        except (ValueError, UnicodeDecodeError):
+            return None
+        ub, pb = u.encode(), p.encode()
+        # Both comparisons always run, so timing does not reveal which account exists.
+        is_admin = hmac.compare_digest(ub, USER.encode()) & hmac.compare_digest(pb, PASSWORD.encode())
+        is_viewer = bool(VIEWER_USER and VIEWER_PASSWORD) & hmac.compare_digest(ub, VIEWER_USER.encode()) \
+            & hmac.compare_digest(pb, VIEWER_PASSWORD.encode())
+        return "admin" if is_admin else "viewer" if is_viewer else None
 
-    def _guard(self):
-        if not self._authed():
+    def _guard(self, need_admin=True):
+        role = self._role()
+        if role is None:
             self._send(401, b"Login required", "text/plain",
-                       {"WWW-Authenticate": 'Basic realm="Library quick add"'})
+                       {"WWW-Authenticate": 'Basic realm="Library"'})
             return False
+        if need_admin and role != "admin":
+            self._send(403, {"status": "error", "message": "This login can search but not change anything."})
+            return False
+        self.role = role
         return True
 
     def do_GET(self):
         if self.path == "/healthz":
             return self._send(200, b"ok", "text/plain")
-        if not self._guard():
-            return
         path = self.path.split("?")[0]
+        if not self._guard(need_admin=path not in ("/", "/api/state", "/api/search")):
+            return
         if path == "/":
             return self._send(200, INDEX, "text/html; charset=utf-8")
+        if path == "/api/state" and self.role == "viewer":
+            return self._send(200, {"role": "viewer", "library": LIBRARY, "recent": [], "types": {}, "locations": [],
+                                    "settings": {}, "staff_port": STAFF_PORT, "staff_url": STAFF_URL,
+                                    "opac_url": OPAC_URL, "opac_port": OPAC_PORT, "sources": []})
         if path == "/api/state":
-            return self._send(200, {"recent": load_recent()[:100], "types": get_item_types(),
+            return self._send(200, {"role": "admin", "recent": load_recent()[:100], "types": get_item_types(),
                                     "library": LIBRARY, "locations": get_locations(), "settings": load_settings(), "staff_port": STAFF_PORT, "staff_url": STAFF_URL, "opac_url": OPAC_URL, "opac_port": OPAC_PORT,
                                     "sources": [s.split(":", 1)[0] if s.startswith("z3950") else s for s in SOURCES]})
         if path == "/api/settings":

@@ -455,10 +455,12 @@
 
   // ---- under the staff site (/add/) everything is same-origin
   const embedded = location.pathname.startsWith('/add/');
+  let viewer = false;                       // the read-only guest login: search only
 
   // ---- views: Add books / Find a book
   function showView() {
-    const find = location.hash === '#find';
+    const find = viewer || location.hash === '#find';
+    $('tab-add').hidden = viewer;
     $('view-add').hidden = find; $('view-find').hidden = !find;
     $('tab-add').classList.toggle('on', !find); $('tab-find').classList.toggle('on', find);
     $('title').textContent = find ? 'Find a book' : 'Add to library';
@@ -482,18 +484,22 @@
           el('span', {}, c.location || 'no shelf set'), c.callnumber ? el('span', { className: 'meta' }, c.callnumber) : '',
           el('span', { className: 'chip ' + (c.status === 'On shelf' ? 'in' : 'out') }, c.status)))
         : [el('div', { className: 'small' }, 'No copies recorded.')]),
-      el('div', { className: 'small', style: 'margin-top:6px' },
+      viewer ? '' : el('div', { className: 'small', style: 'margin-top:6px' },
         el('a', { href: staffRoot() + '/cgi-bin/koha/catalogue/detail.pl?biblionumber=' + b.biblio_id, target: '_blank', rel: 'noopener' }, 'Open full record')))));
   }
   $('findform').onsubmit = ev => { ev.preventDefault(); find($('q').value); };
 
   (async () => {
     const s = await api('/api/state');
-    types = s.types; if (!types[type]) type = 'BOOK'; typeButtons();
+    viewer = s.role === 'viewer';
+    types = s.types || {}; if (!types[type]) type = 'BOOK'; if (!viewer) typeButtons();
     staffPort = s.staff_port; settings = s.settings || {}; shelf = settings.location || '';
     staffBase = s.staff_url || '';
-    $('lnk-opac').href = s.opac_url ? s.opac_url + '/' : 'http://' + location.hostname + ':' + s.opac_port + '/';
+    // The public catalogue is off by default: only link to it when a public address was configured.
+    $('lnk-opac').hidden = !s.opac_url;
+    if (s.opac_url) $('lnk-opac').href = s.opac_url + '/';
     $('lnk-staff').href = staffRoot() + '/';
+    $('lnk-staff').hidden = viewer;
     $('lnk-labels').href = staffRoot() + '/cgi-bin/koha/labels/label-edit-range.pl';
     if (s.locations && s.locations.length) {
       const sel = $('shelf');
@@ -504,7 +510,7 @@
       sel.onchange = () => { shelf = sel.value; saveSettings({ location: shelf }); $('code').focus(); };
       $('shelfbox').hidden = false;
     }
-    api('/api/settings').then(applySettings);
+    if (!viewer) api('/api/settings').then(applySettings);
     $('earlier').replaceChildren(...s.recent.slice(0, 25).map(e => rowFor(e, false)));
     showView();
   })();

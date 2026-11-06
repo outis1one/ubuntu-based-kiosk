@@ -153,19 +153,6 @@ Koha::CirculationRules->set_rules({
     },
 });
 
-# ---- Staff home page: a "Library tools" block with a link to the Add books page ----
-# (Koha 26.05 stores these in the HTML customizations tool, not in a preference.)
-{
-    my $html = '<div class="main-heading"><h3>Library tools</h3></div><ul class="list-unstyled">'
-        . '<li><a class="btn btn-primary" href="/add/">Add books (scan an ISBN)</a></li>'
-        . '<li><a href="/add/#find">Find a book</a></li></ul>';
-    $dbh->do(q{INSERT INTO additional_contents (category, code, location, branchcode, published_on, number)
-               VALUES ('html_customizations', 'library_tools', 'IntranetmainUserblock', NULL, CURDATE(), 1)});
-    my $id = $dbh->last_insert_id( undef, undef, 'additional_contents', 'id' );
-    $dbh->do( q{INSERT INTO additional_contents_localizations (additional_content_id, title, content, lang)
-                VALUES (?, 'Library tools', ?, 'default')}, undef, $id, $html );
-}
-
 # ---- Preferences ----------------------------------------------------------
 my %prefs = (
     autoBarcode              => 'OFF',          # barcodes are assigned by Quick Add (zero-padded, or none/scanned on request)
@@ -173,11 +160,11 @@ my %prefs = (
     finesMode                => 'off',          # a home library does not charge overdue fines
     itemcallnumber           => '082ab',        # Dewey call number copied from the MARC record
     RESTBasicAuth            => 1,              # lets the quick-add page use the REST API
+    OpacPublic               => 0,              # the public catalogue, if ever exposed, asks for a login
     OpenLibraryCovers        => 1,              # cover images in the catalogue
     OPACSearchForTitleIn     => '',
     BiblioDefaultView        => 'normal',
-    OpacPublic               => 1,
-    opacuserlogin            => 0,              # catalogue is browse-only; no patron logins needed
+    opacuserlogin            => 1,
     OpacMaintenance          => 0,
     ExpireReservesMaxPickUpDelay => 0,
     AllowOfflineCirculation  => 0,
