@@ -1,0 +1,60 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kiosk Web UI - sign in</title>
+<link rel="stylesheet" href="style.css">
+<style>
+  body { display: flex; align-items: center; justify-content: center; min-height: 100vh; margin: 0; }
+  .login { width: min(360px, 92vw); padding: 28px; border-radius: 14px; background: var(--surface, #fff);
+           box-shadow: 0 6px 30px rgba(0,0,0,.18); }
+  .login h1 { font-size: 20px; margin: 0 0 6px; }
+  .login p { margin: 0 0 16px; opacity: .75; font-size: 14px; }
+  .login input { width: 100%; box-sizing: border-box; padding: 12px; font-size: 18px; margin-bottom: 12px; }
+  .login button { width: 100%; padding: 12px; font-size: 16px; cursor: pointer; }
+  #err { color: #c0392b; min-height: 20px; margin-top: 10px; font-size: 14px; }
+</style>
+</head>
+<body>
+<form class="login" id="form">
+  <h1>Kiosk Web UI</h1>
+  <p id="hint">Enter the kiosk's code to continue.</p>
+  <input id="code" type="password" autocomplete="current-password" autofocus>
+  <button type="submit" id="go">Sign in</button>
+  <div id="err"></div>
+</form>
+<script>
+  const $ = (id) => document.getElementById(id);
+  fetch('/api/auth').then((r) => r.json()).then((s) => {
+    if (s.authed) { location.href = '/'; return; }
+    if (s.codeType === 'pin') {
+      $('hint').textContent = "Enter the kiosk's PIN to continue.";
+      $('code').setAttribute('inputmode', 'numeric');
+    } else {
+      $('hint').textContent = "Enter the kiosk's password to continue.";
+    }
+  }).catch(() => {});
+  $('form').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    $('go').disabled = true;
+    $('err').textContent = '';
+    try {
+      const res = await fetch('/api/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code: $('code').value }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data.ok) { location.href = '/'; return; }
+      $('err').textContent = data.error || 'Sign in failed';
+      $('code').value = '';
+      $('code').focus();
+    } catch (err) {
+      $('err').textContent = 'Could not reach the kiosk';
+    }
+    $('go').disabled = false;
+  });
+</script>
+</body>
+</html>

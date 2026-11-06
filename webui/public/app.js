@@ -1,3 +1,12 @@
+// Signed out (or the kiosk's code changed): any 401 from the server sends
+// the page back to the login screen.
+const nativeFetch = window.fetch.bind(window);
+window.fetch = async (...args) => {
+    const res = await nativeFetch(...args);
+    if (res.status === 401 && !String(args[0]).includes('/api/login')) location.reload();
+    return res;
+};
+
 'use strict';
 
 // webui/public/app.js - vanilla JS, no framework/build step. Every
@@ -31,6 +40,23 @@ document.querySelectorAll('.nav-item').forEach((btn) => {
 });
 
 document.getElementById('brand-sub').textContent = location.host || 'this kiosk';
+
+// When the kiosk's password protection is on, this page is behind the same
+// PIN/password - say so, and offer Sign out.
+fetch('/api/auth').then((r) => r.json()).then((s) => {
+    if (!s.required) return;
+    const foot = document.getElementById('sidebar-footer');
+    foot.textContent = "Signed in with the kiosk's " + (s.codeType === 'pin' ? 'PIN' : 'password') + '. ';
+    const out = document.createElement('a');
+    out.href = '#';
+    out.textContent = 'Sign out';
+    out.addEventListener('click', async (e) => {
+        e.preventDefault();
+        await fetch('/api/logout', { method: 'POST' });
+        location.reload();
+    });
+    foot.appendChild(out);
+}).catch(() => {});
 
 /* ---------------------------------------------------------------------- */
 /* Config API (Sites / Display / Lockout)                                 */

@@ -46,7 +46,7 @@
       </button>
     </div>
 
-    <div class="sidebar-footer">No login of its own - front this with your own reverse proxy + Authelia if it needs to be reachable beyond a trusted LAN.</div>
+    <div class="sidebar-footer" id="sidebar-footer">Open to anyone on this network while the kiosk's password protection is off. Turn it on (Lockout) and this page asks for the same PIN/password. Beyond a trusted LAN, front it with your own reverse proxy + Authelia.</div>
   </nav>
 
   <main class="main">
@@ -64,6 +64,18 @@
           <button type="button" id="add-site" class="secondary">Add a page</button>
           <button type="button" id="save-sites">Save Sites &amp; Page Timing</button>
         </div>
+      </div>
+      <div class="card">
+        <h2 style="margin-top:0">Keyboard shortcuts</h2>
+        <p class="hint" style="margin-bottom:10px">For a keyboard on the kiosk. They act on the page that's on screen, and don't work while the screen is locked.</p>
+        <table class="shortcuts">
+          <tr><td><kbd>Alt</kbd> + <kbd>Left</kbd></td><td>Back (previous page in this site)</td></tr>
+          <tr><td><kbd>Alt</kbd> + <kbd>Right</kbd></td><td>Forward</td></tr>
+          <tr><td><kbd>Alt</kbd> + <kbd>Home</kbd></td><td>Home: back to this page's own address, as set above</td></tr>
+          <tr><td><kbd>Ctrl</kbd> + <kbd>Tab</kbd> / <kbd>Ctrl</kbd> + <kbd>PageDown</kbd></td><td>Next site</td></tr>
+          <tr><td><kbd>Ctrl</kbd> + <kbd>Shift</kbd> + <kbd>Tab</kbd> / <kbd>Ctrl</kbd> + <kbd>PageUp</kbd></td><td>Previous site</td></tr>
+        </table>
+        <p class="hint" style="margin-top:10px">Screens with no keyboard can show on-screen back / home / forward buttons: Display &rarr; "On-screen back / home / forward buttons". A mouse's side buttons also go back and forward.</p>
       </div>
     </section>
 

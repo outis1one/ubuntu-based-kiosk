@@ -30,12 +30,15 @@
 # Factory Reset, Virtual Consoles, Emergency Hotspot, Clone Settings)
 # stays terminal-only for now.
 #
-# No login of its own, by design: this addon assumes it'll be put behind
-# a reverse proxy (e.g. Caddy) with Authelia forward-auth in front, the
-# same way other self-hosted apps get protected - Authelia integration
-# is explicitly out of scope for this repo (Authelia runs elsewhere).
-# Direct LAN access with no proxy in front has no authentication at all -
-# treat it the same as SSH access to this kiosk, which is also the
+# Login: when the kiosk's password protection is on (Core Settings ->
+# Password Protection & Lockout), the Web UI asks for the same PIN/password
+# the lock screen uses (webui/lib/auth.js). With protection off it has no
+# login, so on a network you don't fully trust, turn protection on or put
+# it behind a reverse proxy (e.g. Caddy) with Authelia forward-auth in
+# front, the same way other self-hosted apps get protected - Authelia
+# integration is explicitly out of scope for this repo (Authelia runs
+# elsewhere). Direct LAN access with protection off has no authentication
+# at all - treat it the same as SSH access to this kiosk, which is also the
 # access level the privileged helper effectively grants if reached
 # without a proxy in front: bounded to its fixed action list, not a
 # root shell, but real system mutation all the same.
@@ -274,9 +277,10 @@ action_webui_install() {
     echo "This installs a small web app for editing Sites & Page Timing,"
     echo "Display & Interaction, and Password Protection & Lockout from a"
     echo "browser - plus installing/reconfiguring CUPS, LMS/Squeezelite,"
-    echo "and Asterisk Intercom, and checking for updates. It has no login"
-    echo "of its own - put it behind your own reverse proxy (e.g. Caddy +"
-    echo "Authelia) if it needs to be reachable beyond a trusted LAN."
+    echo "and Asterisk Intercom, and checking for updates. When the kiosk's"
+    echo "password protection is on it asks for the same PIN/password; when it"
+    echo "is off there is no login - turn protection on, or put it behind your"
+    echo "own reverse proxy (e.g. Caddy + Authelia), beyond a trusted LAN."
     echo
     ask_yes_no "Install the Web UI?" "n" || { echo "Cancelled"; return; }
 

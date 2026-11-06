@@ -18,6 +18,20 @@ process.env.WIFI_HELPER_PATH = path.join(__dirname, 'fixtures', 'fake-wifi-helpe
 
 const app = require('../server');
 
+// These tests turn password protection on partway through, and the Web UI
+// then (correctly) wants a login. A browser keeps the session cookie the
+// server hands out on a save; Node's fetch doesn't, so keep it here.
+const nodeFetch = global.fetch;
+let sessionCookie = '';
+global.fetch = async (url, opts = {}) => {
+    const headers = { ...(opts.headers || {}) };
+    if (sessionCookie) headers.cookie = sessionCookie;
+    const res = await nodeFetch(url, { ...opts, headers });
+    const set = res.headers.get('set-cookie');
+    if (set) sessionCookie = set.split(';')[0];
+    return res;
+};
+
 let failures = 0;
 async function check(label, fn) {
     try {

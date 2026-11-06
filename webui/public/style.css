@@ -393,3 +393,14 @@ button.danger:hover { background: var(--danger-soft); }
   .sidebar-footer { display: none; }
   .main { padding: 20px; }
 }
+
+/* Keyboard shortcuts list on the Sites page */
+.shortcuts { border-collapse: collapse; width: 100%; font-size: 13.5px; }
+.shortcuts td { padding: 6px 10px 6px 0; vertical-align: top; }
+.shortcuts td:first-child { white-space: nowrap; }
+kbd {
+  display: inline-block; padding: 1px 6px; font: inherit; font-size: 12px;
+  border: 1px solid var(--border, #cfd4da); border-bottom-width: 2px; border-radius: 4px;
+  background: var(--surface-2, rgba(127,127,127,.12));
+}
+
