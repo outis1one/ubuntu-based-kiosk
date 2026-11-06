@@ -731,6 +731,167 @@ def op_search(term):
         "year": b.get("copyright_date") or "", "copies": by_bib.get(b["biblio_id"], [])} for b in biblios]}
 
 
+# ------------------------------------------------------------ library / book page
+PAGE_SIZE = 48
+ITEM_FILTER_CAP = 2000
+
+
+def _shape_book(b, items, where):
+    mine = [i for i in items if i["biblio_id"] == b["biblio_id"]]
+    out = sum(1 for i in mine if item_status(i) == "Checked out")
+    shelves = sorted({where.get(i.get("location"), "") for i in mine} - {""})
+    return {"id": b["biblio_id"], "title": (b.get("title") or "").rstrip(" /:"), "author": b.get("author") or "",
+            "year": b.get("copyright_date") or "", "isbn": b.get("isbn") or "", "type": b.get("item_type") or "",
+            "copies": len(mine), "out": out, "shelves": shelves,
+            "callnumber": next((i.get("callnumber") for i in mine if i.get("callnumber")), "") or ""}
+
+
+def op_library(qs):
+    """The Library grid: filter by shelf / format / status, search, sort, page."""
+    def one(k):
+        return (qs.get(k) or [""])[0]
+    term = re.sub(r"[%_\\]", "", one("q")).strip()[:80]
+    shelf, itype, status = one("shelf"), one("type"), one("status")
+    sort = one("sort") or "title"
+    try:
+        page = max(1, int(one("page") or 1))
+    except ValueError:
+        page = 1
+    conds = []
+    if term:
+        like = {"-like": "%" + term + "%"}
+        conds.append({"-or": [{"title": like}, {"author": like}, {"isbn": like}, {"ean": like}]})
+    order = {"title": "title", "author": "author", "new": "-biblio_id"}.get(sort, "title")
+    item_q = {}
+    if shelf == "-":
+        item_q["location"] = None
+    elif shelf:
+        item_q["location"] = shelf
+    if itype:
+        item_q["item_type_id"] = itype
+    if status == "out":
+        item_q["checked_out_date"] = {"!=": None}
+    elif status == "in":
+        item_q["checked_out_date"] = None
+    query = {"_order_by": order}
+    if item_q:
+        its = koha("GET", "/items", query={"q": json.dumps(item_q), "_per_page": str(ITEM_FILTER_CAP)}) or []
+        ids = sorted({i["biblio_id"] for i in its})
+        if not ids:
+            return {"books": [], "page": page, "more": False}
+        conds.append({"biblio_id": ids})
+    if conds:
+        query["q"] = json.dumps(conds[0] if len(conds) == 1 else {"-and": conds})
+    query.update({"_per_page": str(PAGE_SIZE + 1), "_page": str(page)})
+    books = koha("GET", "/biblios", query=query) or []
+    more = len(books) > PAGE_SIZE
+    books = books[:PAGE_SIZE]
+    if not books:
+        return {"books": [], "page": page, "more": False}
+    ids = [b["biblio_id"] for b in books]
+    items = koha("GET", "/items", query={"q": json.dumps({"biblio_id": ids}), "_per_page": "1000"}) or []
+    where = {l["value"]: l["label"] for l in get_locations()}
+    return {"books": [_shape_book(b, items, where) for b in books], "page": page, "more": more}
+
+
+def _checkout_info(item_ids, names):
+    """item_id -> {who, due} for items currently out (staff only)."""
+    if not item_ids:
+        return {}
+    cos = koha("GET", "/checkouts", query={"q": json.dumps({"item_id": item_ids}), "_per_page": "100"}) or []
+    out = {}
+    for c in cos:
+        who = ""
+        if names:
+            try:
+                p = koha("GET", "/patrons/%s" % c["patron_id"])
+                who = ("%s %s" % (p.get("firstname") or "", p.get("surname") or "")).strip()
+            except KohaError:
+                pass
+        out[c["item_id"]] = {"who": who, "patron_id": c["patron_id"], "due": (c.get("due_date") or "")[:10],
+                             "checkout_id": c["checkout_id"]}
+    return out
+
+
+def op_book(biblio_id, staff):
+    b = koha("GET", "/biblios/%d" % biblio_id)
+    items = koha("GET", "/biblios/%d/items" % biblio_id) or []
+    where = {l["value"]: l["label"] for l in get_locations()}
+    out = _checkout_info([i["item_id"] for i in items if item_status(i) == "Checked out"], staff)
+    copies = []
+    for i in items:
+        c = {"item_id": i["item_id"], "barcode": i.get("external_id") or "", "callnumber": i.get("callnumber") or "",
+             "shelf": i.get("location") or "", "shelf_label": where.get(i.get("location"), ""),
+             "status": item_status(i), "type": i.get("item_type_id") or ""}
+        if staff and c["status"] == "Checked out":
+            c["out"] = out.get(i["item_id"])
+        copies.append(c)
+    return {"id": b["biblio_id"], "title": (b.get("title") or "").rstrip(" /:"), "subtitle": b.get("subtitle") or "",
+            "author": b.get("author") or "", "year": b.get("copyright_date") or b.get("publication_year") or "",
+            "isbn": b.get("isbn") or "", "publisher": b.get("publisher") or "", "pages": b.get("pages") or "",
+            "edition": b.get("edition_statement") or "", "summary": b.get("abstract") or b.get("notes") or "",
+            "series": b.get("series_title") or "", "type": b.get("item_type") or "", "copies": copies,
+            "shelves": get_locations()}
+
+
+def op_item_update(payload):
+    item_id = payload.get("item_id")
+    if not isinstance(item_id, int):
+        return 400, {"status": "invalid"}
+    with LOCK:
+        it = koha("GET", "/items/%d" % item_id)
+        if "shelf" in payload:
+            it["location"] = valid_location(payload.get("shelf")) or None
+        if "callnumber" in payload:
+            it["callnumber"] = (str(payload.get("callnumber") or "").strip()[:80]) or None
+        # Koha's update route rejects the computed fields the GET adds.
+        for k in [k for k in it if k.startswith("effective_")] + [
+                "checkouts_count", "holds_count", "renewals_count", "localuse", "timestamp", "call_number_sort",
+                "bookable", "extended_subfields"]:
+            it.pop(k, None)
+        koha("PUT", "/biblios/%d/items/%d" % (it["biblio_id"], item_id), it)
+    return 200, {"status": "saved"}
+
+
+def op_item_delete(payload):
+    item_id, biblio_id = payload.get("item_id"), payload.get("biblio_id")
+    if not isinstance(item_id, int) or not isinstance(biblio_id, int):
+        return 400, {"status": "invalid"}
+    return op_undo({"item_id": item_id, "biblio_id": biblio_id})
+
+
+def op_book_delete(payload):
+    biblio_id = payload.get("biblio_id")
+    if not isinstance(biblio_id, int):
+        return 400, {"status": "invalid"}
+    with LOCK:
+        items = koha("GET", "/biblios/%d/items" % biblio_id) or []
+        if any(item_status(i) == "Checked out" for i in items):
+            return 409, {"status": "error", "message": "A copy is checked out - return it first."}
+        for i in items:
+            koha("DELETE", "/items/%d" % i["item_id"])
+            forget(i["item_id"])
+        koha("DELETE", "/biblios/%d" % biblio_id)
+    return 200, {"status": "deleted"}
+
+
+def op_item_copy(payload):
+    """Another copy of a book already in the library (new barcode per the barcode setting)."""
+    biblio_id = payload.get("biblio_id")
+    if not isinstance(biblio_id, int):
+        return 400, {"status": "invalid"}
+    with LOCK:
+        b = koha("GET", "/biblios/%d" % biblio_id)
+        items = koha("GET", "/biblios/%d/items" % biblio_id) or []
+        base = items[0] if items else {}
+        mode = load_settings()["barcode_mode"]
+        if mode == "scan":
+            mode = "auto"           # no scanner step here: number it, or leave it blank in 'none' mode
+        item = add_item(biblio_id, base.get("item_type_id") or valid_type(b.get("item_type")), base.get("callnumber"),
+                        valid_location(payload.get("shelf")) or base.get("location"), mode)
+    return 200, {"status": "added", "item_id": item["item_id"], "barcode": item.get("external_id") or ""}
+
+
 # ------------------------------------------------------------ photo scanning
 MAX_IMAGE = 12 * 1024 * 1024
 ZBAR_TIMEOUT = 20
@@ -888,7 +1049,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/healthz":
             return self._send(200, b"ok", "text/plain")
         path = self.path.split("?")[0]
-        if not self._guard(need_admin=path not in ("/", "/api/state", "/api/search")):
+        if not self._guard(need_admin=path not in ("/", "/api/state", "/api/search", "/api/library") and not path.startswith("/api/book/")):
             return
         if path == "/":
             return self._send(200, INDEX, "text/html; charset=utf-8")
@@ -902,6 +1063,19 @@ class Handler(BaseHTTPRequestHandler):
                                     "sources": [s.split(":", 1)[0] if s.startswith("z3950") else s for s in SOURCES]})
         if path == "/api/settings":
             return self._send(200, settings_view())
+        if path == "/api/library" or path.startswith("/api/book/"):
+            try:
+                if path == "/api/library":
+                    return self._send(200, dict(op_library(urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)),
+                                                shelves=get_locations(), types=get_item_types()))
+                m = re.match(r"^/api/book/(\d{1,9})$", path)
+                if not m:
+                    return self._send(404, {"error": "not found"})
+                return self._send(200, op_book(int(m.group(1)), self.role == "admin"))
+            except KohaError as e:
+                return self._send(404 if e.status == 404 else 502, {"status": "error", "message":
+                                  "Koha is not answering yet - try again in a minute." if e.status == 503
+                                  else "Not found." if e.status == 404 else "Failed: %s" % e.body[:120]})
         if path == "/api/search":
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             try:
@@ -931,7 +1105,9 @@ class Handler(BaseHTTPRequestHandler):
             payload = json.loads(self.rfile.read(length) or b"{}")
             ops = {"/api/add": op_add, "/api/manual": op_manual, "/api/undo": op_undo,
                    "/api/finish": op_finish, "/api/cancel": op_cancel, "/api/settings": op_settings,
-                   "/api/barcodes/reserve": op_reserve, "/api/barcodes/assign": op_assign}
+                   "/api/barcodes/reserve": op_reserve, "/api/barcodes/assign": op_assign,
+                   "/api/item/update": op_item_update, "/api/item/delete": op_item_delete,
+                   "/api/item/copy": op_item_copy, "/api/book/delete": op_book_delete}
             fn = ops.get(self.path)
             if not fn:
                 return self._send(404, {"error": "not found"})
