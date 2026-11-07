@@ -318,3 +318,18 @@ It writes `Caddyfile`, starts a `caddy` container (the compose `caddy` profile),
 ports to the network (`BIND_ADDR=127.0.0.1`; add `--keep-direct` to leave them open). Then use `https://<name>/`: everything works
 as before, and the **Live scan** buttons appear on Add books and Lend / return. Behind your own Caddy instead, point it at the library
 port: `library.example.com { reverse_proxy <this machine>:8098 }` and set `STAFF_URL=https://library.example.com` in `.env`.
+
+### Editing, holds, history, overdue list, covers
+
+- **Edit details** on a book's page: title, subtitle, author, publisher, year, pages, ISBN and summary, saved straight into Koha
+  (copies, barcodes and loans are untouched).
+- **Holds**: staff place a hold for a person from the book page (name or card number); a signed-in borrower sees **Hold this
+  book for me** when every copy is out, and can cancel their own holds on **My books**. Returning a book that someone is waiting
+  for says so (*ON HOLD for Pat - put it aside*).
+- **History**: *Borrowing history* on a book (who had it, when) and *Past books* for a person (staff), and *Books I have
+  borrowed before* for a borrower.
+- **Overdue list** (menu): overdue books grouped by person with phone and email, days late, a **Print this list** button and a
+  ready-written email reminder link. The home page shows a banner when anything is overdue.
+- **Covers** are fetched once from Open Library when a book is added (or the first time one is shown) and kept in the data
+  volume (`covers/`), so browsers never contact another site and covers still show offline. A book with no cover found shows a
+  coloured title tile and is retried after a week.
