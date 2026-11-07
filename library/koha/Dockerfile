@@ -39,6 +39,12 @@ RUN for c in koha-create koha-plack koha-zebra koha-rebuild-zebra koha-upgrade-s
       command -v "$c" >/dev/null || { echo "BUILD ERROR: $c is missing from the image" >&2; exit 1; }; \
     done
 
+# The endpoint Quick Add uses to recognise a signed-in staff user (see the file header).
+COPY quickadd-session.pl /usr/share/koha/intranet/cgi-bin/svc/quickadd-session
+# (the return script lives beside the staff .pl scripts, not under svc/: Koha's svc Plack app 500s on it)
+COPY quickadd-return.pl quickadd-value.pl /usr/share/koha/intranet/cgi-bin/
+RUN chmod 0755 /usr/share/koha/intranet/cgi-bin/svc/quickadd-session /usr/share/koha/intranet/cgi-bin/quickadd-return.pl /usr/share/koha/intranet/cgi-bin/quickadd-value.pl
+
 COPY bootstrap.pl ensure.pl entrypoint.sh /opt/koha-init/
 COPY seed/ /opt/koha-init/seed/
 RUN chmod 0755 /opt/koha-init/entrypoint.sh && chmod -R a+rX /opt/koha-init

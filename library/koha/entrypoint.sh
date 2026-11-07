@@ -60,22 +60,36 @@ if [ ! -d "/etc/koha/sites/$INST" ]; then
     # (The staff and public catalogue sites cannot share one address: Koha gives both the
     # same URL shapes. The staff site is the natural home for a home library.)
     if [ -n "${KOHA_QUICKADD_URL:-}" ]; then
+        # Single sign-on for staff: when KOHA_SSO_SECRET is set, this web server tells Quick Add (via a
+        # secret header nobody outside can forge: it is overwritten here on every request) that the
+        # request came through the staff site, and Quick Add then asks Koha whether the browser's login
+        # cookie belongs to a staff user who may edit the catalogue. Without the secret, or if anything
+        # about that fails, Quick Add just asks for its own login as before.
+        SSO_BLOCK=""
+        if [ -n "${KOHA_SSO_SECRET:-}" ]; then
+            install -m 0640 -o root -g "$INST-koha" /dev/null /etc/koha/quickadd-sso.secret
+            printf '%s' "$KOHA_SSO_SECRET" > /etc/koha/quickadd-sso.secret
+            SSO_BLOCK="    <IfModule mod_headers.c>
+        <Location /add/>
+            RequestHeader set X-Quickadd-Proxy \"$KOHA_SSO_SECRET\"
+        </Location>
+    </IfModule>"
+        fi
         cat > /etc/koha/apache-quickadd.conf << APACHE
 <IfModule mod_proxy_http.c>
     RedirectMatch ^/add\$ /add/
     ProxyPass /add/ ${KOHA_QUICKADD_URL%/}/
     ProxyPassReverse /add/ ${KOHA_QUICKADD_URL%/}/
+${SSO_BLOCK}
 </IfModule>
 APACHE
         sed -i 's|^\(\s*\)Include /etc/koha/apache-shared-intranet.conf|&\n\1Include /etc/koha/apache-quickadd.conf|' "/etc/apache2/sites-available/$INST.conf"
     fi
 
-    # Run Apache itself as the instance user instead of mpm_itk's per-vhost
-    # uid switching (which needs extra capabilities and is pointless here:
-    # Plack does the real work as that user already).
     # koha-create insists on mpm_itk being enabled, but inside a container it can
     # not switch users (initgroups: Operation not permitted -> HTTP 500 on every
-    # page). Now that the instance exists, swap to plain prefork.
+    # page). Now that the instance exists, swap to plain prefork; Apache runs as the
+    # instance user (Plack does the real work as that user already).
     rm -f /etc/apache2/mods-enabled/mpm_itk.*
     a2enmod mpm_prefork >/dev/null 2>&1 || true
     sed -i '/AssignUserID/d' "$SITE"

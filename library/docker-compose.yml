@@ -35,6 +35,7 @@ services:
     environment:
       TZ: ${TZ:-UTC}
       KOHA_QUICKADD_URL: http://quickadd:8082
+      KOHA_SSO_SECRET: ${SSO_SECRET:-}
       KOHA_DB_HOST: db
       KOHA_DB_PASS: ${DB_PASSWORD}
       KOHA_ADMIN_USER: ${ADMIN_USER:-admin}
@@ -60,6 +61,7 @@ services:
     environment:
       TZ: ${TZ:-UTC}
       KOHA_API: http://koha:8081/api/v1
+      SSO_SECRET: ${SSO_SECRET:-}
       ADMIN_USER: ${ADMIN_USER:-admin}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD}
       VIEWER_USER: ${VIEWER_USER:-guest}

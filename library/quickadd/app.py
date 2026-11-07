@@ -9,6 +9,7 @@ A tiny web app that sits next to Koha. For each ISBN/UPC it:
 Standard library only; Z39.50 is done by shelling out to yaz-client.
 """
 import base64
+import hashlib
 import hmac
 import json
 import os
@@ -28,6 +29,12 @@ KOHA_API = os.environ.get("KOHA_API", "http://koha:8081/api/v1").rstrip("/")
 USER = os.environ.get("ADMIN_USER", "admin")
 PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 # Optional read-only login to hand out: may open the page and search, nothing else.
+# Single sign-on: requests that reach us through the staff site's web server carry this secret in
+# X-Quickadd-Proxy; we then ask Koha whether the browser's login cookie is a staff user who may edit
+# the catalogue. Unset = feature off (only the Basic logins below work).
+SSO_SECRET = os.environ.get("SSO_SECRET", "")
+KOHA_RETURN_URL = KOHA_API.rsplit("/api/v1", 1)[0] + "/cgi-bin/koha/quickadd-return.pl"
+KOHA_SESSION_URL = KOHA_API.rsplit("/api/v1", 1)[0] + "/cgi-bin/koha/svc/quickadd-session"
 VIEWER_USER = os.environ.get("VIEWER_USER", "")
 VIEWER_PASSWORD = os.environ.get("VIEWER_PASSWORD", "")
 LIBRARY = os.environ.get("KOHA_LIBRARY", "HOME")
@@ -300,6 +307,26 @@ def get_locations():
     return _LOC_CACHE["value"]
 
 
+_COLL_CACHE = {"at": 0.0, "value": []}
+
+
+def get_collections():
+    """Collections (Koha authorised-value category CCODE): 'Kids', 'Cookbooks', ... one per copy."""
+    if time.time() - _COLL_CACHE["at"] < 30:
+        return _COLL_CACHE["value"]
+    try:
+        vals = koha("GET", "/authorised_value_categories/CCODE/authorised_values") or []
+        _COLL_CACHE["value"] = [{"value": v["value"], "label": v.get("description") or v["value"]} for v in vals]
+        _COLL_CACHE["at"] = time.time()
+    except KohaError:
+        pass
+    return _COLL_CACHE["value"]
+
+
+def valid_collection(code):
+    return code if code and any(c["value"] == code for c in get_collections()) else None
+
+
 def valid_location(code):
     return code if code and any(l["value"] == code for l in get_locations()) else None
 
@@ -327,7 +354,7 @@ def find_existing(code):
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 COUNTER_FILE = os.path.join(DATA_DIR, "counter.json")
 MIN_WIDTH, MAX_WIDTH = 7, 10     # 6 all-digit Code 39 symbols can be misread as Code 32 by some scanners
-DEFAULT_SETTINGS = {"barcode_mode": "auto", "width": MIN_WIDTH, "location": ""}
+DEFAULT_SETTINGS = {"barcode_mode": "auto", "width": MIN_WIDTH, "location": "", "patron_password_mode": "generated", "patron_password": ""}
 BARCODE_MODES = ("auto", "scan", "none")
 LOCK = threading.RLock()
 
@@ -362,6 +389,12 @@ def clean_settings(payload, current):
             s["width"] = min(max(int(payload["width"]), MIN_WIDTH), MAX_WIDTH)
         except (TypeError, ValueError):
             pass
+    if payload.get("patron_password_mode") in ("generated", "same"):
+        s["patron_password_mode"] = payload["patron_password_mode"]
+    if "patron_password" in payload:
+        pw = str(payload["patron_password"] or "").strip()
+        if pw == "" or 4 <= len(pw) <= 40:
+            s["patron_password"] = pw
     if "location" in payload:
         loc = payload["location"] or ""
         if loc == "" or valid_location(loc):
@@ -726,6 +759,869 @@ def op_search(term):
         "year": b.get("copyright_date") or "", "copies": by_bib.get(b["biblio_id"], [])} for b in biblios]}
 
 
+# ------------------------------------------------------------ library / book page
+PAGE_SIZE = 48
+ITEM_FILTER_CAP = 2000
+
+
+def _shape_book(b, items, where):
+    mine = [i for i in items if i["biblio_id"] == b["biblio_id"]]
+    out = sum(1 for i in mine if item_status(i) == "Checked out")
+    shelves = sorted({where.get(i.get("location"), "") for i in mine} - {""})
+    colls = {c["value"]: c["label"] for c in get_collections()}
+    collections = sorted({colls.get(i.get("collection_code"), "") for i in mine} - {""})
+    return {"tags": _tags_load().get(str(b["biblio_id"]), []), "collections": collections, "id": b["biblio_id"], "title": (b.get("title") or "").rstrip(" /:"), "author": b.get("author") or "",
+            "year": b.get("copyright_date") or "", "isbn": b.get("isbn") or "", "type": b.get("item_type") or "",
+            "copies": len(mine), "out": out, "shelves": shelves,
+            "callnumber": next((i.get("callnumber") for i in mine if i.get("callnumber")), "") or ""}
+
+
+def op_library(qs):
+    """The Library grid: filter by shelf / format / status, search, sort, page."""
+    def one(k):
+        return (qs.get(k) or [""])[0]
+    term = re.sub(r"[%_\\]", "", one("q")).strip()[:80]
+    shelf, itype, status, coll, tag = one("shelf"), one("type"), one("status"), one("collection"), one("tag")
+    sort = one("sort") or "title"
+    try:
+        page = max(1, int(one("page") or 1))
+    except ValueError:
+        page = 1
+    conds = []
+    if term:
+        like = {"-like": "%" + term + "%"}
+        conds.append({"-or": [{"title": like}, {"author": like}, {"isbn": like}, {"ean": like}]})
+    if tag:
+        ids_t = sorted(int(k) for k, v in _tags_load().items() if any(t.lower() == tag.lower() for t in v))
+        if not ids_t:
+            return {"books": [], "page": page, "more": False}
+        conds.append({"biblio_id": ids_t})
+    order = {"title": "title", "author": "author", "new": "-biblio_id"}.get(sort, "title")
+    item_q = {}
+    if shelf == "-":
+        item_q["location"] = None
+    elif shelf:
+        item_q["location"] = shelf
+    if itype:
+        item_q["item_type_id"] = itype
+    if coll == "-":
+        item_q["collection_code"] = None
+    elif coll:
+        item_q["collection_code"] = coll
+    if status == "out":
+        item_q["checked_out_date"] = {"!=": None}
+    elif status == "in":
+        item_q["checked_out_date"] = None
+    query = {"_order_by": order}
+    if item_q:
+        its = koha("GET", "/items", query={"q": json.dumps(item_q), "_per_page": str(ITEM_FILTER_CAP)}) or []
+        ids = sorted({i["biblio_id"] for i in its})
+        if not ids:
+            return {"books": [], "page": page, "more": False}
+        conds.append({"biblio_id": ids})
+    if conds:
+        query["q"] = json.dumps(conds[0] if len(conds) == 1 else {"-and": conds})
+    query.update({"_per_page": str(PAGE_SIZE + 1), "_page": str(page)})
+    books = koha("GET", "/biblios", query=query) or []
+    more = len(books) > PAGE_SIZE
+    books = books[:PAGE_SIZE]
+    if not books:
+        return {"books": [], "page": page, "more": False}
+    ids = [b["biblio_id"] for b in books]
+    items = koha("GET", "/items", query={"q": json.dumps({"biblio_id": ids}), "_per_page": "1000"}) or []
+    where = {l["value"]: l["label"] for l in get_locations()}
+    return {"books": [_shape_book(b, items, where) for b in books], "page": page, "more": more}
+
+
+def _checkout_info(item_ids, names):
+    """item_id -> {who, due} for items currently out (staff only)."""
+    if not item_ids:
+        return {}
+    cos = koha("GET", "/checkouts", query={"q": json.dumps({"item_id": item_ids}), "_per_page": "100"}) or []
+    out = {}
+    for c in cos:
+        who = ""
+        if names:
+            try:
+                p = koha("GET", "/patrons/%s" % c["patron_id"])
+                who = ("%s %s" % (p.get("firstname") or "", p.get("surname") or "")).strip()
+            except KohaError:
+                pass
+        out[c["item_id"]] = {"who": who, "patron_id": c["patron_id"], "due": (c.get("due_date") or "")[:10],
+                             "checkout_id": c["checkout_id"]}
+    return out
+
+
+def op_book(biblio_id, staff):
+    b = koha("GET", "/biblios/%d" % biblio_id)
+    items = koha("GET", "/biblios/%d/items" % biblio_id) or []
+    where = {l["value"]: l["label"] for l in get_locations()}
+    out = _checkout_info([i["item_id"] for i in items if item_status(i) == "Checked out"], staff)
+    copies = []
+    for i in items:
+        c = {"item_id": i["item_id"], "barcode": i.get("external_id") or "", "callnumber": i.get("callnumber") or "",
+             "shelf": i.get("location") or "", "shelf_label": where.get(i.get("location"), ""),
+             "collection": i.get("collection_code") or "",
+             "collection_label": {c["value"]: c["label"] for c in get_collections()}.get(i.get("collection_code"), ""),
+             "status": item_status(i), "type": i.get("item_type_id") or ""}
+        if staff and c["status"] == "Checked out":
+            c["out"] = out.get(i["item_id"])
+        copies.append(c)
+    return {"id": b["biblio_id"], "title": (b.get("title") or "").rstrip(" /:"), "subtitle": b.get("subtitle") or "",
+            "author": b.get("author") or "", "year": b.get("copyright_date") or b.get("publication_year") or "",
+            "isbn": b.get("isbn") or "", "publisher": b.get("publisher") or "", "pages": b.get("pages") or "",
+            "edition": b.get("edition_statement") or "", "summary": b.get("abstract") or b.get("notes") or "",
+            "series": b.get("series_title") or "", "type": b.get("item_type") or "", "copies": copies,
+            "shelves": get_locations(), "collections": get_collections(),
+            "tags": _tags_load().get(str(b["biblio_id"]), []), "all_tags": tag_counts()}
+
+
+def op_item_update(payload):
+    item_id = payload.get("item_id")
+    if not isinstance(item_id, int):
+        return 400, {"status": "invalid"}
+    with LOCK:
+        it = koha("GET", "/items/%d" % item_id)
+        if "shelf" in payload:
+            it["location"] = valid_location(payload.get("shelf")) or None
+        if "collection" in payload:
+            it["collection_code"] = valid_collection(payload.get("collection")) or None
+        if "callnumber" in payload:
+            it["callnumber"] = (str(payload.get("callnumber") or "").strip()[:80]) or None
+        # Koha's update route rejects the computed fields the GET adds.
+        for k in [k for k in it if k.startswith("effective_")] + [
+                "checkouts_count", "holds_count", "renewals_count", "localuse", "timestamp", "call_number_sort",
+                "bookable", "extended_subfields"]:
+            it.pop(k, None)
+        koha("PUT", "/biblios/%d/items/%d" % (it["biblio_id"], item_id), it)
+    return 200, {"status": "saved"}
+
+
+def op_item_delete(payload):
+    item_id, biblio_id = payload.get("item_id"), payload.get("biblio_id")
+    if not isinstance(item_id, int) or not isinstance(biblio_id, int):
+        return 400, {"status": "invalid"}
+    return op_undo({"item_id": item_id, "biblio_id": biblio_id})
+
+
+def op_book_delete(payload):
+    biblio_id = payload.get("biblio_id")
+    if not isinstance(biblio_id, int):
+        return 400, {"status": "invalid"}
+    with LOCK:
+        items = koha("GET", "/biblios/%d/items" % biblio_id) or []
+        if any(item_status(i) == "Checked out" for i in items):
+            return 409, {"status": "error", "message": "A copy is checked out - return it first."}
+        for i in items:
+            koha("DELETE", "/items/%d" % i["item_id"])
+            forget(i["item_id"])
+        koha("DELETE", "/biblios/%d" % biblio_id)
+        d = _tags_load()
+        if d.pop(str(biblio_id), None) is not None:
+            save_json(TAGS_FILE, d)
+    return 200, {"status": "deleted"}
+
+
+def op_item_copy(payload):
+    """Another copy of a book already in the library (new barcode per the barcode setting)."""
+    biblio_id = payload.get("biblio_id")
+    if not isinstance(biblio_id, int):
+        return 400, {"status": "invalid"}
+    with LOCK:
+        b = koha("GET", "/biblios/%d" % biblio_id)
+        items = koha("GET", "/biblios/%d/items" % biblio_id) or []
+        base = items[0] if items else {}
+        mode = load_settings()["barcode_mode"]
+        if mode == "scan":
+            mode = "auto"           # no scanner step here: number it, or leave it blank in 'none' mode
+        item = add_item(biblio_id, base.get("item_type_id") or valid_type(b.get("item_type")), base.get("callnumber"),
+                        valid_location(payload.get("shelf")) or base.get("location"), mode)
+    return 200, {"status": "added", "item_id": item["item_id"], "barcode": item.get("external_id") or ""}
+
+
+# ------------------------------------------------------------ lending / people
+import datetime as _dt
+
+PATRON_CATEGORY = os.environ.get("PATRON_CATEGORY", "FRIEND")
+
+
+def _patron_name(p):
+    return ("%s %s" % (p.get("firstname") or "", p.get("surname") or "")).strip() or p.get("cardnumber") or "?"
+
+
+def _shape_patron(p):
+    return {"id": p["patron_id"], "name": _patron_name(p), "card": p.get("cardnumber") or "",
+            "email": p.get("email") or "", "phone": p.get("phone") or ""}
+
+
+def op_patron_search(term):
+    term = re.sub(r"[%_\\]", "", term or "").strip()[:60]
+    if not term:
+        res = koha("GET", "/patrons", query={"_per_page": "50", "_order_by": "surname"}) or []
+    else:
+        like = {"-like": "%" + term + "%"}
+        conds = [{"surname": like}, {"firstname": like}, {"cardnumber": {"-like": term + "%"}}]
+        parts = term.split()
+        if len(parts) == 2:                      # "Jane Smith"
+            conds.append({"-and": [{"firstname": {"-like": parts[0] + "%"}}, {"surname": {"-like": parts[1] + "%"}}]})
+        res = koha("GET", "/patrons", query={"q": json.dumps({"-or": conds}), "_per_page": "25", "_order_by": "surname"}) or []
+    return {"patrons": [_shape_patron(p) for p in res]}
+
+
+def _loan_rows(cos):
+    """Checkouts (with embedded item) -> rows with titles and an overdue flag."""
+    if not cos:
+        return []
+    bib_ids = sorted({c["item"]["biblio_id"] for c in cos if c.get("item")})
+    titles = {}
+    if bib_ids:
+        for b in koha("GET", "/biblios", query={"q": json.dumps({"biblio_id": bib_ids}), "_per_page": str(len(bib_ids) + 1)}) or []:
+            titles[b["biblio_id"]] = ((b.get("title") or "").rstrip(" /:"), b.get("author") or "", b.get("isbn") or "")
+    today = _dt.date.today().isoformat()
+    rows = []
+    for c in cos:
+        it = c.get("item") or {}
+        t = titles.get(it.get("biblio_id"), ("(unknown)", "", ""))
+        due = (c.get("due_date") or "")[:10]
+        rows.append({"checkout_id": c["checkout_id"], "patron_id": c["patron_id"], "barcode": it.get("external_id") or "",
+                     "biblio_id": it.get("biblio_id"), "title": t[0], "author": t[1], "isbn": t[2], "due": due,
+                     "overdue": bool(due) and due < today, "renewals": c.get("renewals_count") or 0})
+    return rows
+
+
+def op_patron(patron_id):
+    p = koha("GET", "/patrons/%d" % patron_id)
+    cos = koha("GET", "/checkouts", query={"q": json.dumps({"patron_id": patron_id}), "_per_page": "200",
+                                           "_order_by": "due_date"}, headers={"x-koha-embed": "item"}) or []
+    d = _shape_patron(p)
+    d["loans"] = _loan_rows(cos)
+    d["category"] = p.get("category_id") or ""
+    return d
+
+
+def op_out():
+    """Everything checked out right now, soonest due first (overdue on top)."""
+    cos = koha("GET", "/checkouts", query={"_per_page": "500", "_order_by": "due_date"}, headers={"x-koha-embed": "item"}) or []
+    rows = _loan_rows(cos)
+    names = {}
+    for pid in sorted({r["patron_id"] for r in rows}):
+        try:
+            names[pid] = _patron_name(koha("GET", "/patrons/%d" % pid))
+        except KohaError:
+            names[pid] = "?"
+    for r in rows:
+        r["who"] = names.get(r["patron_id"], "?")
+    return {"loans": rows}
+
+
+def _item_by_barcode(code):
+    code = (code or "").strip()
+    if not code or len(code) > 40:
+        return None
+    res = koha("GET", "/items", query={"q": json.dumps({"external_id": code}), "_per_page": "1"}) or []
+    return res[0] if res else None
+
+
+def _title_of(biblio_id):
+    try:
+        return (koha("GET", "/biblios/%d" % biblio_id).get("title") or "").rstrip(" /:")
+    except KohaError:
+        return ""
+
+
+def op_checkout(payload):
+    pid, code = payload.get("patron_id"), payload.get("barcode")
+    if not isinstance(pid, int):
+        return 400, {"status": "invalid", "message": "Pick the person first."}
+    it = _item_by_barcode(code)
+    if not it:
+        return 200, {"status": "unknown", "message": "No book has the barcode %s." % str(code)[:40]}
+    title = _title_of(it["biblio_id"])
+    if item_status(it) == "Checked out":
+        return 200, {"status": "already_out", "title": title, "barcode": it["external_id"],
+                     "message": "That one is already checked out. Scan it as a return first."}
+    try:
+        co = koha("POST", "/checkouts", {"patron_id": pid, "item_id": it["item_id"]})
+    except KohaError as e:
+        try:
+            msg = json.loads(e.body).get("error") or ""
+        except ValueError:
+            msg = ""
+        return 200, {"status": "refused", "title": title, "message": msg or "Koha would not allow that checkout."}
+    return 200, {"status": "checked_out", "title": title, "barcode": it["external_id"], "due": (co.get("due_date") or "")[:10]}
+
+
+def op_return(payload):
+    code = str(payload.get("barcode") or "").strip()
+    if not SSO_SECRET:
+        return 200, {"status": "error", "message": "Returns need SSO_SECRET in .env (run the installer's Update)."}
+    req = urllib.request.Request(KOHA_RETURN_URL + "?" + urllib.parse.urlencode({"barcode": code}),
+                                 headers={"X-Quickadd-Secret": SSO_SECRET})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            res = json.loads(r.read())
+    except (urllib.error.URLError, OSError, ValueError):
+        return 502, {"status": "error", "message": "Koha did not answer the return - try again."}
+    it = _item_by_barcode(code) if res.get("status") in ("returned", "not_out") else None
+    res["title"] = _title_of(it["biblio_id"]) if it else ""
+    return 200, res
+
+
+def op_renew(payload):
+    cid = payload.get("checkout_id")
+    if not isinstance(cid, int):
+        return 400, {"status": "invalid"}
+    try:
+        co = koha("POST", "/checkouts/%d/renewal" % cid)
+    except KohaError as e:
+        try:
+            msg = json.loads(e.body).get("error") or ""
+        except ValueError:
+            msg = ""
+        return 200, {"status": "refused", "message": msg or "That one can't be renewed (limit reached or someone is waiting)."}
+    return 200, {"status": "renewed", "due": (co.get("due_date") or "")[:10]}
+
+
+_NAME_CACHE = {"at": 0.0, "value": ""}
+
+
+def library_name():
+    if time.time() - _NAME_CACHE["at"] > 300:
+        try:
+            _NAME_CACHE["value"] = koha("GET", "/libraries/%s" % urllib.parse.quote(LIBRARY)).get("name") or ""
+        except (KohaError, AttributeError):
+            pass
+        _NAME_CACHE["at"] = time.time()
+    return _NAME_CACHE["value"]
+
+
+def op_patron_add(payload):
+    def clean(k, n=60):
+        return re.sub(r"\s+", " ", str(payload.get(k) or "")).strip()[:n]
+    surname, first = clean("surname"), clean("firstname")
+    if not surname:
+        return 400, {"status": "invalid", "message": "A name is needed."}
+    body = {"surname": surname, "firstname": first or None, "category_id": PATRON_CATEGORY, "library_id": LIBRARY,
+            "email": clean("email", 100) or None, "phone": clean("phone", 30) or None}
+    try:
+        p = koha("POST", "/patrons", body, headers={"x-confirm-not-duplicate": "1"} if payload.get("confirm") else None)
+    except KohaError as e:
+        if e.status == 409 or "already exists" in e.body:
+            return 200, {"status": "duplicate", "message": "Someone named %s is already in the library." % _patron_name(body)}
+        raise
+    out = dict(_shape_patron(p), status="added")
+    if not payload.get("nologin"):
+        pw = new_password()
+        try:
+            set_patron_password(p["patron_id"], pw)
+            out["password"] = pw
+        except KohaError:
+            out["password"] = ""
+    return 200, out
+
+
+# ------------------------------------------------ new shelves / collections, QR codes, book info
+KOHA_VALUE_URL = KOHA_API.rsplit("/api/v1", 1)[0] + "/cgi-bin/koha/quickadd-value.pl"
+
+
+def op_value_add(payload):
+    """Add a shelf/room or a collection (Koha's REST API cannot; a small guarded Koha script does)."""
+    kind = payload.get("kind")
+    cat = {"shelf": "LOC", "collection": "CCODE"}.get(kind)
+    name = re.sub(r"\s+", " ", str(payload.get("name") or "")).strip()[:60]
+    if not cat or not name:
+        return 400, {"status": "invalid", "message": "A name is needed."}
+    if not SSO_SECRET:
+        return 200, {"status": "error", "message": "Adding these needs SSO_SECRET in .env (run the installer's Update)."}
+    existing = get_locations() if cat == "LOC" else get_collections()
+    for v in existing:                      # same name again: hand back the one that exists
+        if v["label"].strip().lower() == name.lower():
+            return 200, {"status": "added", "value": v["value"], "label": v["label"]}
+    base = re.sub(r"[^A-Z0-9]+", "", name.upper())[:12] or "X"
+    have = {v["value"] for v in existing}
+    code, n = base, 2
+    while code in have:
+        code = base[:10] + str(n)
+        n += 1
+    req = urllib.request.Request(KOHA_VALUE_URL + "?" + urllib.parse.urlencode({"category": cat, "value": code, "description": name}),
+                                 headers={"X-Quickadd-Secret": SSO_SECRET})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            res = json.loads(r.read())
+    except (urllib.error.URLError, OSError, ValueError):
+        return 502, {"status": "error", "message": "Koha did not answer - try again."}
+    if res.get("status") != "added":
+        return 200, {"status": "error", "message": "Koha would not add that."}
+    _LOC_CACHE["at"] = _COLL_CACHE["at"] = 0.0
+    return 200, {"status": "added", "value": code, "label": name}
+
+
+def qr_svg(text):
+    if not re.fullmatch(r"[A-Za-z0-9-]{1,40}", text or ""):
+        raise ValueError("bad text")
+    return subprocess.run(["qrencode", "-t", "SVG", "-m", "2", "-s", "8", "-l", "M", "-o", "-", text],
+                          capture_output=True, timeout=10, check=True).stdout
+
+
+MORE_FILE = os.path.join(DATA_DIR, "more.json")
+MORE_TTL = 30 * 86400
+
+
+def _http_json(url):
+    req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "library-quickadd/1 (home library)"})
+    with urllib.request.urlopen(req, timeout=8) as r:
+        return json.loads(r.read())
+
+
+def _ol_text(v):
+    if isinstance(v, dict):
+        v = v.get("value")
+    return re.sub(r"\s+", " ", v).strip() if isinstance(v, str) else ""
+
+
+def op_more(biblio_id):
+    """Extra details from Open Library (description, subjects) plus look-up links, cached on disk.
+    AR BookFind is a link only: its terms forbid automated access, so nothing is fetched from it."""
+    b = koha("GET", "/biblios/%d" % biblio_id)
+    isbn = re.sub(r"[^0-9Xx]", "", (b.get("isbn") or "").split(" ")[0].split("|")[0])
+    title = (b.get("title") or "").rstrip(" /:")
+    out = {"links": [], "description": "", "subjects": [], "first_published": "", "isbn": isbn,
+           "ar": _ar_load().get(_isbn13(isbn) or "", {})}
+    q = urllib.parse.quote(title + " " + (b.get("author") or ""))
+    if isbn:
+        out["links"] = [
+            {"label": "Open Library", "url": "https://openlibrary.org/isbn/" + isbn},
+            {"label": "Goodreads", "url": "https://www.goodreads.com/book/isbn/" + isbn},
+            {"label": "LibraryThing", "url": "https://www.librarything.com/isbn/" + isbn},
+            {"label": "WorldCat", "url": "https://search.worldcat.org/search?q=bn%3A" + isbn}]
+    out["links"].append({"label": "AR BookFind (reading level)", "url": "https://www.arbookfind.com/", "note": "search for: " + title})
+    if not isbn:
+        return out
+    with LOCK:
+        try:
+            cache = json.load(open(MORE_FILE))
+        except (OSError, ValueError):
+            cache = {}
+    hit = cache.get(isbn)
+    if hit and time.time() - hit["at"] < (MORE_TTL if hit["ok"] else 3600):
+        return dict(out, **hit["data"])
+    data, ok = {}, False
+    try:
+        ed = _http_json("https://openlibrary.org/isbn/%s.json" % isbn)
+        work = (ed.get("works") or [{}])[0].get("key")
+        data["description"] = _ol_text(ed.get("description"))
+        data["subjects"] = []
+        if work:
+            w = _http_json("https://openlibrary.org%s.json" % work)
+            data["description"] = _ol_text(w.get("description")) or data["description"]
+            data["subjects"] = [str(x) for x in (w.get("subjects") or [])][:12]
+            data["first_published"] = str(w.get("first_publish_date") or "")
+            out["links"][0] = {"label": "Open Library", "url": "https://openlibrary.org" + work}
+        data["description"] = data["description"].split("----------")[0].strip()[:1500]
+        ok = True
+    except Exception:
+        pass
+    if ok:
+        data["link0"] = out["links"][0]
+    cache[isbn] = {"at": time.time(), "ok": ok, "data": data}
+    with LOCK:
+        try:
+            tmp = MORE_FILE + ".tmp"
+            json.dump(cache, open(tmp, "w"))
+            os.replace(tmp, MORE_FILE)
+        except OSError:
+            pass
+    if ok and data.get("link0"):
+        out["links"][0] = data.pop("link0")
+    return dict(out, **data)
+
+
+# ------------------------------------------------ reading levels (AR) and CSV in/out
+# AR BookFind has no public feed and its terms forbid automated access, so reading levels are kept
+# here instead: typed in on the book page, or imported from a CSV you made yourself. Keyed by ISBN-13.
+AR_FILE = os.path.join(DATA_DIR, "reading-levels.json")
+
+
+def _isbn13(raw):
+    c = clean_code(raw)
+    if not c:
+        return None
+    return isbn10_to_13(c) if len(c) == 10 else c
+
+
+def _ar_load():
+    try:
+        return json.load(open(AR_FILE))
+    except (OSError, ValueError):
+        return {}
+
+
+def _ar_save(d):
+    tmp = AR_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(d, f)
+    os.replace(tmp, AR_FILE)
+
+
+def _num(v, maxlen=8):
+    v = str(v or "").strip()[:maxlen]
+    return v if re.fullmatch(r"[0-9]{0,4}(\.[0-9]{1,2})?", v) else None
+
+
+def op_ar_set(payload):
+    key = _isbn13(payload.get("isbn"))
+    level, points, quiz = _num(payload.get("level")), _num(payload.get("points")), re.sub(r"[^0-9]", "", str(payload.get("quiz") or ""))[:8]
+    interest = re.sub(r"[^A-Za-z+]", "", str(payload.get("interest") or ""))[:4].upper()
+    if not key or level is None or points is None:
+        return 400, {"status": "invalid", "message": "Level and points are numbers like 4.5 and 6."}
+    with LOCK:
+        d = _ar_load()
+        if level or points or quiz or interest:
+            d[key] = {"level": level, "points": points, "quiz": quiz, "interest": interest}
+        else:
+            d.pop(key, None)
+        _ar_save(d)
+    return 200, {"status": "saved"}
+
+
+def op_ar_import(payload):
+    """CSV with a header row; needs an isbn column and any of level, points, quiz."""
+    import csv, io
+    text = str(payload.get("csv") or "")[:2_000_000]
+    rows = list(csv.reader(io.StringIO(text)))
+    if len(rows) < 2:
+        return 400, {"status": "invalid", "message": "That file has no rows."}
+    head = [re.sub(r"[^a-z0-9]", "", h.lower()) for h in rows[0]]
+    def col(*names):
+        for n in names:
+            if n in head:
+                return head.index(n)
+        return None
+    cint = col("interest", "interestlevel", "il")
+    ci, cl, cp, cq = col("isbn", "isbn13"), col("level", "arlevel", "bl", "booklevel"), col("points", "arpoints", "pts"), col("quiz", "quizno", "quiznumber")
+    if ci is None or (cl is None and cp is None and cq is None):
+        return 400, {"status": "invalid", "message": "Need a header row with an isbn column and at least one of: level, points, quiz."}
+    done = skipped = 0
+    with LOCK:
+        d = _ar_load()
+        for r in rows[1:]:
+            get = lambda i: r[i] if i is not None and i < len(r) else ""
+            key = _isbn13(get(ci))
+            lv, pt = _num(get(cl)), _num(get(cp))
+            if not key or lv is None or pt is None:
+                skipped += 1
+                continue
+            old = d.get(key, {})
+            d[key] = {"level": lv or old.get("level", ""), "points": pt or old.get("points", ""),
+                      "quiz": re.sub(r"[^0-9]", "", get(cq))[:8] or old.get("quiz", ""),
+                      "interest": re.sub(r"[^A-Za-z+]", "", get(cint))[:4].upper() or old.get("interest", "")}
+            done += 1
+        _ar_save(d)
+    return 200, {"status": "imported", "count": done, "skipped": skipped}
+
+
+def export_csv():
+    """One row per copy: what you have, where it is, and any reading level on file."""
+    import csv, io
+    where = {l["value"]: l["label"] for l in get_locations()}
+    colls = {c["value"]: c["label"] for c in get_collections()}
+    ar = _ar_load()
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["title", "author", "isbn", "year", "barcode", "call number", "shelf", "collection", "status", "ar level", "ar points", "ar quiz", "ar interest"])
+    page = 1
+    while True:
+        books = koha("GET", "/biblios", query={"_per_page": "200", "_page": str(page), "_order_by": "title"}) or []
+        if not books:
+            break
+        ids = [b["biblio_id"] for b in books]
+        items = koha("GET", "/items", query={"q": json.dumps({"biblio_id": ids}), "_per_page": "2000"}) or []
+        for b in books:
+            isbn = b.get("isbn") or ""
+            a = ar.get(_isbn13(isbn) or "", {})
+            mine = [i for i in items if i["biblio_id"] == b["biblio_id"]] or [{}]
+            for i in mine:
+                w.writerow([(b.get("title") or "").rstrip(" /:"), b.get("author") or "", isbn, b.get("copyright_date") or "",
+                            i.get("external_id") or "", i.get("callnumber") or "", where.get(i.get("location"), ""),
+                            colls.get(i.get("collection_code"), ""), item_status(i) if i else "", a.get("level", ""), a.get("points", ""), a.get("quiz", ""), a.get("interest", "")])
+        if len(books) < 200:
+            break
+        page += 1
+    return out.getvalue().encode("utf-8-sig")
+
+
+# ------------------------------------------------------------------ tags
+TAGS_FILE = os.path.join(DATA_DIR, "tags.json")
+
+
+def _tags_load():
+    try:
+        d = json.load(open(TAGS_FILE))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def clean_tags(raw):
+    out, seen = [], set()
+    for t in (raw if isinstance(raw, list) else []):
+        t = re.sub(r"\s+", " ", str(t)).strip(" ,;#")[:30]
+        if t and t.lower() not in seen:
+            seen.add(t.lower())
+            out.append(t)
+    return out[:20]
+
+
+def tag_counts():
+    counts = {}
+    for tags in _tags_load().values():
+        for t in tags:
+            counts[t] = counts.get(t, 0) + 1
+    return [{"tag": t, "count": n} for t, n in sorted(counts.items(), key=lambda x: x[0].lower())]
+
+
+def op_tags_set(payload):
+    bid = payload.get("biblio_id")
+    if not isinstance(bid, int):
+        return 400, {"status": "invalid"}
+    tags = clean_tags(payload.get("tags"))
+    with LOCK:
+        d = _tags_load()
+        if tags:
+            d[str(bid)] = tags
+        else:
+            d.pop(str(bid), None)
+        save_json(TAGS_FILE, d)
+    return 200, {"status": "saved", "tags": tags, "all": tag_counts()}
+
+
+# ------------------------------------------------------- patron logins / my books
+LOGINS_FILE = os.path.join(DATA_DIR, "logins.json")           # patron ids that have a login set up
+PW_WORDS = ["maple", "river", "cedar", "tiger", "lemon", "panda", "otter", "robin", "sunny", "cloud", "apple", "grape",
+            "daisy", "heron", "frost", "amber", "coral", "ember", "fable", "ivory", "brook", "pearl", "tulip", "wheat"]
+_LOGIN_FAILS = {}            # client address -> [count, window start]
+_LOGIN_OK = {}               # (user, sha256(pw)) -> (expires, patron_id)
+
+
+def new_password():
+    s = load_settings()
+    if s.get("patron_password_mode") == "same" and s.get("patron_password"):
+        return s["patron_password"]
+    return secrets.choice(PW_WORDS) + "%03d" % secrets.randbelow(1000)
+
+
+def _logins():
+    try:
+        d = json.load(open(LOGINS_FILE))
+        return d if isinstance(d, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def _mark_login(pid):
+    with LOCK:
+        d = _logins()
+        if pid not in d:
+            d.append(pid)
+            save_json(LOGINS_FILE, d)
+
+
+def set_patron_password(pid, pw):
+    koha("POST", "/patrons/%d/password" % pid, {"password": pw, "password_2": pw})
+    _mark_login(pid)
+
+
+def patron_login(user, pw, addr):
+    """Check a patron's card number / userid and password with Koha. Returns the patron id or None.
+    Failures are counted per address so a password cannot be guessed at speed."""
+    if not re.fullmatch(r"[A-Za-z0-9._@-]{1,40}", user or "") or not pw or len(pw) > 100:
+        return None
+    now = time.time()
+    fails = _LOGIN_FAILS.get(addr)
+    if fails and now - fails[1] < 300 and fails[0] >= 10:
+        return None
+    key = (user, hashlib.sha256(pw.encode()).hexdigest())
+    hit = _LOGIN_OK.get(key)
+    if hit and hit[0] > now:
+        return hit[1]
+    pid = None
+    try:
+        r = koha("POST", "/auth/password/validation", {"identifier": user, "password": pw})
+        pid = (r or {}).get("patron_id")
+    except KohaError:
+        pid = None
+    if pid:
+        _LOGIN_OK[key] = (now + 60, pid)
+        _LOGIN_FAILS.pop(addr, None)
+        return pid
+    f = _LOGIN_FAILS.get(addr)
+    if not f or now - f[1] >= 300:
+        f = _LOGIN_FAILS[addr] = [0, now]
+    f[0] += 1
+    return None
+
+
+def op_me(pid):
+    p = koha("GET", "/patrons/%d" % pid)
+    cos = koha("GET", "/checkouts", query={"q": json.dumps({"patron_id": pid}), "_per_page": "200", "_order_by": "due_date"},
+               headers={"x-koha-embed": "item"}) or []
+    return {"name": _patron_name(p), "card": p.get("cardnumber") or "", "loans": _loan_rows(cos)}
+
+
+def op_me_renew(pid, payload):
+    cid = payload.get("checkout_id")
+    if not isinstance(cid, int):
+        return 400, {"status": "invalid"}
+    co = koha("GET", "/checkouts/%d" % cid)
+    if not co or co.get("patron_id") != pid:
+        return 403, {"status": "error", "message": "That is not one of your books."}
+    return op_renew({"checkout_id": cid})
+
+
+def op_me_password(pid, addr, payload):
+    new = str(payload.get("new") or "")
+    if not 4 <= len(new) <= 40:
+        return 400, {"status": "invalid", "message": "Use 4 to 40 characters."}
+    p = koha("GET", "/patrons/%d" % pid)
+    if not patron_login(p.get("cardnumber") or p.get("userid") or "", str(payload.get("old") or ""), addr):
+        return 403, {"status": "error", "message": "The current password is not right."}
+    try:
+        set_patron_password(pid, new)
+    except KohaError as e:
+        return 200, {"status": "error", "message": "Koha would not accept that password: " + e.body[:100]}
+    _LOGIN_OK.clear()
+    return 200, {"status": "saved"}
+
+
+def op_reset_login(payload):
+    """Give someone a (new) login password and show it once."""
+    pid = payload.get("patron_id")
+    if not isinstance(pid, int):
+        return 400, {"status": "invalid"}
+    p = koha("GET", "/patrons/%d" % pid)
+    pw = new_password()
+    set_patron_password(pid, pw)
+    _LOGIN_OK.clear()
+    return 200, {"status": "saved", "name": _patron_name(p), "card": p.get("cardnumber") or "", "password": pw}
+
+
+def op_logins_all(payload):
+    """Logins for everyone who has none yet (people added before logins existed). Passwords are shown once."""
+    have = set(_logins())
+    made, page = [], 1
+    while True:
+        res = koha("GET", "/patrons", query={"q": json.dumps({"category_id": PATRON_CATEGORY}), "_per_page": "100", "_page": str(page)}) or []
+        for p in res:
+            if p["patron_id"] in have:
+                continue
+            pw = new_password()
+            try:
+                set_patron_password(p["patron_id"], pw)
+            except KohaError:
+                continue
+            made.append({"name": _patron_name(p), "card": p.get("cardnumber") or "", "password": pw})
+        if len(res) < 100:
+            break
+        page += 1
+    _LOGIN_OK.clear()
+    return 200, {"status": "done", "made": made}
+
+
+# ------------------------------------------------------------ title / author search
+def z3950_candidates(spec, term, limit=8):
+    """Title search (falling back to any field) on a Z39.50 server; returns summaries with an ISBN."""
+    out = []
+    for attr in ("@attr 1=4", "@attr 1=1016"):
+        with tempfile.TemporaryDirectory() as tmp:
+            dump = os.path.join(tmp, "rec.mrc")
+            q = term.replace('"', " ")
+            script = 'format usmarc\nfind %s "%s"\nshow 1+%d\nquit\n' % (attr, q, limit)
+            try:
+                res = subprocess.run(["yaz-client", "-m", dump, spec], input=script, capture_output=True, text=True,
+                                     timeout=Z3950_TIMEOUT).stdout
+            except (subprocess.TimeoutExpired, OSError):
+                return out
+            m = re.search(r"Number of hits: (\d+)", res)
+            if not m or int(m.group(1)) == 0 or not os.path.exists(dump):
+                continue
+            raw = open(dump, "rb").read()
+            args = ["yaz-marcdump", "-o", "marcxml"]
+            if len(raw) > 9 and raw[9:10] == b" ":
+                args += ["-f", "MARC-8", "-t", "UTF-8", "-l", "9=97"]
+            conv = subprocess.run(args + [dump], capture_output=True, text=True, timeout=15)
+            if conv.returncode != 0:
+                continue
+            try:
+                root = ET.fromstring(conv.stdout if conv.stdout.lstrip().startswith("<collection") else "<c xmlns='%s'>%s</c>" % (NS["m"], conv.stdout))
+            except ET.ParseError:
+                continue
+            for rec in root.iter("{%s}record" % NS["m"]):
+                info = describe(rec)
+                isbn = ""
+                for df in rec.findall("m:datafield[@tag='020']", NS):
+                    for sf in df.findall("m:subfield[@code='a']", NS):
+                        c = clean_code((sf.text or "").split(" ")[0])
+                        if c and len(c) in (10, 13) and not isbn:
+                            isbn = isbn10_to_13(c) if len(c) == 10 else c
+                if isbn:
+                    out.append(dict(info, isbn=isbn, source="Library of Congress"))
+            if out:
+                return out
+    return out
+
+
+def openlibrary_candidates(term, limit=10):
+    url = "https://openlibrary.org/search.json?" + urllib.parse.urlencode(
+        {"q": term, "limit": str(limit), "fields": "title,author_name,first_publish_year,isbn,publisher,cover_i"})
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "library-quickadd/1.0"}), timeout=10) as r:
+            docs = json.load(r).get("docs") or []
+    except (urllib.error.URLError, OSError, ValueError):
+        return []
+    out = []
+    for d in docs:
+        isbns = [clean_code(i) for i in (d.get("isbn") or [])]
+        isbns = [i for i in isbns if i and len(i) == 13 and i[:3] in ("978", "979")] or [isbn10_to_13(i) for i in isbns if i and len(i) == 10]
+        if not isbns or not d.get("title"):
+            continue
+        out.append({"title": d["title"], "author": ", ".join((d.get("author_name") or [])[:2]), "year": str(d.get("first_publish_year") or ""),
+                    "publisher": ((d.get("publisher") or [""])[0])[:60], "isbn": isbns[0], "source": "Open Library"})
+    return out
+
+
+def op_lookup(term):
+    """Books matching a title/author, to choose from; each has an ISBN so choosing one is a normal add."""
+    term = re.sub(r"\s+", " ", term or "").strip()[:100]
+    if len(term) < 3:
+        return {"candidates": []}
+    found, seen = [], set()
+    for src in SOURCES:
+        got = []
+        if src == "openlibrary":
+            got = openlibrary_candidates(term)
+        elif src.startswith("z3950:"):
+            got = z3950_candidates(src[len("z3950:"):], term)
+        for c in got:
+            key = (c["isbn"], (c["title"] + c["author"]).lower()[:40])
+            if c["isbn"] in {k[0] for k in seen} or key in seen:
+                continue
+            seen.add(key)
+            found.append(c)
+    found = found[:12]
+    if found:                                    # which of these do we already own? one query for all
+        conds = [{"isbn": {"-like": "%" + c["isbn"] + "%"}} for c in found] + [{"ean": {"-like": "%" + c["isbn"] + "%"}} for c in found]
+        try:
+            owned = " ".join((b.get("isbn") or "") + " " + (b.get("ean") or "") for b in
+                             (koha("GET", "/biblios", query={"q": json.dumps({"-or": conds}), "_per_page": "50"}) or []))
+        except KohaError:
+            owned = ""
+        for c in found:
+            alt = isbn13_to_10(c["isbn"]) or ""
+            c["have"] = c["isbn"] in owned or bool(alt and alt in owned)
+    have = found
+    return {"candidates": have}
+
+
 # ------------------------------------------------------------ photo scanning
 MAX_IMAGE = 12 * 1024 * 1024
 ZBAR_TIMEOUT = 20
@@ -782,6 +1678,33 @@ def decode_photo(data, kind):
 INDEX = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html"), "rb").read()
 
 
+_SESSION_CACHE = {}
+
+
+def koha_session_user(sid, ip):
+    """Ask Koha whether this staff session may edit the catalogue. Returns the user name or None.
+    Any problem (Koha starting, endpoint missing, odd reply) reads as 'not signed in', which just
+    means Quick Add asks for its own login."""
+    key, now = (sid, ip), time.time()
+    hit = _SESSION_CACHE.get(key)
+    if hit and hit[0] > now:
+        return hit[1]
+    user = None
+    try:
+        req = urllib.request.Request(KOHA_SESSION_URL + "?" + urllib.parse.urlencode({"sid": sid, "ip": ip}),
+                                     headers={"X-Quickadd-Secret": SSO_SECRET})
+        with urllib.request.urlopen(req, timeout=4) as r:
+            data = json.load(r)
+        if data.get("status") == "ok":
+            user = data.get("user") or "staff"
+    except Exception:
+        user = None
+    if len(_SESSION_CACHE) > 500:
+        _SESSION_CACHE.clear()
+    _SESSION_CACHE[key] = (now + (20 if user else 5), user)     # short: logging out takes effect quickly
+    return user
+
+
 class Handler(BaseHTTPRequestHandler):
     server_version = "QuickAdd/1.0"
 
@@ -799,29 +1722,58 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Content-Security-Policy",
                          "default-src 'self'; img-src 'self' https: data:; "
-                         "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'")
+                         "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-src https://www.arbookfind.com")
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.end_headers()
         self.wfile.write(body)
 
     def _role(self):
-        """'admin', 'viewer' (read-only guest) or None."""
+        """'admin', 'viewer' (read-only guest) or None. Sets self.via to 'koha' for a staff-site login."""
+        self.via = None
+        self.patron_id = None
+        self.addr = self.client_address[0]
         if not PASSWORD:
             return None
         header = self.headers.get("Authorization", "")
-        if not header.startswith("Basic "):
+        if header.startswith("Basic "):
+            try:
+                u, _, p = base64.b64decode(header[6:]).decode().partition(":")
+            except (ValueError, UnicodeDecodeError):
+                return None
+            ub, pb = u.encode(), p.encode()
+            # Both comparisons always run, so timing does not reveal which account exists.
+            is_admin = hmac.compare_digest(ub, USER.encode()) & hmac.compare_digest(pb, PASSWORD.encode())
+            is_viewer = bool(VIEWER_USER and VIEWER_PASSWORD) & hmac.compare_digest(ub, VIEWER_USER.encode()) \
+                & hmac.compare_digest(pb, VIEWER_PASSWORD.encode())
+            if is_admin:
+                return "admin"
+            if is_viewer:
+                return "viewer"
+            # Otherwise: a patron signing in with their card number (or userid) and password.
+            addr = self.client_address[0]
+            if SSO_SECRET and hmac.compare_digest(self.headers.get("X-Quickadd-Proxy", "").encode(), SSO_SECRET.encode()):
+                addr = self.headers.get("X-Forwarded-For", "").split(",")[-1].strip() or addr
+            self.addr = addr
+            pid = patron_login(u, p, addr)
+            if pid:
+                self.patron_id = pid
+                return "patron"
             return None
-        try:
-            u, _, p = base64.b64decode(header[6:]).decode().partition(":")
-        except (ValueError, UnicodeDecodeError):
-            return None
-        ub, pb = u.encode(), p.encode()
-        # Both comparisons always run, so timing does not reveal which account exists.
-        is_admin = hmac.compare_digest(ub, USER.encode()) & hmac.compare_digest(pb, PASSWORD.encode())
-        is_viewer = bool(VIEWER_USER and VIEWER_PASSWORD) & hmac.compare_digest(ub, VIEWER_USER.encode()) \
-            & hmac.compare_digest(pb, VIEWER_PASSWORD.encode())
-        return "admin" if is_admin else "viewer" if is_viewer else None
+        # No Basic login: accept a staff-site login, but only for requests that came through the staff
+        # site's web server (it overwrites X-Quickadd-Proxy with the shared secret on every request).
+        if SSO_SECRET and hmac.compare_digest(self.headers.get("X-Quickadd-Proxy", "").encode(), SSO_SECRET.encode()):
+            sid = ""
+            for part in self.headers.get("Cookie", "").split(";"):
+                k, _, v = part.strip().partition("=")
+                if k == "CGISESSID":
+                    sid = v
+            # the browser's address as the web server saw it: the LAST entry (the one it appended)
+            ip = self.headers.get("X-Forwarded-For", "").split(",")[-1].strip()
+            if sid and ip and koha_session_user(sid, ip):
+                self.via = "koha"
+                return "admin"
+        return None
 
     def _guard(self, need_admin=True):
         role = self._role()
@@ -832,6 +1784,9 @@ class Handler(BaseHTTPRequestHandler):
         if need_admin and role != "admin":
             self._send(403, {"status": "error", "message": "This login can search but not change anything."})
             return False
+        if self.via == "koha" and self.command == "POST" and self.headers.get("X-Quickadd") != "1":
+            self._send(403, {"status": "error", "message": "Missing request header."})
+            return False
         self.role = role
         return True
 
@@ -839,20 +1794,79 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/healthz":
             return self._send(200, b"ok", "text/plain")
         path = self.path.split("?")[0]
-        if not self._guard(need_admin=path not in ("/", "/api/state", "/api/search")):
+        if not self._guard(need_admin=path not in ("/", "/api/state", "/api/search", "/api/library", "/api/me") and not path.startswith(("/api/book/", "/api/more/"))):
             return
         if path == "/":
             return self._send(200, INDEX, "text/html; charset=utf-8")
-        if path == "/api/state" and self.role == "viewer":
-            return self._send(200, {"role": "viewer", "library": LIBRARY, "recent": [], "types": {}, "locations": [],
+        if path == "/api/state" and self.role in ("viewer", "patron"):
+            return self._send(200, {"role": self.role, "library_name": library_name(), "library": LIBRARY, "recent": [], "types": {}, "locations": [],
                                     "settings": {}, "staff_port": STAFF_PORT, "staff_url": STAFF_URL,
                                     "opac_url": OPAC_URL, "opac_port": OPAC_PORT, "sources": []})
         if path == "/api/state":
-            return self._send(200, {"role": "admin", "recent": load_recent()[:100], "types": get_item_types(),
+            return self._send(200, {"role": "admin", "library_name": library_name(), "recent": load_recent()[:100], "types": get_item_types(),
                                     "library": LIBRARY, "locations": get_locations(), "settings": load_settings(), "staff_port": STAFF_PORT, "staff_url": STAFF_URL, "opac_url": OPAC_URL, "opac_port": OPAC_PORT,
                                     "sources": [s.split(":", 1)[0] if s.startswith("z3950") else s for s in SOURCES]})
         if path == "/api/settings":
             return self._send(200, settings_view())
+        if path in ("/api/patrons", "/api/out") or path.startswith("/api/patron/"):
+            try:
+                if path == "/api/out":
+                    return self._send(200, op_out())
+                if path == "/api/patrons":
+                    return self._send(200, op_patron_search((urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("q") or [""])[0]))
+                m = re.match(r"^/api/patron/(\d{1,9})$", path)
+                if not m:
+                    return self._send(404, {"error": "not found"})
+                return self._send(200, op_patron(int(m.group(1))))
+            except KohaError as e:
+                return self._send(404 if e.status == 404 else 502, {"status": "error", "message":
+                                  "Koha is not answering yet - try again in a minute." if e.status == 503 else "Failed: %s" % e.body[:120]})
+        if path == "/api/lookup":
+            q = (urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("q") or [""])[0]
+            try:
+                return self._send(200, op_lookup(q))
+            except KohaError:
+                return self._send(502, {"status": "error", "message": "Koha is not answering yet - try again in a minute."})
+        if path == "/api/me":
+            if self.role != "patron":
+                return self._send(403, {"status": "error", "message": "Sign in with a library card to see your books."})
+            try:
+                return self._send(200, op_me(self.patron_id))
+            except KohaError:
+                return self._send(502, {"status": "error", "message": "Koha is not answering yet - try again in a minute."})
+        if path == "/api/export.csv":
+            try:
+                body = export_csv()
+            except KohaError:
+                return self._send(502, {"status": "error"})
+            return self._send(200, body, "text/csv; charset=utf-8", {"Content-Disposition": 'attachment; filename="library.csv"'})
+        if path == "/api/qr":
+            try:
+                svg = qr_svg((urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("t") or [""])[0])
+            except (ValueError, OSError, subprocess.SubprocessError):
+                return self._send(400, b"bad", "text/plain")
+            return self._send(200, svg, "image/svg+xml")
+        if path.startswith("/api/more/"):
+            m = re.match(r"^/api/more/(\d{1,9})$", path)
+            if not m:
+                return self._send(404, {"error": "not found"})
+            try:
+                return self._send(200, op_more(int(m.group(1))))
+            except KohaError:
+                return self._send(502, {"status": "error"})
+        if path == "/api/library" or path.startswith("/api/book/"):
+            try:
+                if path == "/api/library":
+                    return self._send(200, dict(op_library(urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)),
+                                                shelves=get_locations(), collections=get_collections(), types=get_item_types(), tags=tag_counts()))
+                m = re.match(r"^/api/book/(\d{1,9})$", path)
+                if not m:
+                    return self._send(404, {"error": "not found"})
+                return self._send(200, op_book(int(m.group(1)), self.role == "admin"))
+            except KohaError as e:
+                return self._send(404 if e.status == 404 else 502, {"status": "error", "message":
+                                  "Koha is not answering yet - try again in a minute." if e.status == 503
+                                  else "Not found." if e.status == 404 else "Failed: %s" % e.body[:120]})
         if path == "/api/search":
             qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
             try:
@@ -863,6 +1877,25 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
+        if self.path.startswith("/api/me/"):
+            if not self._guard(need_admin=False):
+                return
+            if self.role != "patron":
+                return self._send(403, {"status": "error", "message": "Sign in with a library card first."})
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                payload = json.loads(self.rfile.read(min(length, 2000)) or b"{}")
+                if self.path == "/api/me/renew":
+                    code, body = op_me_renew(self.patron_id, payload)
+                elif self.path == "/api/me/password":
+                    code, body = op_me_password(self.patron_id, self.addr, payload)
+                else:
+                    return self._send(404, {"error": "not found"})
+                return self._send(code, body)
+            except KohaError:
+                return self._send(502, {"status": "error", "message": "Koha is not answering yet - try again in a minute."})
+            except ValueError:
+                return self._send(400, {"status": "invalid"})
         if not self._guard():
             return
         try:
@@ -877,12 +1910,15 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(415, {"status": "error", "message": "Please send a JPEG or PNG photo."})
                 return self._send(200, {"status": "ok", "codes": codes})
             length = int(self.headers.get("Content-Length", "0"))
-            if length > 20000:
+            if length > (2_200_000 if self.path == "/api/ar/import" else 20000):
                 return self._send(413, {"error": "too large"})
             payload = json.loads(self.rfile.read(length) or b"{}")
             ops = {"/api/add": op_add, "/api/manual": op_manual, "/api/undo": op_undo,
                    "/api/finish": op_finish, "/api/cancel": op_cancel, "/api/settings": op_settings,
-                   "/api/barcodes/reserve": op_reserve, "/api/barcodes/assign": op_assign}
+                   "/api/barcodes/reserve": op_reserve, "/api/barcodes/assign": op_assign,
+                   "/api/item/update": op_item_update, "/api/item/delete": op_item_delete,
+                   "/api/item/copy": op_item_copy, "/api/book/delete": op_book_delete,
+                   "/api/value/add": op_value_add, "/api/tags/set": op_tags_set, "/api/patron/reset-login": op_reset_login, "/api/logins/all": op_logins_all, "/api/ar/set": op_ar_set, "/api/ar/import": op_ar_import, "/api/checkout": op_checkout, "/api/return": op_return, "/api/renew": op_renew, "/api/patron/add": op_patron_add}
             fn = ops.get(self.path)
             if not fn:
                 return self._send(404, {"error": "not found"})
