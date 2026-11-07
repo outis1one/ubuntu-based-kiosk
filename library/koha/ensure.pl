@@ -37,8 +37,8 @@ unless ( -e $flag ) {
 }
 
 # Staff home page block (Koha 26.05 keeps these in the HTML customizations tool). Rewritten each start.
-my $html = '<div class="main-heading"><h3>A Room for Books</h3></div><ul class="list-unstyled">'
-    . '<li><a class="btn btn-primary" href="/add/">Open A Room for Books</a> (library, lend / return, people, add books)</li>'
+my $html = '<div class="main-heading"><h3>Room for Books</h3></div><ul class="list-unstyled">'
+    . '<li><a class="btn btn-primary" href="/add/">Open Room for Books</a> (library, lend / return, people, add books)</li>'
     . '<li><a href="/add/#find">Find a book</a></li></ul>';
 my ($id) = $dbh->selectrow_array(q{SELECT id FROM additional_contents WHERE code = 'library_tools'});
 unless ($id) {
@@ -46,10 +46,10 @@ unless ($id) {
                VALUES ('html_customizations', 'library_tools', 'IntranetmainUserblock', NULL, CURDATE(), 1)});
     $id = $dbh->last_insert_id( undef, undef, 'additional_contents', 'id' );
     $dbh->do( q{INSERT INTO additional_contents_localizations (additional_content_id, title, content, lang)
-                VALUES (?, 'A Room for Books', ?, 'default')}, undef, $id, $html );
-    say "ensure: added the staff home 'A Room for Books' block";
+                VALUES (?, 'Room for Books', ?, 'default')}, undef, $id, $html );
+    say "ensure: added the staff home 'Room for Books' block";
 }
 else {
-    $dbh->do( q{UPDATE additional_contents_localizations SET title = 'A Room for Books', content = ? WHERE additional_content_id = ? AND lang = 'default'},
+    $dbh->do( q{UPDATE additional_contents_localizations SET title = 'Room for Books', content = ? WHERE additional_content_id = ? AND lang = 'default'},
         undef, $html, $id );
 }

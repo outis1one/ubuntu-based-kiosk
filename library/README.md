@@ -1,4 +1,4 @@
-# A Room for Books: a home library (Koha + the A Room for Books site, in Docker)
+# Room for Books: a home library (Koha + the Room for Books site, in Docker)
 
 A self-hosted library catalogue you can set up in one command:
 

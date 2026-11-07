@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>A Room for Books</title>
+<title>Room for Books</title>
 <style>
   :root {
     --bg: #f6f5f1; --card: #ffffff; --ink: #1d2320; --muted: #5b655f; --line: #dcdad2;
@@ -147,7 +147,7 @@
 <body>
 <main>
   <header>
-    <h1 id="title">A Room for Books</h1>
+    <h1 id="title">Room for Books</h1>
     <nav class="tabs" aria-label="Sections">
       <a id="tab-library" href="#library" class="on">Library</a>
       <a id="tab-mine" href="#mine" hidden>My books</a>
@@ -1197,7 +1197,7 @@
     for (const t of ['add', 'lend', 'people']) $('tab-' + t).hidden = viewer;
     $('csvtools').hidden = viewer;
     const names = { library: 'The library', book: 'The library', add: 'Add books', lend: 'Lend / return', people: 'People', card: 'Library card', cards: 'Library cards', mine: 'My books' };
-    document.title = names[view] + ' - A Room for Books';
+    document.title = names[view] + ' - Room for Books';
     if (view === 'book') loadBook(m[1]);
     else if (view === 'mine') loadMine();
     else if (view === 'add') $('code').focus();
