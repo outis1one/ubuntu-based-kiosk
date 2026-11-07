@@ -210,6 +210,11 @@ Staff who are signed in to the library site (and allowed to edit the catalogue) 
 
 ## The home page (the Room for Books site at `/add/`)
 
+**One address.** `http://<ip>:<port>/` (and later `https://your-domain/` behind Caddy) opens this page; there is no separate
+port to remember. Koha's own staff screens live on the same address at `/cgi-bin/koha/mainpage.pl`, reached from the menu
+(*Koha (full staff screens)*). Everyone signs in at the same prompt: staff with the admin login, borrowers with their card number
+and password, the guest with the guest login.
+
 One simple page: a **Look up** box (books by title, author or ISBN, and people by name or card number), four big buttons
 (**Check out**, **Return**, **Add books**, **Add a person**) and **Recently added** books with their covers. The **menu**
 (top right) holds the rest: browse all books, lend / return, people and library cards, barcodes and settings, export / import,

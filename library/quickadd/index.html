@@ -1347,8 +1347,8 @@
     // The public catalogue is off by default: only link to it when a public address was configured.
     $('lnk-opac').hidden = !s.opac_url;
     if (s.opac_url) $('lnk-opac').href = s.opac_url + '/';
-    $('lnk-staff').href = staffRoot() + '/';
-    $('lnk-staff').hidden = viewer; $('footkoha').href = staffRoot() + '/';
+    $('lnk-staff').href = staffRoot() + '/cgi-bin/koha/mainpage.pl';
+    $('lnk-staff').hidden = viewer; $('footkoha').href = staffRoot() + '/cgi-bin/koha/mainpage.pl';
     $('footname').textContent = 'Room for Books' + (s.library_name ? ' · ' + s.library_name : '');
     $('lnk-labels').href = staffRoot() + '/cgi-bin/koha/labels/label-edit-range.pl';
     if (s.locations && s.locations.length) {

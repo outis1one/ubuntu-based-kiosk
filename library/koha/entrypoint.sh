@@ -78,6 +78,9 @@ if [ ! -d "/etc/koha/sites/$INST" ]; then
         cat > /etc/koha/apache-quickadd.conf << APACHE
 <IfModule mod_proxy_http.c>
     RedirectMatch ^/add\$ /add/
+    # The bare address (http://ip:port/ or https://your-domain/) opens the Room for Books home page;
+    # Koha's own staff screens stay at /cgi-bin/koha/mainpage.pl.
+    RedirectMatch ^/\$ /add/
     ProxyPass /add/ ${KOHA_QUICKADD_URL%/}/
     ProxyPassReverse /add/ ${KOHA_QUICKADD_URL%/}/
 ${SSO_BLOCK}
