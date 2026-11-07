@@ -234,3 +234,12 @@ The read-only `guest` login only sees the Library and book pages (no copy status
   **Print everyone's cards** (People) lays out a sheet of cards.
 - **More about a book**: a description and subjects from Open Library, plus look-up links (Goodreads, LibraryThing,
   WorldCat). **AR BookFind** is a link only: Renaissance's terms forbid automated access, so nothing is fetched from it.
+
+### Reading levels (AR) and spreadsheets
+
+AR BookFind has no public feed or import, and its terms forbid automated look-ups, so this site does not fetch from it.
+Instead: the book page has an **Open AR BookFind** link (plus **Copy title** to paste into its search) and boxes to record the
+**level, points and quiz number** you find there (the read-only guest sees them). **Library page -> Export / import** downloads
+`library.csv` (one row per copy, with any reading level) and imports a CSV of `isbn, level, points[, quiz]` you made yourself
+(for example from a spreadsheet or a Renaissance report you are entitled to export). Levels are stored in `reading-levels.json`
+in the Add books data volume, keyed by ISBN, so they survive a Koha reinstall and are included in the usual backups of that folder.

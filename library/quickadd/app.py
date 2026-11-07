@@ -1161,7 +1161,8 @@ def op_more(biblio_id):
     b = koha("GET", "/biblios/%d" % biblio_id)
     isbn = re.sub(r"[^0-9Xx]", "", (b.get("isbn") or "").split(" ")[0].split("|")[0])
     title = (b.get("title") or "").rstrip(" /:")
-    out = {"links": [], "description": "", "subjects": [], "first_published": ""}
+    out = {"links": [], "description": "", "subjects": [], "first_published": "", "isbn": isbn,
+           "ar": _ar_load().get(_isbn13(isbn) or "", {})}
     q = urllib.parse.quote(title + " " + (b.get("author") or ""))
     if isbn:
         out["links"] = [
@@ -1209,6 +1210,117 @@ def op_more(biblio_id):
     if ok and data.get("link0"):
         out["links"][0] = data.pop("link0")
     return dict(out, **data)
+
+
+# ------------------------------------------------ reading levels (AR) and CSV in/out
+# AR BookFind has no public feed and its terms forbid automated access, so reading levels are kept
+# here instead: typed in on the book page, or imported from a CSV you made yourself. Keyed by ISBN-13.
+AR_FILE = os.path.join(DATA_DIR, "reading-levels.json")
+
+
+def _isbn13(raw):
+    c = clean_code(raw)
+    if not c:
+        return None
+    return isbn10_to_13(c) if len(c) == 10 else c
+
+
+def _ar_load():
+    try:
+        return json.load(open(AR_FILE))
+    except (OSError, ValueError):
+        return {}
+
+
+def _ar_save(d):
+    tmp = AR_FILE + ".tmp"
+    with open(tmp, "w") as f:
+        json.dump(d, f)
+    os.replace(tmp, AR_FILE)
+
+
+def _num(v, maxlen=8):
+    v = str(v or "").strip()[:maxlen]
+    return v if re.fullmatch(r"[0-9]{0,4}(\.[0-9]{1,2})?", v) else None
+
+
+def op_ar_set(payload):
+    key = _isbn13(payload.get("isbn"))
+    level, points, quiz = _num(payload.get("level")), _num(payload.get("points")), re.sub(r"[^0-9]", "", str(payload.get("quiz") or ""))[:8]
+    if not key or level is None or points is None:
+        return 400, {"status": "invalid", "message": "Level and points are numbers like 4.5 and 6."}
+    with LOCK:
+        d = _ar_load()
+        if level or points or quiz:
+            d[key] = {"level": level, "points": points, "quiz": quiz}
+        else:
+            d.pop(key, None)
+        _ar_save(d)
+    return 200, {"status": "saved"}
+
+
+def op_ar_import(payload):
+    """CSV with a header row; needs an isbn column and any of level, points, quiz."""
+    import csv, io
+    text = str(payload.get("csv") or "")[:2_000_000]
+    rows = list(csv.reader(io.StringIO(text)))
+    if len(rows) < 2:
+        return 400, {"status": "invalid", "message": "That file has no rows."}
+    head = [re.sub(r"[^a-z0-9]", "", h.lower()) for h in rows[0]]
+    def col(*names):
+        for n in names:
+            if n in head:
+                return head.index(n)
+        return None
+    ci, cl, cp, cq = col("isbn", "isbn13"), col("level", "arlevel", "bl", "booklevel"), col("points", "arpoints", "pts"), col("quiz", "quizno", "quiznumber")
+    if ci is None or (cl is None and cp is None and cq is None):
+        return 400, {"status": "invalid", "message": "Need a header row with an isbn column and at least one of: level, points, quiz."}
+    done = skipped = 0
+    with LOCK:
+        d = _ar_load()
+        for r in rows[1:]:
+            get = lambda i: r[i] if i is not None and i < len(r) else ""
+            key = _isbn13(get(ci))
+            lv, pt = _num(get(cl)), _num(get(cp))
+            if not key or lv is None or pt is None:
+                skipped += 1
+                continue
+            old = d.get(key, {})
+            d[key] = {"level": lv or old.get("level", ""), "points": pt or old.get("points", ""),
+                      "quiz": re.sub(r"[^0-9]", "", get(cq))[:8] or old.get("quiz", "")}
+            done += 1
+        _ar_save(d)
+    return 200, {"status": "imported", "count": done, "skipped": skipped}
+
+
+def export_csv():
+    """One row per copy: what you have, where it is, and any reading level on file."""
+    import csv, io
+    where = {l["value"]: l["label"] for l in get_locations()}
+    colls = {c["value"]: c["label"] for c in get_collections()}
+    ar = _ar_load()
+    out = io.StringIO()
+    w = csv.writer(out)
+    w.writerow(["title", "author", "isbn", "year", "barcode", "call number", "shelf", "collection", "status", "ar level", "ar points", "ar quiz"])
+    page = 1
+    while True:
+        books = koha("GET", "/biblios", query={"_per_page": "200", "_page": str(page), "_order_by": "title"}) or []
+        if not books:
+            break
+        ids = [b["biblio_id"] for b in books]
+        items = koha("GET", "/items", query={"q": json.dumps({"biblio_id": ids}), "_per_page": "2000"}) or []
+        for b in books:
+            isbn = b.get("isbn") or ""
+            a = ar.get(_isbn13(isbn) or "", {})
+            mine = [i for i in items if i["biblio_id"] == b["biblio_id"]] or [{}]
+            for i in mine:
+                w.writerow([(b.get("title") or "").rstrip(" /:"), b.get("author") or "", isbn, b.get("copyright_date") or "",
+                            i.get("external_id") or "", i.get("callnumber") or "", where.get(i.get("location"), ""),
+                            colls.get(i.get("collection_code"), ""), item_status(i) if i else "", a.get("level", ""), a.get("points", ""), a.get("quiz", "")])
+        if len(books) < 200:
+            break
+        page += 1
+    return out.getvalue().encode("utf-8-sig")
 
 
 # ------------------------------------------------------------ photo scanning
@@ -1368,7 +1480,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/healthz":
             return self._send(200, b"ok", "text/plain")
         path = self.path.split("?")[0]
-        if not self._guard(need_admin=path not in ("/", "/api/state", "/api/search", "/api/library") and not path.startswith("/api/book/")):
+        if not self._guard(need_admin=path not in ("/", "/api/state", "/api/search", "/api/library") and not path.startswith(("/api/book/", "/api/more/"))):
             return
         if path == "/":
             return self._send(200, INDEX, "text/html; charset=utf-8")
@@ -1395,6 +1507,12 @@ class Handler(BaseHTTPRequestHandler):
             except KohaError as e:
                 return self._send(404 if e.status == 404 else 502, {"status": "error", "message":
                                   "Koha is not answering yet - try again in a minute." if e.status == 503 else "Failed: %s" % e.body[:120]})
+        if path == "/api/export.csv":
+            try:
+                body = export_csv()
+            except KohaError:
+                return self._send(502, {"status": "error"})
+            return self._send(200, body, "text/csv; charset=utf-8", {"Content-Disposition": 'attachment; filename="library.csv"'})
         if path == "/api/qr":
             try:
                 svg = qr_svg((urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("t") or [""])[0])
@@ -1446,7 +1564,7 @@ class Handler(BaseHTTPRequestHandler):
                     return self._send(415, {"status": "error", "message": "Please send a JPEG or PNG photo."})
                 return self._send(200, {"status": "ok", "codes": codes})
             length = int(self.headers.get("Content-Length", "0"))
-            if length > 20000:
+            if length > (2_200_000 if self.path == "/api/ar/import" else 20000):
                 return self._send(413, {"error": "too large"})
             payload = json.loads(self.rfile.read(length) or b"{}")
             ops = {"/api/add": op_add, "/api/manual": op_manual, "/api/undo": op_undo,
@@ -1454,7 +1572,7 @@ class Handler(BaseHTTPRequestHandler):
                    "/api/barcodes/reserve": op_reserve, "/api/barcodes/assign": op_assign,
                    "/api/item/update": op_item_update, "/api/item/delete": op_item_delete,
                    "/api/item/copy": op_item_copy, "/api/book/delete": op_book_delete,
-                   "/api/value/add": op_value_add, "/api/checkout": op_checkout, "/api/return": op_return, "/api/renew": op_renew, "/api/patron/add": op_patron_add}
+                   "/api/value/add": op_value_add, "/api/ar/set": op_ar_set, "/api/ar/import": op_ar_import, "/api/checkout": op_checkout, "/api/return": op_return, "/api/renew": op_renew, "/api/patron/add": op_patron_add}
             fn = ops.get(self.path)
             if not fn:
                 return self._send(404, {"error": "not found"})

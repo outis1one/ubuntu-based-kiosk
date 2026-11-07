@@ -170,6 +170,16 @@
     <div id="libstatus" class="small" aria-live="polite"></div>
     <div class="grid" id="grid"></div>
     <div class="actions"><button type="button" id="more" hidden>Show more</button></div>
+    <details class="settings" id="csvtools">
+      <summary>Export / import</summary>
+      <div class="tool"><strong>Export your books</strong>
+        <div class="small">A spreadsheet (CSV) with one row per copy: title, author, ISBN, barcode, shelf, collection, status and any reading level on file.</div>
+        <div class="actions"><a href="api/export.csv" download><button type="button">Download library.csv</button></a></div></div>
+      <div class="tool"><strong>Import reading levels</strong>
+        <div class="small">A CSV with a header row and columns <code>isbn</code>, <code>level</code>, <code>points</code> (and optionally <code>quiz</code>). Existing levels for the same ISBN are updated.</div>
+        <div class="actions"><input type="file" id="arfile" accept=".csv,text/csv"><button type="button" id="arimport">Import</button></div>
+        <div id="arresult" class="small" aria-live="polite"></div></div>
+    </details>
   </section>
 
   <section id="view-lend" hidden>
@@ -639,6 +649,11 @@
     $('libstatus').textContent = shown ? shown + (r.more ? '+' : '') + (shown === 1 ? ' book' : ' books') + (f.q || f.shelf || f.collection || f.type || f.status ? ' match' : '') :
       (f.q || f.shelf || f.collection || f.type || f.status ? 'No books match.' : (viewer ? 'Nothing here yet.' : 'Nothing here yet - open Add books and scan an ISBN.'));
   }
+  $('arimport').onclick = async () => {
+    const f = $('arfile').files[0]; if (!f) { $('arresult').textContent = 'Choose a CSV file first.'; return; }
+    const r = await api('/api/ar/import', { csv: await f.text() });
+    $('arresult').textContent = r.status === 'imported' ? 'Imported ' + r.count + ' reading level' + (r.count === 1 ? '' : 's') + (r.skipped ? ' (' + r.skipped + ' rows skipped: no valid ISBN or level)' : '') + '.' : (r.message || 'Import failed.');
+  };
   $('more').onclick = () => { libPage += 1; loadLibrary(false); };
   $('findform').onsubmit = ev => { ev.preventDefault(); loadLibrary(true); };
   for (const id of ['f-shelf', 'f-coll', 'f-type', 'f-status', 'f-sort']) $(id).onchange = () => loadLibrary(true);
@@ -698,6 +713,28 @@
     return sel;
   }
 
+  // Reading level (AR): typed in here or imported from a CSV. AR BookFind itself is only a link: it has no
+  // public feed and its terms forbid automated look-ups.
+  function arBox(b, m) {
+    const ar = m.ar || {};
+    const f = (ph, v, w) => el('input', { type: 'text', placeholder: ph, value: v || '', 'aria-label': ph, inputMode: 'decimal', style: 'width:' + w + 'em;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)' });
+    const lvl = f('Level', ar.level, 5), pts = f('Points', ar.points, 5), quiz = f('Quiz no.', ar.quiz, 7);
+    const wrap = el('div', { className: 'small', style: 'margin-top:10px;border-top:1px solid var(--line);padding-top:8px' });
+    const copy = el('button', { type: 'button' }, 'Copy title');
+    copy.onclick = async () => { try { await navigator.clipboard.writeText(b.title); copy.textContent = 'Copied ✓'; } catch (e) { copy.textContent = 'Copy failed'; } setTimeout(() => copy.textContent = 'Copy title', 1500); };
+    const open = el('a', { href: 'https://www.arbookfind.com/', target: '_blank', rel: 'noopener noreferrer' }, 'Open AR BookFind');
+    if (viewer) { wrap.append(el('strong', {}, 'Reading level: '), ar.level ? 'AR ' + ar.level + (ar.points ? ', ' + ar.points + ' points' : '') : 'not recorded'); return wrap; }
+    const save = el('button', { type: 'button', className: 'primary' }, 'Save');
+    const msg = el('span', {});
+    save.onclick = async () => {
+      const r = await api('/api/ar/set', { isbn: m.isbn, level: lvl.value, points: pts.value, quiz: quiz.value });
+      msg.textContent = r.status === 'saved' ? ' Saved ✓' : ' ' + (r.message || 'Could not save.');
+    };
+    wrap.append(el('strong', {}, 'Reading level (AR): '), lvl, ' ', pts, ' ', quiz, ' ', save, msg,
+      el('div', { style: 'margin-top:6px' }, open, ' (a new tab: search for the title there, then type what it shows) ', copy));
+    return wrap;
+  }
+
   function fillMore(box, b, m) {
     const parts = [];
     if (m.description && !b.summary) parts.push(el('p', {}, m.description), el('div', { className: 'small' }, 'Description from Open Library.'));
@@ -706,7 +743,7 @@
     const row = el('div', { className: 'small', style: 'margin-top:8px' }, 'Look it up: ');
     (m.links || []).forEach((l, i) => { if (i) row.append(' · '); row.append(el('a', { href: l.url, target: '_blank', rel: 'noopener noreferrer' }, l.label)); });
     parts.push(row);
-    if ((m.links || []).some(l => l.note)) parts.push(el('div', { className: 'small' }, 'AR BookFind has no public feed and its terms forbid automated look-ups, so open it and search for "' + b.title + '" yourself.'));
+    if ((m.links || []).some(l => l.note)) parts.push(arBox(b, m));
     box.replaceChildren(...parts);
   }
 
@@ -940,6 +977,7 @@
     const tab = { library: 'library', book: 'library', add: 'add', lend: 'lend', people: 'people', card: 'people', cards: 'people' }[view];
     for (const t of ['library', 'add', 'lend', 'people']) $('tab-' + t).classList.toggle('on', t === tab);
     for (const t of ['add', 'lend', 'people']) $('tab-' + t).hidden = viewer;
+    $('csvtools').hidden = viewer;
     const names = { library: 'Library', book: 'Library', add: 'Add books', lend: 'Lend / return', people: 'People', card: 'Library card', cards: 'Library cards' };
     $('title').textContent = names[view]; document.title = names[view];
     if (view === 'book') loadBook(m[1]);
