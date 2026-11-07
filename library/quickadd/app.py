@@ -783,6 +783,8 @@ def _extra_matches(term):
     locs = [l["value"] for l in get_locations() if t in l["label"].lower() or t == l["value"].lower()]
     colls = [c["value"] for c in get_collections() if t in c["label"].lower() or t == c["value"].lower()]
     conds = ([{"location": locs}] if locs else []) + ([{"collection_code": colls}] if colls else [])
+    if re.fullmatch(r"[A-Za-z0-9-]{3,40}", term):          # a scanned item barcode finds its book
+        conds.append({"external_id": term})
     if conds:
         try:
             its = koha("GET", "/items", query={"q": json.dumps(conds[0] if len(conds) == 1 else {"-or": conds}),

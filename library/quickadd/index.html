@@ -199,7 +199,9 @@
       <label class="sr" for="hq">Look up a book or a person</label>
       <input id="hq" type="search" placeholder="Search books, authors, tags, shelves, people" enterkeyhint="search" autocomplete="off">
       <button class="primary" type="submit">Look up</button>
+      <button type="button" id="homescan" aria-label="Scan a barcode with the camera">&#128247; Scan</button>
     </form>
+    <div id="homescanmsg" class="small" aria-live="polite"></div>
     <div id="homeresults" aria-live="polite"></div>
     <div id="homemine" hidden></div>
     <div class="bigacts" id="homeacts">
@@ -1304,6 +1306,16 @@
     else parts.push(el('div', { className: 'small' }, 'No book matches "' + term + '".' + (viewer ? '' : ' ') ), viewer ? '' : el('a', { href: '#add' }, 'Add it'));
     box.replaceChildren(...parts);
   }
+  // Scan a barcode into the search box: a book's barcode or ISBN finds the book, a library card (barcode or phone QR) finds the person.
+  // A USB/Bluetooth scanner just types into the box and presses Enter, so it needs nothing special.
+  $('homescan').onclick = async () => {
+    const found = code => { $('hq').value = code; homeLookup(code); };
+    if (liveOK) { liveScan('sticker', 'Hold a book barcode, ISBN or library card in the frame', async code => { found(code); }, false); return; }
+    const codes = await takePhoto('sticker', $('homescanmsg'));
+    if (codes === null) { $('homescanmsg').textContent = ''; return; }
+    if (!codes.length) { $('homescanmsg').textContent = "Couldn't read a barcode from that photo - move closer and try again."; return; }
+    $('homescanmsg').textContent = ''; found(codes[0]);
+  };
   $('homeform').onsubmit = ev => { ev.preventDefault(); homeLookup($('hq').value.trim()); };
   let recentLoaded = 0;
   async function loadRecent() {

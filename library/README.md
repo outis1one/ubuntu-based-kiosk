@@ -222,6 +222,8 @@ and a link to Koha's own staff screens. Borrowers and the read-only guest see ju
 
 **One search box for everything:** it matches a book's title, author, ISBN, **tags**, **shelf / room** and **collection** (type `kids`, `garage`, `to read`...), and people by name or card number.
 
+**Scanning into the search box:** a USB or Bluetooth scanner just types into it and presses Enter (a book's barcode or ISBN finds the book; a library card finds the person). The **Scan** button next to it uses the phone camera: a live view over HTTPS, or a photo on plain HTTP. The same three ways (type, scanner, camera) work on Add books, Lend / return and Return.
+
 **Adding by title:** on Add books, scan or type an ISBN to add it straight away; type a title or author instead and you get a list
 of matches (cover, author, year, publisher) from Open Library and the Library of Congress to choose from. Books you already have
 are marked, with an *Add another copy* button.
