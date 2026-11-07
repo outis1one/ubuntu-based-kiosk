@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Library</title>
+<title>A Room for Books</title>
 <style>
   :root {
     --bg: #f6f5f1; --card: #ffffff; --ink: #1d2320; --muted: #5b655f; --line: #dcdad2;
@@ -147,9 +147,10 @@
 <body>
 <main>
   <header>
-    <h1 id="title">Library</h1>
+    <h1 id="title">A Room for Books</h1>
     <nav class="tabs" aria-label="Sections">
       <a id="tab-library" href="#library" class="on">Library</a>
+      <a id="tab-mine" href="#mine" hidden>My books</a>
       <a id="tab-lend" href="#lend">Lend / return</a>
       <a id="tab-people" href="#people">People</a>
       <a id="tab-add" href="#add">Add books</a>
@@ -166,6 +167,7 @@
     </form>
     <div class="filters">
       <label class="sr" for="f-shelf">Shelf</label><select id="f-shelf"></select>
+      <label class="sr" for="f-tag">Tag</label><select id="f-tag"></select>
       <label class="sr" for="f-coll">Collection</label><select id="f-coll"></select>
       <label class="sr" for="f-type">Format</label><select id="f-type"></select>
       <label class="sr" for="f-status">Status</label><select id="f-status">
@@ -228,7 +230,16 @@
       </form>
       <div id="personresult" aria-live="polite"></div>
     </details>
-    <p><a href="#cards"><button type="button">Print everyone's cards</button></a></p>
+    <p><a href="#cards"><button type="button">Print everyone's cards</button></a>
+       <button type="button" id="alllogins">Give everyone a sign-in</button></p>
+    <details class="settings"><summary>Sign-in passwords for new people</summary>
+      <fieldset><label class="opt"><input type="radio" name="pwmode" value="generated"> A different easy password for each person (like maple482)</label>
+        <label class="opt"><input type="radio" name="pwmode" value="same"> The same password for everyone:
+          <input type="text" id="pwsame" maxlength="40" placeholder="e.g. readmore" style="font:inherit;padding:4px 8px"></label>
+        <div class="small">People sign in to see their own books with their library card number and this password; they can change it themselves. Existing passwords are never changed by this setting.</div>
+        <div class="actions"><button type="button" id="pwsave">Save</button> <span id="pwsaved" class="small"></span></div></fieldset>
+    </details>
+    <div id="loginresult" aria-live="polite"></div>
     <form class="find-form" id="peopleform" autocomplete="off">
       <label class="sr" for="pq">Search people</label>
       <input id="pq" type="search" placeholder="Search by name or card number" enterkeyhint="search">
@@ -240,6 +251,20 @@
   <section id="view-card" hidden>
     <p class="noprint"><a href="#people">&larr; Back to people</a> &nbsp; <button type="button" id="printcard" class="primary">Print this card</button> <button type="button" id="savecard">Save as picture (to send to a phone)</button></p>
     <div id="cardbox"></div>
+  </section>
+
+  <section id="view-mine" hidden>
+    <div class="copybox"><strong id="mename"></strong> <span class="badge" id="mecard"></span>
+      <div class="small">What you have borrowed, and when it is due.</div></div>
+    <div id="meloans" aria-live="polite"></div>
+    <details class="settings" id="mepw"><summary>Change my password</summary>
+      <form class="manual" id="mepwform" autocomplete="off">
+        <input type="password" name="old" placeholder="Current password" autocomplete="current-password" required aria-label="Current password">
+        <input type="password" name="new" placeholder="New password (4 or more characters)" autocomplete="new-password" required minlength="4" aria-label="New password">
+        <div class="actions"><button class="primary" type="submit">Change password</button></div>
+      </form>
+      <div id="mepwresult" class="small" aria-live="polite"></div>
+    </details>
   </section>
 
   <section id="view-cards" hidden>
@@ -653,7 +678,7 @@
 
   // ---- under the staff site (/add/) everything is same-origin
   const embedded = location.pathname.startsWith('/add/');
-  let viewer = false;                       // the read-only guest login: search only
+  let viewer = false, isPatron = false;                       // the read-only guest login: search only
 
   // ---- views: Library / Book / Add books
   const TINTS = ['#5b6f63', '#6b5b73', '#73655b', '#4f6a7a', '#7a5252', '#6a6f3f', '#4a5f7a', '#7a6a3a'];
@@ -671,7 +696,7 @@
   }
 
   let libPage = 1, libShelves = [], libCollections = [], libLoaded = false, filtersReady = false;
-  const filters = () => ({ q: $('q').value.trim(), shelf: $('f-shelf').value, collection: $('f-coll').value, type: $('f-type').value,
+  const filters = () => ({ q: $('q').value.trim(), shelf: $('f-shelf').value, collection: $('f-coll').value, tag: $('f-tag').value, type: $('f-type').value,
                            status: $('f-status').value, sort: $('f-sort').value });
   const filterQuery = () => { const f = filters(); return Object.entries(f).filter(([, v]) => v).map(([k, v]) => k + '=' + encodeURIComponent(v)).join('&'); };
 
@@ -685,6 +710,11 @@
     return a;
   }
 
+  function fillTagFilter(tags) {
+    const cur = $('f-tag').value;
+    $('f-tag').replaceChildren(el('option', { value: '' }, 'Any tag'), ...tags.map(t => el('option', { value: t.tag }, t.tag + ' (' + t.count + ')')));
+    $('f-tag').value = [...$('f-tag').options].some(o => o.value === cur) ? cur : '';
+  }
   let libSeq = 0;
   async function loadLibrary(reset) {
     const seq = ++libSeq;           // a newer search makes an older, slower answer irrelevant
@@ -697,6 +727,7 @@
     if (seq !== libSeq) return;
     if (!r.books) { $('libstatus').textContent = r.message || 'Koha is not answering yet - try again in a minute.'; return; }
     if (r.collections) libCollections = r.collections;
+    if (r.tags) fillTagFilter(r.tags);
     if (!filtersReady && r.shelves) {
       filtersReady = true;
       libShelves = r.shelves;
@@ -711,8 +742,8 @@
     $('more').hidden = !r.more;
     const shown = grid.children.length;
     const f = filters();
-    $('libstatus').textContent = shown ? shown + (r.more ? '+' : '') + (shown === 1 ? ' book' : ' books') + (f.q || f.shelf || f.collection || f.type || f.status ? ' match' : '') :
-      (f.q || f.shelf || f.collection || f.type || f.status ? 'No books match.' : (viewer ? 'Nothing here yet.' : 'Nothing here yet - open Add books and scan an ISBN.'));
+    $('libstatus').textContent = shown ? shown + (r.more ? '+' : '') + (shown === 1 ? ' book' : ' books') + (f.q || f.shelf || f.collection || f.tag || f.type || f.status ? ' match' : '') :
+      (f.q || f.shelf || f.collection || f.tag || f.type || f.status ? 'No books match.' : (viewer ? 'Nothing here yet.' : 'Nothing here yet - open Add books and scan an ISBN.'));
   }
   $('arimport').onclick = async () => {
     const f = $('arfile').files[0]; if (!f) { $('arresult').textContent = 'Choose a CSV file first.'; return; }
@@ -721,7 +752,7 @@
   };
   $('more').onclick = () => { libPage += 1; loadLibrary(false); };
   $('findform').onsubmit = ev => { ev.preventDefault(); loadLibrary(true); };
-  for (const id of ['f-shelf', 'f-coll', 'f-type', 'f-status', 'f-sort']) $(id).onchange = () => loadLibrary(true);
+  for (const id of ['f-shelf', 'f-coll', 'f-tag', 'f-type', 'f-status', 'f-sort']) $(id).onchange = () => loadLibrary(true);
 
   // ---- one book
   async function loadBook(id) {
@@ -740,6 +771,7 @@
         b.summary ? el('p', {}, b.summary) : ''));
     box.replaceChildren(head);
     const refresh = () => loadBook(id);
+    box.append(tagBox(b));
     const moreBox = el('div', { className: 'copybox' }, el('div', { className: 'small' }, 'Looking for more about this book…'));
     box.append(moreBox);
     api('/api/more/' + id).then(m => fillMore(moreBox, b, m)).catch(() => moreBox.remove());
@@ -788,6 +820,19 @@
     const copy = el('button', { type: 'button' }, 'Copy title');
     copy.onclick = async () => { try { await navigator.clipboard.writeText(b.title); copy.textContent = 'Copied ✓'; } catch (e) { copy.textContent = 'Copy failed'; } setTimeout(() => copy.textContent = 'Copy title', 1500); };
     const open = el('a', { href: 'https://www.arbookfind.com/', target: '_blank', rel: 'noopener noreferrer' }, 'Open AR BookFind');
+    const copyTitle = async () => { try { await navigator.clipboard.writeText(b.title); } catch (e) {} };
+    const arPop = el('button', { type: 'button' }, 'Open beside this page');
+    arPop.onclick = async () => { await copyTitle();
+      const w = Math.min(560, Math.floor(screen.availWidth / 2)), h = screen.availHeight - 80;
+      window.open('https://www.arbookfind.com/', 'arbookfind', 'popup=yes,width=' + w + ',height=' + h + ',left=' + (screen.availWidth - w) + ',top=40'); };
+    const arHolder = el('div', {});
+    const arFrame = el('button', { type: 'button' }, 'Show it here');
+    arFrame.onclick = async () => { await copyTitle();
+      if (arHolder.firstChild) { arHolder.replaceChildren(); arFrame.textContent = 'Show it here'; return; }
+      arFrame.textContent = 'Hide it';
+      arHolder.replaceChildren(el('iframe', { src: 'https://www.arbookfind.com/', title: 'AR BookFind', loading: 'lazy', referrerPolicy: 'no-referrer',
+        style: 'width:100%;height:520px;border:1px solid var(--line);border-radius:8px;margin-top:8px;background:#fff' }),
+        el('div', { className: 'small' }, 'If it keeps asking who you are, your browser is blocking its cookies inside another page: use "Open beside this page" instead.')); };
     if (viewer) { wrap.append(el('strong', {}, 'Reading level: '), ar.level ? 'AR ' + ar.level + (ar.points ? ', ' + ar.points + ' points' : '') + (ar.interest ? ', interest ' + ar.interest : '') : 'not recorded'); return wrap; }
     const save = el('button', { type: 'button', className: 'primary' }, 'Save');
     const msg = el('span', {});
@@ -806,8 +851,43 @@
       msg.textContent = (found.level || found.points || found.quiz) ? ' Filled in from what you pasted - check it, then Save.' : (t.trim() ? " Couldn't find a level or points in that text." : '');
     };
     wrap.append(el('strong', {}, 'Reading level (AR): '), lvl, ' ', pts, ' ', quiz, ' ', inter, ' ', save, msg, paste,
-      el('div', { style: 'margin-top:6px' }, open, ' (a new tab: search for the title there, then type what it shows) ', copy));
+      el('div', { style: 'margin-top:6px' }, open, ' ', arPop, ' ', arFrame, ' ', copy),
+      el('div', { className: 'small' }, 'Search for the title there, select the whole book page, copy, and paste it below. (The title is copied for you when you open it.)'), arHolder);
     return wrap;
+  }
+
+  // Tags: any number per book, free words ("to read", "kids", "signed"...). Click one to see every book with it.
+  function tagBox(b) {
+    const box = el('div', { className: 'copybox' });
+    let tags = [...(b.tags || [])];
+    const all = (b.all_tags || []).map(t => t.tag);
+    const draw = () => {
+      const chips = tags.map(t => {
+        const c = el('span', { className: 'chip', style: 'margin:0 6px 6px 0;display:inline-block' });
+        const a = el('a', { href: '#library', style: 'text-decoration:none' }, t);
+        a.onclick = () => { setTimeout(() => { $('f-tag').value = t; loadLibrary(true); }, 0); };
+        c.append(a);
+        if (!viewer) { const x = el('button', { type: 'button', 'aria-label': 'Remove tag ' + t, style: 'border:0;background:none;padding:0 0 0 6px;cursor:pointer;color:inherit' }, '×');
+          x.onclick = () => save(tags.filter(y => y !== t)); c.append(x); }
+        return c;
+      });
+      const parts = [el('strong', {}, 'Tags: '), ...(chips.length ? chips : [el('span', { className: 'small' }, viewer ? 'none' : 'none yet ')])];
+      if (!viewer) {
+        const list = el('datalist', { id: 'taglist' }, ...all.filter(t => !tags.includes(t)).map(t => el('option', { value: t })));
+        const inp = el('input', { type: 'text', placeholder: 'Add a tag, press Enter', 'aria-label': 'Add a tag', maxLength: 30,
+          style: 'font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);min-width:12em' });
+        inp.setAttribute('list', 'taglist');
+        inp.onkeydown = ev => { if (ev.key === 'Enter') { ev.preventDefault(); const v = inp.value.trim(); if (v) save([...tags, v]); } };
+        parts.push(list, inp);
+      }
+      box.replaceChildren(...parts);
+    };
+    const save = async next => {
+      const r = await api('/api/tags/set', { biblio_id: b.id, tags: next });
+      if (r.status === 'saved') { tags = r.tags; draw(); fillTagFilter(r.all || []); }
+    };
+    draw();
+    return box;
   }
 
   function fillMore(box, b, m) {
@@ -989,9 +1069,30 @@
     await findPeople(term, $('peoplelist'), p => {
       const lend = el('a', { href: '#lend/' + p.id }, el('button', { type: 'button' }, 'Lend / returns'));
       const card = el('a', { href: '#card/' + p.id }, el('button', { type: 'button' }, 'Print card'));
-      return [lend, card];
+      const reset = el('button', { type: 'button' }, 'New password');
+      reset.onclick = async () => { if (!confirm('Give ' + p.name + ' a new sign-in password?')) return; const r = await api('/api/patron/reset-login', { patron_id: p.id });
+        $('loginresult').replaceChildren(el('div', { className: 'result-note' }, r.status === 'saved' ? r.name + ': sign in with card number ' + r.card + ' and password ' : 'Could not do that.', r.password ? el('strong', {}, r.password) : '')); };
+      return [lend, card, reset];
     });
   }
+  $('alllogins').onclick = async () => {
+    if (!confirm('Create a sign-in for everyone who does not have one yet? You will see each password once.')) return;
+    const r = await api('/api/logins/all', {});
+    if (r.status !== 'done') { $('loginresult').textContent = r.message || 'Could not do that.'; return; }
+    $('loginresult').replaceChildren(r.made.length ? el('div', { className: 'result-note' }, el('strong', {}, r.made.length + ' sign-ins created - write these down or print this page:'),
+      ...r.made.map(x => el('div', {}, x.name + ' - card ' + x.card + ' - password ', el('strong', {}, x.password)))) : el('div', { className: 'small' }, 'Everyone already has a sign-in.'));
+  };
+  let pwModeLoaded = false;
+  async function loadPwSettings() {
+    if (pwModeLoaded) return; const v = await api('/api/settings'); const st = v.settings || {}; pwModeLoaded = true;
+    document.querySelectorAll('input[name=pwmode]').forEach(i => { i.checked = i.value === (st.patron_password_mode || 'generated'); });
+    $('pwsame').value = st.patron_password || '';
+  }
+  $('pwsave').onclick = async () => {
+    const mode = document.querySelector('input[name=pwmode]:checked').value;
+    const r = await api('/api/settings', { patron_password_mode: mode, patron_password: $('pwsame').value });
+    $('pwsaved').textContent = r.settings && r.settings.patron_password_mode === mode ? 'Saved ✓' + (mode === 'same' && !r.settings.patron_password ? ' (enter a password of 4+ characters)' : '') : 'Could not save.';
+  };
   $('peopleform').onsubmit = ev => { ev.preventDefault(); loadPeople($('pq').value.trim()); };
   $('personform').onsubmit = async ev => {
     ev.preventDefault();
@@ -999,7 +1100,7 @@
     const r = await api('/api/patron/add', Object.assign(Object.fromEntries(new FormData(f)), confirm ? { confirm: true } : {}));
     if (r.status === 'added') {
       f.reset();
-      $('personresult').replaceChildren(el('div', { className: 'result-note' }, r.name + ' added with library card number ', el('span', { className: 'badge' }, r.card), '. ',
+      $('personresult').replaceChildren(el('div', { className: 'result-note' }, r.name + ' added with library card number ', el('span', { className: 'badge' }, r.card), r.password ? ' (sign-in: card number + password ' : '', r.password ? el('strong', {}, r.password) : '', r.password ? ')' : '', '. ',
         el('a', { href: '#card/' + r.id }, 'Print the card'), ' or ', el('a', { href: '#lend/' + r.id }, 'check something out')));
       loadPeople('');
     } else if (r.status === 'duplicate') {
@@ -1056,28 +1157,53 @@
   };
   $('printcard').onclick = () => window.print();
 
+  async function loadMine() {
+    let r; try { r = await api('/api/me'); } catch (e) { r = {}; }
+    if (!r.loans) { $('meloans').textContent = r.message || 'Could not load your books.'; return; }
+    $('mename').textContent = r.name; $('mecard').textContent = r.card;
+    const today = new Date(); today.setHours(12, 0, 0, 0);
+    const rows = r.loans.map(l => {
+      const days = Math.round((new Date(l.due + 'T12:00:00') - today) / 86400000);
+      const when = l.overdue ? 'Overdue by ' + (-days) + (days === -1 ? ' day' : ' days') : days === 0 ? 'Due today' : 'Due ' + fmtDue(l.due) + ' (in ' + days + (days === 1 ? ' day)' : ' days)');
+      const ren = el('button', { type: 'button' }, 'Renew');
+      ren.onclick = async () => { ren.disabled = true; const x = await api('/api/me/renew', { checkout_id: l.checkout_id });
+        if (x.status === 'renewed') loadMine(); else { ren.disabled = false; alert(x.message || 'That one cannot be renewed.'); } };
+      return el('div', { className: 'loan' }, el('span', { className: 't' }, el('a', { href: '#book/' + l.biblio_id }, l.title), el('div', { className: 'small' }, l.author)),
+        el('span', { className: 'chip ' + (l.overdue ? 'late' : 'in') }, when), ren);
+    });
+    $('meloans').replaceChildren(...(rows.length ? rows : [el('div', { className: 'card ok' }, el('div', { className: 'body' }, 'You have nothing checked out right now.'))]));
+  }
+  $('mepwform').onsubmit = async ev => {
+    ev.preventDefault(); const f = ev.target; const r = await api('/api/me/password', Object.fromEntries(new FormData(f)));
+    $('mepwresult').textContent = r.status === 'saved' ? 'Password changed. Next time your browser asks, use the new one.' : (r.message || 'Could not change it.');
+    if (r.status === 'saved') f.reset();
+  };
+
   function route() {
     const h = location.hash.replace(/^#/, '');
     let m, view = 'library';
     if ((m = h.match(/^book\/(\d+)$/))) view = 'book';
+    else if (h === 'mine' && isPatron) view = 'mine';
     else if (viewer) view = 'library';
     else if (h === 'add') view = 'add';
     else if ((m = h.match(/^lend(?:\/(\d+))?$/))) view = 'lend';
     else if (h === 'people') view = 'people';
     else if ((m = h.match(/^card\/(\d+)$/))) view = 'card';
     else if (h === 'cards') view = 'cards';
-    for (const v of ['library', 'book', 'add', 'lend', 'people', 'card', 'cards']) $('view-' + v).hidden = v !== view;
-    const tab = { library: 'library', book: 'library', add: 'add', lend: 'lend', people: 'people', card: 'people', cards: 'people' }[view];
-    for (const t of ['library', 'add', 'lend', 'people']) $('tab-' + t).classList.toggle('on', t === tab);
+    for (const v of ['library', 'book', 'add', 'lend', 'people', 'card', 'cards', 'mine']) $('view-' + v).hidden = v !== view;
+    const tab = { library: 'library', book: 'library', add: 'add', lend: 'lend', people: 'people', card: 'people', cards: 'people', mine: 'mine' }[view];
+    for (const t of ['library', 'add', 'lend', 'people', 'mine']) $('tab-' + t).classList.toggle('on', t === tab);
+    $('tab-mine').hidden = !isPatron;
     for (const t of ['add', 'lend', 'people']) $('tab-' + t).hidden = viewer;
     $('csvtools').hidden = viewer;
-    const names = { library: 'Library', book: 'Library', add: 'Add books', lend: 'Lend / return', people: 'People', card: 'Library card', cards: 'Library cards' };
-    $('title').textContent = names[view]; document.title = names[view];
+    const names = { library: 'The library', book: 'The library', add: 'Add books', lend: 'Lend / return', people: 'People', card: 'Library card', cards: 'Library cards', mine: 'My books' };
+    document.title = names[view] + ' - A Room for Books';
     if (view === 'book') loadBook(m[1]);
+    else if (view === 'mine') loadMine();
     else if (view === 'add') $('code').focus();
     else if (view === 'lend') { loadOut(); curPatron = null; $('patronbox').replaceChildren();
       if (m && m[1]) openPatron(m[1]); else { $('whoresults').replaceChildren(); $('who').focus(); } }
-    else if (view === 'people') { loadPeople($('pq').value.trim()); }
+    else if (view === 'people') { loadPeople($('pq').value.trim()); loadPwSettings(); }
     else if (view === 'card') loadCard(m[1]);
     else if (view === 'cards') loadCards();
     else { if (!libLoaded) { libLoaded = true; loadLibrary(true); } if (h === 'find') $('q').focus(); }
@@ -1087,7 +1213,7 @@
 
   (async () => {
     const s = await api('/api/state');
-    viewer = s.role === 'viewer';
+    viewer = s.role !== 'admin'; isPatron = s.role === 'patron';
     types = s.types || {}; if (!types[type]) type = 'BOOK'; if (!viewer) typeButtons();
     staffPort = s.staff_port; settings = s.settings || {}; shelf = settings.location || '';
     staffBase = s.staff_url || '';

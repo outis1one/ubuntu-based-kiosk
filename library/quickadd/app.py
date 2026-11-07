@@ -9,6 +9,7 @@ A tiny web app that sits next to Koha. For each ISBN/UPC it:
 Standard library only; Z39.50 is done by shelling out to yaz-client.
 """
 import base64
+import hashlib
 import hmac
 import json
 import os
@@ -353,7 +354,7 @@ def find_existing(code):
 SETTINGS_FILE = os.path.join(DATA_DIR, "settings.json")
 COUNTER_FILE = os.path.join(DATA_DIR, "counter.json")
 MIN_WIDTH, MAX_WIDTH = 7, 10     # 6 all-digit Code 39 symbols can be misread as Code 32 by some scanners
-DEFAULT_SETTINGS = {"barcode_mode": "auto", "width": MIN_WIDTH, "location": ""}
+DEFAULT_SETTINGS = {"barcode_mode": "auto", "width": MIN_WIDTH, "location": "", "patron_password_mode": "generated", "patron_password": ""}
 BARCODE_MODES = ("auto", "scan", "none")
 LOCK = threading.RLock()
 
@@ -388,6 +389,12 @@ def clean_settings(payload, current):
             s["width"] = min(max(int(payload["width"]), MIN_WIDTH), MAX_WIDTH)
         except (TypeError, ValueError):
             pass
+    if payload.get("patron_password_mode") in ("generated", "same"):
+        s["patron_password_mode"] = payload["patron_password_mode"]
+    if "patron_password" in payload:
+        pw = str(payload["patron_password"] or "").strip()
+        if pw == "" or 4 <= len(pw) <= 40:
+            s["patron_password"] = pw
     if "location" in payload:
         loc = payload["location"] or ""
         if loc == "" or valid_location(loc):
@@ -763,7 +770,7 @@ def _shape_book(b, items, where):
     shelves = sorted({where.get(i.get("location"), "") for i in mine} - {""})
     colls = {c["value"]: c["label"] for c in get_collections()}
     collections = sorted({colls.get(i.get("collection_code"), "") for i in mine} - {""})
-    return {"collections": collections, "id": b["biblio_id"], "title": (b.get("title") or "").rstrip(" /:"), "author": b.get("author") or "",
+    return {"tags": _tags_load().get(str(b["biblio_id"]), []), "collections": collections, "id": b["biblio_id"], "title": (b.get("title") or "").rstrip(" /:"), "author": b.get("author") or "",
             "year": b.get("copyright_date") or "", "isbn": b.get("isbn") or "", "type": b.get("item_type") or "",
             "copies": len(mine), "out": out, "shelves": shelves,
             "callnumber": next((i.get("callnumber") for i in mine if i.get("callnumber")), "") or ""}
@@ -774,7 +781,7 @@ def op_library(qs):
     def one(k):
         return (qs.get(k) or [""])[0]
     term = re.sub(r"[%_\\]", "", one("q")).strip()[:80]
-    shelf, itype, status, coll = one("shelf"), one("type"), one("status"), one("collection")
+    shelf, itype, status, coll, tag = one("shelf"), one("type"), one("status"), one("collection"), one("tag")
     sort = one("sort") or "title"
     try:
         page = max(1, int(one("page") or 1))
@@ -784,6 +791,11 @@ def op_library(qs):
     if term:
         like = {"-like": "%" + term + "%"}
         conds.append({"-or": [{"title": like}, {"author": like}, {"isbn": like}, {"ean": like}]})
+    if tag:
+        ids_t = sorted(int(k) for k, v in _tags_load().items() if any(t.lower() == tag.lower() for t in v))
+        if not ids_t:
+            return {"books": [], "page": page, "more": False}
+        conds.append({"biblio_id": ids_t})
     order = {"title": "title", "author": "author", "new": "-biblio_id"}.get(sort, "title")
     item_q = {}
     if shelf == "-":
@@ -860,7 +872,8 @@ def op_book(biblio_id, staff):
             "isbn": b.get("isbn") or "", "publisher": b.get("publisher") or "", "pages": b.get("pages") or "",
             "edition": b.get("edition_statement") or "", "summary": b.get("abstract") or b.get("notes") or "",
             "series": b.get("series_title") or "", "type": b.get("item_type") or "", "copies": copies,
-            "shelves": get_locations(), "collections": get_collections()}
+            "shelves": get_locations(), "collections": get_collections(),
+            "tags": _tags_load().get(str(b["biblio_id"]), []), "all_tags": tag_counts()}
 
 
 def op_item_update(payload):
@@ -903,6 +916,9 @@ def op_book_delete(payload):
             koha("DELETE", "/items/%d" % i["item_id"])
             forget(i["item_id"])
         koha("DELETE", "/biblios/%d" % biblio_id)
+        d = _tags_load()
+        if d.pop(str(biblio_id), None) is not None:
+            save_json(TAGS_FILE, d)
     return 200, {"status": "deleted"}
 
 
@@ -1093,7 +1109,15 @@ def op_patron_add(payload):
         if e.status == 409 or "already exists" in e.body:
             return 200, {"status": "duplicate", "message": "Someone named %s is already in the library." % _patron_name(body)}
         raise
-    return 200, dict(_shape_patron(p), status="added")
+    out = dict(_shape_patron(p), status="added")
+    if not payload.get("nologin"):
+        pw = new_password()
+        try:
+            set_patron_password(p["patron_id"], pw)
+            out["password"] = pw
+        except KohaError:
+            out["password"] = ""
+    return 200, out
 
 
 # ------------------------------------------------ new shelves / collections, QR codes, book info
@@ -1326,6 +1350,183 @@ def export_csv():
     return out.getvalue().encode("utf-8-sig")
 
 
+# ------------------------------------------------------------------ tags
+TAGS_FILE = os.path.join(DATA_DIR, "tags.json")
+
+
+def _tags_load():
+    try:
+        d = json.load(open(TAGS_FILE))
+        return d if isinstance(d, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def clean_tags(raw):
+    out, seen = [], set()
+    for t in (raw if isinstance(raw, list) else []):
+        t = re.sub(r"\s+", " ", str(t)).strip(" ,;#")[:30]
+        if t and t.lower() not in seen:
+            seen.add(t.lower())
+            out.append(t)
+    return out[:20]
+
+
+def tag_counts():
+    counts = {}
+    for tags in _tags_load().values():
+        for t in tags:
+            counts[t] = counts.get(t, 0) + 1
+    return [{"tag": t, "count": n} for t, n in sorted(counts.items(), key=lambda x: x[0].lower())]
+
+
+def op_tags_set(payload):
+    bid = payload.get("biblio_id")
+    if not isinstance(bid, int):
+        return 400, {"status": "invalid"}
+    tags = clean_tags(payload.get("tags"))
+    with LOCK:
+        d = _tags_load()
+        if tags:
+            d[str(bid)] = tags
+        else:
+            d.pop(str(bid), None)
+        save_json(TAGS_FILE, d)
+    return 200, {"status": "saved", "tags": tags, "all": tag_counts()}
+
+
+# ------------------------------------------------------- patron logins / my books
+LOGINS_FILE = os.path.join(DATA_DIR, "logins.json")           # patron ids that have a login set up
+PW_WORDS = ["maple", "river", "cedar", "tiger", "lemon", "panda", "otter", "robin", "sunny", "cloud", "apple", "grape",
+            "daisy", "heron", "frost", "amber", "coral", "ember", "fable", "ivory", "brook", "pearl", "tulip", "wheat"]
+_LOGIN_FAILS = {}            # client address -> [count, window start]
+_LOGIN_OK = {}               # (user, sha256(pw)) -> (expires, patron_id)
+
+
+def new_password():
+    s = load_settings()
+    if s.get("patron_password_mode") == "same" and s.get("patron_password"):
+        return s["patron_password"]
+    return secrets.choice(PW_WORDS) + "%03d" % secrets.randbelow(1000)
+
+
+def _logins():
+    try:
+        d = json.load(open(LOGINS_FILE))
+        return d if isinstance(d, list) else []
+    except (OSError, ValueError):
+        return []
+
+
+def _mark_login(pid):
+    with LOCK:
+        d = _logins()
+        if pid not in d:
+            d.append(pid)
+            save_json(LOGINS_FILE, d)
+
+
+def set_patron_password(pid, pw):
+    koha("POST", "/patrons/%d/password" % pid, {"password": pw, "password_2": pw})
+    _mark_login(pid)
+
+
+def patron_login(user, pw, addr):
+    """Check a patron's card number / userid and password with Koha. Returns the patron id or None.
+    Failures are counted per address so a password cannot be guessed at speed."""
+    if not re.fullmatch(r"[A-Za-z0-9._@-]{1,40}", user or "") or not pw or len(pw) > 100:
+        return None
+    now = time.time()
+    fails = _LOGIN_FAILS.get(addr)
+    if fails and now - fails[1] < 300 and fails[0] >= 10:
+        return None
+    key = (user, hashlib.sha256(pw.encode()).hexdigest())
+    hit = _LOGIN_OK.get(key)
+    if hit and hit[0] > now:
+        return hit[1]
+    pid = None
+    try:
+        r = koha("POST", "/auth/password/validation", {"identifier": user, "password": pw})
+        pid = (r or {}).get("patron_id")
+    except KohaError:
+        pid = None
+    if pid:
+        _LOGIN_OK[key] = (now + 60, pid)
+        _LOGIN_FAILS.pop(addr, None)
+        return pid
+    f = _LOGIN_FAILS.get(addr)
+    if not f or now - f[1] >= 300:
+        f = _LOGIN_FAILS[addr] = [0, now]
+    f[0] += 1
+    return None
+
+
+def op_me(pid):
+    p = koha("GET", "/patrons/%d" % pid)
+    cos = koha("GET", "/checkouts", query={"q": json.dumps({"patron_id": pid}), "_per_page": "200", "_order_by": "due_date"},
+               headers={"x-koha-embed": "item"}) or []
+    return {"name": _patron_name(p), "card": p.get("cardnumber") or "", "loans": _loan_rows(cos)}
+
+
+def op_me_renew(pid, payload):
+    cid = payload.get("checkout_id")
+    if not isinstance(cid, int):
+        return 400, {"status": "invalid"}
+    co = koha("GET", "/checkouts/%d" % cid)
+    if not co or co.get("patron_id") != pid:
+        return 403, {"status": "error", "message": "That is not one of your books."}
+    return op_renew({"checkout_id": cid})
+
+
+def op_me_password(pid, addr, payload):
+    new = str(payload.get("new") or "")
+    if not 4 <= len(new) <= 40:
+        return 400, {"status": "invalid", "message": "Use 4 to 40 characters."}
+    p = koha("GET", "/patrons/%d" % pid)
+    if not patron_login(p.get("cardnumber") or p.get("userid") or "", str(payload.get("old") or ""), addr):
+        return 403, {"status": "error", "message": "The current password is not right."}
+    try:
+        set_patron_password(pid, new)
+    except KohaError as e:
+        return 200, {"status": "error", "message": "Koha would not accept that password: " + e.body[:100]}
+    _LOGIN_OK.clear()
+    return 200, {"status": "saved"}
+
+
+def op_reset_login(payload):
+    """Give someone a (new) login password and show it once."""
+    pid = payload.get("patron_id")
+    if not isinstance(pid, int):
+        return 400, {"status": "invalid"}
+    p = koha("GET", "/patrons/%d" % pid)
+    pw = new_password()
+    set_patron_password(pid, pw)
+    _LOGIN_OK.clear()
+    return 200, {"status": "saved", "name": _patron_name(p), "card": p.get("cardnumber") or "", "password": pw}
+
+
+def op_logins_all(payload):
+    """Logins for everyone who has none yet (people added before logins existed). Passwords are shown once."""
+    have = set(_logins())
+    made, page = [], 1
+    while True:
+        res = koha("GET", "/patrons", query={"q": json.dumps({"category_id": PATRON_CATEGORY}), "_per_page": "100", "_page": str(page)}) or []
+        for p in res:
+            if p["patron_id"] in have:
+                continue
+            pw = new_password()
+            try:
+                set_patron_password(p["patron_id"], pw)
+            except KohaError:
+                continue
+            made.append({"name": _patron_name(p), "card": p.get("cardnumber") or "", "password": pw})
+        if len(res) < 100:
+            break
+        page += 1
+    _LOGIN_OK.clear()
+    return 200, {"status": "done", "made": made}
+
+
 # ------------------------------------------------------------ photo scanning
 MAX_IMAGE = 12 * 1024 * 1024
 ZBAR_TIMEOUT = 20
@@ -1426,7 +1627,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Content-Security-Policy",
                          "default-src 'self'; img-src 'self' https: data:; "
-                         "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'")
+                         "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-src https://www.arbookfind.com")
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.end_headers()
@@ -1435,6 +1636,8 @@ class Handler(BaseHTTPRequestHandler):
     def _role(self):
         """'admin', 'viewer' (read-only guest) or None. Sets self.via to 'koha' for a staff-site login."""
         self.via = None
+        self.patron_id = None
+        self.addr = self.client_address[0]
         if not PASSWORD:
             return None
         header = self.headers.get("Authorization", "")
@@ -1448,7 +1651,20 @@ class Handler(BaseHTTPRequestHandler):
             is_admin = hmac.compare_digest(ub, USER.encode()) & hmac.compare_digest(pb, PASSWORD.encode())
             is_viewer = bool(VIEWER_USER and VIEWER_PASSWORD) & hmac.compare_digest(ub, VIEWER_USER.encode()) \
                 & hmac.compare_digest(pb, VIEWER_PASSWORD.encode())
-            return "admin" if is_admin else "viewer" if is_viewer else None
+            if is_admin:
+                return "admin"
+            if is_viewer:
+                return "viewer"
+            # Otherwise: a patron signing in with their card number (or userid) and password.
+            addr = self.client_address[0]
+            if SSO_SECRET and hmac.compare_digest(self.headers.get("X-Quickadd-Proxy", "").encode(), SSO_SECRET.encode()):
+                addr = self.headers.get("X-Forwarded-For", "").split(",")[-1].strip() or addr
+            self.addr = addr
+            pid = patron_login(u, p, addr)
+            if pid:
+                self.patron_id = pid
+                return "patron"
+            return None
         # No Basic login: accept a staff-site login, but only for requests that came through the staff
         # site's web server (it overwrites X-Quickadd-Proxy with the shared secret on every request).
         if SSO_SECRET and hmac.compare_digest(self.headers.get("X-Quickadd-Proxy", "").encode(), SSO_SECRET.encode()):
@@ -1483,12 +1699,12 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/healthz":
             return self._send(200, b"ok", "text/plain")
         path = self.path.split("?")[0]
-        if not self._guard(need_admin=path not in ("/", "/api/state", "/api/search", "/api/library") and not path.startswith(("/api/book/", "/api/more/"))):
+        if not self._guard(need_admin=path not in ("/", "/api/state", "/api/search", "/api/library", "/api/me") and not path.startswith(("/api/book/", "/api/more/"))):
             return
         if path == "/":
             return self._send(200, INDEX, "text/html; charset=utf-8")
-        if path == "/api/state" and self.role == "viewer":
-            return self._send(200, {"role": "viewer", "library": LIBRARY, "recent": [], "types": {}, "locations": [],
+        if path == "/api/state" and self.role in ("viewer", "patron"):
+            return self._send(200, {"role": self.role, "library_name": library_name(), "library": LIBRARY, "recent": [], "types": {}, "locations": [],
                                     "settings": {}, "staff_port": STAFF_PORT, "staff_url": STAFF_URL,
                                     "opac_url": OPAC_URL, "opac_port": OPAC_PORT, "sources": []})
         if path == "/api/state":
@@ -1510,6 +1726,13 @@ class Handler(BaseHTTPRequestHandler):
             except KohaError as e:
                 return self._send(404 if e.status == 404 else 502, {"status": "error", "message":
                                   "Koha is not answering yet - try again in a minute." if e.status == 503 else "Failed: %s" % e.body[:120]})
+        if path == "/api/me":
+            if self.role != "patron":
+                return self._send(403, {"status": "error", "message": "Sign in with a library card to see your books."})
+            try:
+                return self._send(200, op_me(self.patron_id))
+            except KohaError:
+                return self._send(502, {"status": "error", "message": "Koha is not answering yet - try again in a minute."})
         if path == "/api/export.csv":
             try:
                 body = export_csv()
@@ -1534,7 +1757,7 @@ class Handler(BaseHTTPRequestHandler):
             try:
                 if path == "/api/library":
                     return self._send(200, dict(op_library(urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)),
-                                                shelves=get_locations(), collections=get_collections(), types=get_item_types()))
+                                                shelves=get_locations(), collections=get_collections(), types=get_item_types(), tags=tag_counts()))
                 m = re.match(r"^/api/book/(\d{1,9})$", path)
                 if not m:
                     return self._send(404, {"error": "not found"})
@@ -1553,6 +1776,25 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
+        if self.path.startswith("/api/me/"):
+            if not self._guard(need_admin=False):
+                return
+            if self.role != "patron":
+                return self._send(403, {"status": "error", "message": "Sign in with a library card first."})
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                payload = json.loads(self.rfile.read(min(length, 2000)) or b"{}")
+                if self.path == "/api/me/renew":
+                    code, body = op_me_renew(self.patron_id, payload)
+                elif self.path == "/api/me/password":
+                    code, body = op_me_password(self.patron_id, self.addr, payload)
+                else:
+                    return self._send(404, {"error": "not found"})
+                return self._send(code, body)
+            except KohaError:
+                return self._send(502, {"status": "error", "message": "Koha is not answering yet - try again in a minute."})
+            except ValueError:
+                return self._send(400, {"status": "invalid"})
         if not self._guard():
             return
         try:
@@ -1575,7 +1817,7 @@ class Handler(BaseHTTPRequestHandler):
                    "/api/barcodes/reserve": op_reserve, "/api/barcodes/assign": op_assign,
                    "/api/item/update": op_item_update, "/api/item/delete": op_item_delete,
                    "/api/item/copy": op_item_copy, "/api/book/delete": op_book_delete,
-                   "/api/value/add": op_value_add, "/api/ar/set": op_ar_set, "/api/ar/import": op_ar_import, "/api/checkout": op_checkout, "/api/return": op_return, "/api/renew": op_renew, "/api/patron/add": op_patron_add}
+                   "/api/value/add": op_value_add, "/api/tags/set": op_tags_set, "/api/patron/reset-login": op_reset_login, "/api/logins/all": op_logins_all, "/api/ar/set": op_ar_set, "/api/ar/import": op_ar_import, "/api/checkout": op_checkout, "/api/return": op_return, "/api/renew": op_renew, "/api/patron/add": op_patron_add}
             fn = ops.get(self.path)
             if not fn:
                 return self._send(404, {"error": "not found"})

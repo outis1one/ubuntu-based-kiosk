@@ -1,4 +1,4 @@
-# Home library: Koha + Quick Add (Docker)
+# A Room for Books: a home library (Koha + the A Room for Books site, in Docker)
 
 A self-hosted library catalogue you can set up in one command:
 
@@ -255,3 +255,22 @@ browsers send small camera frames to the server's decoder a couple of times a se
 
 On the AR BookFind book page, select everything (Ctrl/Cmd+A), copy, and paste into the box on the book page here: the level,
 points, quiz number and interest level fill in by themselves; check them and press Save.
+
+### Tags, and borrowers signing in
+
+- **Tags**: any number per book (to read, kids, signed...). Add and remove them on the book page; click one to see every
+  book that has it; the Library page can filter by tag. They are stored in `tags.json` in the Add books data volume, which
+  the usual backups of that folder include.
+- **Borrowers sign in**: every person gets a login, **their library card number + a password**. Adding someone shows
+  their password once (a different easy one like `maple482`, or the same one for everyone: People -> *Sign-in passwords for new
+  people*). *Give everyone a sign-in* covers people added earlier; *New password* resets one person. A borrower who signs in
+  sees the library and a **My books** page: what they have out, when each is due (or overdue), **Renew**, and **Change my
+  password**. They cannot lend, edit or see other people. Passwords are Koha's own patron passwords; this stack relaxes Koha's
+  default strength rule (4+ characters instead of 8 with upper/lower/digit) once, at install or update.
+  Ten wrong guesses from one address locks sign-in attempts from it for five minutes.
+
+### Reading levels: pop-up or in-page AR BookFind
+
+The book page's AR box has **Open beside this page** (a pop-up window next to the book) and **Show it here** (AR BookFind inside the
+page; some browsers block its cookies inside another page, then use the pop-up). Either copies the title first so you can paste
+it into AR's search; AR's own page cannot be pre-filled from here.
