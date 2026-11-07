@@ -207,3 +207,20 @@ quickadd/             the scan-to-add service (Python standard library + yaz)
 ## Signing in once
 
 Staff who are signed in to the library site (and allowed to edit the catalogue) open **Add books** without a second login. Koha itself confirms the sign-in; the shared secret is `SSO_SECRET` in `.env`. The read-only `guest` login still uses the Add books prompt, and the direct Add books port never accepts a Koha sign-in. If `SSO_SECRET` is empty, Add books just asks for its own login as before.
+
+## Everyday use (the Library site at `/add/`)
+
+One page for the day-to-day, so you rarely need Koha's own screens:
+
+- **Library**: a cover grid of everything you own. Search by title, author or ISBN; filter by shelf, format
+  (book/DVD/CD) and status (on the shelf / checked out); sort by title, author or newest. Click a book for its
+  page: copies with barcode, status, who has it and when it is due; change a copy's shelf or call number,
+  add another copy, remove a copy, or delete the book. (Title/author edits are one click away in Koha.)
+- **Lend / return**: scan or type a library card number (or search by name), then scan books to check them out;
+  "Return a book" takes a scan with no person needed; **Renew** extends a loan; the list below shows everything
+  that is out, overdue ones flagged. Check-in goes through Koha's own check-in code, so holds and rules still apply.
+- **People**: add someone with just a name (the card number is assigned automatically), search, and
+  **Print card** for a library card with a scannable Code 39 barcode.
+- **Add books**: scan an ISBN (or use the phone camera), as before.
+
+The read-only `guest` login only sees the Library and book pages (no copy status names, no editing, no lending).

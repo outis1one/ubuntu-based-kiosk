@@ -121,6 +121,16 @@
   .copybox .row { display: flex; flex-wrap: wrap; gap: 8px 10px; align-items: center; margin-top: 8px; }
   .copybox select, .copybox input[type=text] { font: inherit; padding: 7px 9px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--ink); min-width: 0; }
   button.danger { color: var(--bad); border-color: var(--bad); }
+  .person { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; padding: 10px 2px; border-bottom: 1px solid var(--line); }
+  .person .t { flex: 1; min-width: 180px; }
+  .loan { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+  .loan .t { flex: 1; min-width: 160px; overflow-wrap: anywhere; }
+  .chip.late { background: var(--bad-bg); border-color: var(--bad); color: var(--bad); }
+  .libcard { width: 85.6mm; height: 54mm; border: 1px solid #888; border-radius: 3mm; padding: 5mm; background: #fff; color: #000;
+             display: flex; flex-direction: column; justify-content: space-between; font-family: system-ui, sans-serif; }
+  .libcard .lib { font-size: 11pt; font-weight: 700; } .libcard .nm { font-size: 14pt; font-weight: 700; }
+  .libcard svg { width: 100%; height: 16mm; } .libcard .no { font-size: 9pt; text-align: center; letter-spacing: .15em; }
+  @media print { header, .noprint, nav { display: none !important; } body { background: #fff; } main { padding: 0; max-width: none; } .libcard { border: 1px solid #000; } }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 </style>
 </head>
@@ -130,6 +140,8 @@
     <h1 id="title">Library</h1>
     <nav class="tabs" aria-label="Sections">
       <a id="tab-library" href="#library" class="on">Library</a>
+      <a id="tab-lend" href="#lend">Lend / return</a>
+      <a id="tab-people" href="#people">People</a>
       <a id="tab-add" href="#add">Add books</a>
       <a id="lnk-staff" class="ext" href="#" target="_blank" rel="noopener">Manage</a>
       <a id="lnk-opac" class="ext" href="#" target="_blank" rel="noopener">Public catalogue</a>
@@ -153,6 +165,55 @@
     <div id="libstatus" class="small" aria-live="polite"></div>
     <div class="grid" id="grid"></div>
     <div class="actions"><button type="button" id="more" hidden>Show more</button></div>
+  </section>
+
+  <section id="view-lend" hidden>
+    <div class="copybox">
+      <strong>Return a book</strong>
+      <form class="scan" id="retform" autocomplete="off" style="margin-top:8px">
+        <label class="sr" for="ret">Barcode to return</label>
+        <input id="ret" inputmode="numeric" placeholder="Scan the book's barcode" autocomplete="off">
+        <button class="primary" type="submit">Return</button>
+      </form>
+      <div id="retresult" role="status" aria-live="polite" class="small" style="margin-top:8px"></div>
+    </div>
+    <div class="copybox">
+      <strong>Check out to&hellip;</strong>
+      <form class="find-form" id="whoform" autocomplete="off">
+        <label class="sr" for="who">Name or library card number</label>
+        <input id="who" type="search" placeholder="Name, or scan the library card" enterkeyhint="search" autocomplete="off">
+        <button type="submit">Find</button>
+      </form>
+      <div id="whoresults"></div>
+      <div id="patronbox"></div>
+    </div>
+    <h2>Checked out right now <span id="outcount" class="small"></span></h2>
+    <div id="outlist"></div>
+  </section>
+
+  <section id="view-people" hidden>
+    <details class="settings" id="newperson" open>
+      <summary>Add a person</summary>
+      <form class="manual" id="personform" autocomplete="off">
+        <input name="firstname" placeholder="First name" aria-label="First name">
+        <input name="surname" placeholder="Last name" required aria-label="Last name">
+        <input name="phone" placeholder="Phone (optional)" aria-label="Phone">
+        <input name="email" type="email" placeholder="Email (optional)" aria-label="Email">
+        <div class="actions"><button class="primary" type="submit">Add person</button></div>
+      </form>
+      <div id="personresult" aria-live="polite"></div>
+    </details>
+    <form class="find-form" id="peopleform" autocomplete="off">
+      <label class="sr" for="pq">Search people</label>
+      <input id="pq" type="search" placeholder="Search by name or card number" enterkeyhint="search">
+      <button type="submit">Search</button>
+    </form>
+    <div id="peoplelist"></div>
+  </section>
+
+  <section id="view-card" hidden>
+    <p class="noprint"><a href="#people">&larr; Back to people</a> &nbsp; <button type="button" id="printcard" class="primary">Print this card</button></p>
+    <div id="cardbox"></div>
   </section>
 
   <section id="view-book" hidden>
@@ -624,21 +685,162 @@
     return box;
   }
 
+  // ---- lend / return
+  const fmtDue = d => d ? new Date(d + 'T12:00:00').toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '';
+  let curPatron = null, lendBusy = false;
+
+  function say(box, kind, text) { box.replaceChildren(el('div', { className: 'card ' + kind }, el('div', { className: 'body' }, text))); }
+
+  async function doReturn(code, box) {
+    box.textContent = 'Returning…';
+    let r; try { r = await api('/api/return', { barcode: code }); } catch (e) { r = { status: 'error', message: 'Could not reach the service.' }; }
+    if (r.status === 'returned') { beep(SOUND.added); say(box, 'ok', 'Returned: ' + (r.title || code) + (r.patron ? ' (from ' + r.patron + ')' : '')); }
+    else if (r.status === 'not_out') { beep(SOUND.duplicate); say(box, 'warn', (r.title || code) + ' was not checked out.'); }
+    else if (r.status === 'unknown_barcode') { beep(SOUND.notfound); say(box, 'warn', 'No book has the barcode ' + code + '.'); }
+    else { beep(SOUND.error); say(box, 'bad', r.message || 'Could not return that.'); }
+    loadOut(); if (curPatron) openPatron(curPatron.id, true);
+    return r;
+  }
+  $('retform').onsubmit = async ev => { ev.preventDefault(); const c = $('ret').value.trim(); $('ret').value = ''; if (c) { await doReturn(c, $('retresult')); $('ret').focus(); } };
+
+  async function loadOut() {
+    let r; try { r = await api('/api/out'); } catch (e) { return; }
+    if (!r.loans) return;
+    $('outcount').textContent = r.loans.length ? '(' + r.loans.length + ')' : '';
+    const late = r.loans.filter(l => l.overdue).length;
+    if (!r.loans.length) { $('outlist').replaceChildren(el('div', { className: 'small' }, 'Nothing is checked out.')); return; }
+    $('outlist').replaceChildren(...(late ? [el('div', { className: 'small' }, late + ' overdue')] : []), ...r.loans.map(l => loanRow(l, true)));
+  }
+
+  function loanRow(l, showWho) {
+    const ret = el('button', { type: 'button' }, 'Return');
+    ret.onclick = async () => { ret.disabled = true; await doReturn(l.barcode, $('retresult')); };
+    const ren = el('button', { type: 'button' }, 'Renew');
+    ren.onclick = async () => {
+      ren.disabled = true; const r = await api('/api/renew', { checkout_id: l.checkout_id });
+      if (r.status === 'renewed') { loadOut(); if (curPatron) openPatron(curPatron.id, true); } else { ren.disabled = false; alert(r.message); }
+    };
+    const a = el('a', { href: '#book/' + l.biblio_id }, l.title);
+    return el('div', { className: 'loan' }, el('span', { className: 'badge' }, l.barcode),
+      el('span', { className: 't' }, a, showWho ? el('div', { className: 'small' }, l.who) : ''),
+      el('span', { className: 'chip ' + (l.overdue ? 'late' : 'in') }, (l.overdue ? 'Overdue, was due ' : 'Due ') + fmtDue(l.due)), ret, ren);
+  }
+
+  async function openPatron(id, quiet) {
+    let p; try { p = await api('/api/patron/' + id); } catch (e) { p = {}; }
+    if (!p.name) { $('patronbox').textContent = 'Could not load that person.'; return; }
+    curPatron = p;
+    $('whoresults').replaceChildren();
+    const scan = el('input', { placeholder: 'Scan a book to check out', inputMode: 'numeric', autocomplete: 'off', 'aria-label': 'Barcode to check out' });
+    const form = el('form', { className: 'scan' }, scan, el('button', { className: 'primary', type: 'submit' }, 'Check out'));
+    const out = (quiet && document.getElementById('coresult')) || el('div', { id: 'coresult', role: 'status', className: 'small', style: 'margin-top:8px' });
+    form.onsubmit = async ev => {
+      ev.preventDefault(); const code = scan.value.trim(); scan.value = ''; if (!code || lendBusy) return; lendBusy = true;
+      try {
+        const r = await api('/api/checkout', { patron_id: p.id, barcode: code });
+        if (r.status === 'checked_out') { beep(SOUND.added); say(out, 'ok', (r.title || code) + ' - due ' + fmtDue(r.due)); }
+        else if (r.status === 'already_out') {
+          beep(SOUND.duplicate);
+          const rb = el('button', { type: 'button', className: 'primary' }, 'Return it, then check it out');
+          rb.onclick = async () => { rb.disabled = true; await doReturn(code, out); const r2 = await api('/api/checkout', { patron_id: p.id, barcode: code });
+            if (r2.status === 'checked_out') say(out, 'ok', (r2.title || code) + ' - due ' + fmtDue(r2.due)); await openPatron(p.id, true); loadOut(); };
+          out.replaceChildren(el('div', { className: 'card warn' }, el('div', { className: 'body' }, (r.title || code) + ' is already checked out. ', rb)));
+        } else { beep(SOUND.notfound); say(out, 'bad', r.message || 'That did not work.'); }
+      } catch (e) { say(out, 'bad', 'Could not reach the service.'); }
+      lendBusy = false; await openPatron(p.id, true); loadOut(); document.querySelector('#patronbox form input').focus();
+    };
+    const loans = p.loans.length ? p.loans.map(l => loanRow(l, false)) : [el('div', { className: 'small' }, 'Nothing checked out to ' + p.name + ' yet.')];
+    $('patronbox').replaceChildren(el('div', { className: 'title', style: 'margin-top:10px' }, p.name, ' ', el('span', { className: 'badge' }, p.card || 'no card')),
+      form, out, el('h2', {}, 'Has out'), ...loans,
+      el('div', { className: 'small', style: 'margin-top:8px' }, el('a', { href: '#card/' + p.id }, 'Print library card'), ' · ',
+        el('a', { href: '#lend' }, 'Choose someone else')));
+    if (!quiet) scan.focus();
+  }
+
+  async function findPeople(term, into, withActions) {
+    let r; try { r = await api('/api/patrons?q=' + encodeURIComponent(term)); } catch (e) { r = {}; }
+    if (!r.patrons) { into.textContent = (r && r.message) || 'Search failed.'; return []; }
+    if (!r.patrons.length) { into.replaceChildren(el('div', { className: 'small' }, term ? 'Nobody matches "' + term + '".' : 'No people yet.')); return []; }
+    into.replaceChildren(...r.patrons.map(p => el('div', { className: 'person' },
+      el('span', { className: 't' }, el('strong', {}, p.name), el('div', { className: 'small' }, [p.card, p.phone, p.email].filter(Boolean).join(' · '))),
+      ...withActions(p))));
+    return r.patrons;
+  }
+  $('whoform').onsubmit = async ev => {
+    ev.preventDefault(); const term = $('who').value.trim(); if (!term) return;
+    const list = await findPeople(term, $('whoresults'), p => { const b = el('button', { type: 'button', className: 'primary' }, 'Choose');
+      b.onclick = () => { location.hash = '#lend/' + p.id; }; return [b]; });
+    const exact = list.filter(p => p.card === term);
+    if (exact.length === 1) { $('who').value = ''; location.hash = '#lend/' + exact[0].id; }       // a scanned card goes straight through
+  };
+
+  // ---- people
+  async function loadPeople(term) {
+    await findPeople(term, $('peoplelist'), p => {
+      const lend = el('a', { href: '#lend/' + p.id }, el('button', { type: 'button' }, 'Lend / returns'));
+      const card = el('a', { href: '#card/' + p.id }, el('button', { type: 'button' }, 'Print card'));
+      return [lend, card];
+    });
+  }
+  $('peopleform').onsubmit = ev => { ev.preventDefault(); loadPeople($('pq').value.trim()); };
+  $('personform').onsubmit = async ev => {
+    ev.preventDefault();
+    const f = ev.target, r = await api('/api/patron/add', Object.fromEntries(new FormData(f)));
+    if (r.status === 'added') {
+      f.reset();
+      $('personresult').replaceChildren(el('div', { className: 'result-note' }, r.name + ' added with library card number ', el('span', { className: 'badge' }, r.card), '. ',
+        el('a', { href: '#card/' + r.id }, 'Print the card'), ' or ', el('a', { href: '#lend/' + r.id }, 'check something out')));
+      loadPeople('');
+    } else $('personresult').replaceChildren(el('div', { className: 'card bad' }, el('div', { className: 'body' }, r.message || 'Could not add that person.')));
+  };
+
+  // ---- printable library card (Code 39 barcode drawn as SVG)
+  const C39 = { '0': 'nnnwwnwnn', '1': 'wnnwnnnnw', '2': 'nnwwnnnnw', '3': 'wnwwnnnnn', '4': 'nnnwwnnnw', '5': 'wnnwwnnnn',
+                '6': 'nnwwwnnnn', '7': 'nnnwnnwnw', '8': 'wnnwnnwnn', '9': 'nnwwnnwnn', '*': 'nwnnwnwnn' };
+  function code39(text) {
+    const W = 3; let x = 10, bars = '';
+    for (const ch of '*' + text + '*') {
+      const pat = C39[ch]; if (!pat) continue;
+      for (let i = 0; i < 9; i++) { const w = pat[i] === 'w' ? W : 1; if (i % 2 === 0) bars += '<rect x="' + x + '" y="0" width="' + w + '" height="50"/>'; x += w; }
+      x += 1;       // narrow gap between characters
+    }
+    return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + (x + 9) + ' 50" preserveAspectRatio="none" fill="#000" role="img" aria-label="Barcode ' + text + '">' + bars + '</svg>';
+  }
+  async function loadCard(id) {
+    let p; try { p = await api('/api/patron/' + id); } catch (e) { p = {}; }
+    if (!p.name) { $('cardbox').textContent = 'Could not load that person.'; return; }
+    const lib = el('div', { className: 'libcard' }, el('div', { className: 'lib' }, libraryDisplay || 'Library card'), el('div', { className: 'nm' }, p.name),
+      el('div', {}, el('div', { id: 'cardsvg' }), el('div', { className: 'no' }, p.card)));
+    $('cardbox').replaceChildren(lib);
+    $('cardsvg').innerHTML = code39(p.card);
+  }
+  $('printcard').onclick = () => window.print();
+
   function route() {
     const h = location.hash.replace(/^#/, '');
-    const m = h.match(/^book\/(\d+)$/);
-    let view = m ? 'book' : (h === 'add' && !viewer) ? 'add' : 'library';
-    $('view-library').hidden = view !== 'library'; $('view-book').hidden = view !== 'book'; $('view-add').hidden = view !== 'add';
-    $('tab-library').classList.toggle('on', view !== 'add'); $('tab-add').classList.toggle('on', view === 'add');
-    $('tab-add').hidden = viewer;
-    document.title = view === 'add' ? 'Add books' : (libraryName || 'Library');
-    $('title').textContent = view === 'add' ? 'Add books' : (libraryName || 'Library');
+    let m, view = 'library';
+    if ((m = h.match(/^book\/(\d+)$/))) view = 'book';
+    else if (viewer) view = 'library';
+    else if (h === 'add') view = 'add';
+    else if ((m = h.match(/^lend(?:\/(\d+))?$/))) view = 'lend';
+    else if (h === 'people') view = 'people';
+    else if ((m = h.match(/^card\/(\d+)$/))) view = 'card';
+    for (const v of ['library', 'book', 'add', 'lend', 'people', 'card']) $('view-' + v).hidden = v !== view;
+    const tab = { library: 'library', book: 'library', add: 'add', lend: 'lend', people: 'people', card: 'people' }[view];
+    for (const t of ['library', 'add', 'lend', 'people']) $('tab-' + t).classList.toggle('on', t === tab);
+    for (const t of ['add', 'lend', 'people']) $('tab-' + t).hidden = viewer;
+    const names = { library: 'Library', book: 'Library', add: 'Add books', lend: 'Lend / return', people: 'People', card: 'Library card' };
+    $('title').textContent = names[view]; document.title = names[view];
     if (view === 'book') loadBook(m[1]);
     else if (view === 'add') $('code').focus();
+    else if (view === 'lend') { loadOut(); curPatron = null; $('patronbox').replaceChildren();
+      if (m && m[1]) openPatron(m[1]); else { $('whoresults').replaceChildren(); $('who').focus(); } }
+    else if (view === 'people') { loadPeople($('pq').value.trim()); }
+    else if (view === 'card') loadCard(m[1]);
     else { if (!libLoaded) { libLoaded = true; loadLibrary(true); } if (h === 'find') $('q').focus(); }
   }
   window.addEventListener('hashchange', route);
-  let libraryName = '';
+  let libraryDisplay = '';
 
   (async () => {
     const s = await api('/api/state');
@@ -663,6 +865,7 @@
     }
     if (!viewer) api('/api/settings').then(applySettings);
     $('earlier').replaceChildren(...s.recent.slice(0, 25).map(e => rowFor(e, false)));
+    libraryDisplay = s.library_name || '';
     route();
   })();
 })();

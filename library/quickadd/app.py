@@ -32,6 +32,7 @@ PASSWORD = os.environ.get("ADMIN_PASSWORD", "")
 # X-Quickadd-Proxy; we then ask Koha whether the browser's login cookie is a staff user who may edit
 # the catalogue. Unset = feature off (only the Basic logins below work).
 SSO_SECRET = os.environ.get("SSO_SECRET", "")
+KOHA_RETURN_URL = KOHA_API.rsplit("/api/v1", 1)[0] + "/cgi-bin/koha/quickadd-return.pl"
 KOHA_SESSION_URL = KOHA_API.rsplit("/api/v1", 1)[0] + "/cgi-bin/koha/svc/quickadd-session"
 VIEWER_USER = os.environ.get("VIEWER_USER", "")
 VIEWER_PASSWORD = os.environ.get("VIEWER_PASSWORD", "")
@@ -892,6 +893,174 @@ def op_item_copy(payload):
     return 200, {"status": "added", "item_id": item["item_id"], "barcode": item.get("external_id") or ""}
 
 
+# ------------------------------------------------------------ lending / people
+import datetime as _dt
+
+PATRON_CATEGORY = os.environ.get("PATRON_CATEGORY", "FRIEND")
+
+
+def _patron_name(p):
+    return ("%s %s" % (p.get("firstname") or "", p.get("surname") or "")).strip() or p.get("cardnumber") or "?"
+
+
+def _shape_patron(p):
+    return {"id": p["patron_id"], "name": _patron_name(p), "card": p.get("cardnumber") or "",
+            "email": p.get("email") or "", "phone": p.get("phone") or ""}
+
+
+def op_patron_search(term):
+    term = re.sub(r"[%_\\]", "", term or "").strip()[:60]
+    if not term:
+        res = koha("GET", "/patrons", query={"_per_page": "50", "_order_by": "surname"}) or []
+    else:
+        like = {"-like": "%" + term + "%"}
+        conds = [{"surname": like}, {"firstname": like}, {"cardnumber": {"-like": term + "%"}}]
+        parts = term.split()
+        if len(parts) == 2:                      # "Jane Smith"
+            conds.append({"-and": [{"firstname": {"-like": parts[0] + "%"}}, {"surname": {"-like": parts[1] + "%"}}]})
+        res = koha("GET", "/patrons", query={"q": json.dumps({"-or": conds}), "_per_page": "25", "_order_by": "surname"}) or []
+    return {"patrons": [_shape_patron(p) for p in res]}
+
+
+def _loan_rows(cos):
+    """Checkouts (with embedded item) -> rows with titles and an overdue flag."""
+    if not cos:
+        return []
+    bib_ids = sorted({c["item"]["biblio_id"] for c in cos if c.get("item")})
+    titles = {}
+    if bib_ids:
+        for b in koha("GET", "/biblios", query={"q": json.dumps({"biblio_id": bib_ids}), "_per_page": str(len(bib_ids) + 1)}) or []:
+            titles[b["biblio_id"]] = ((b.get("title") or "").rstrip(" /:"), b.get("author") or "", b.get("isbn") or "")
+    today = _dt.date.today().isoformat()
+    rows = []
+    for c in cos:
+        it = c.get("item") or {}
+        t = titles.get(it.get("biblio_id"), ("(unknown)", "", ""))
+        due = (c.get("due_date") or "")[:10]
+        rows.append({"checkout_id": c["checkout_id"], "patron_id": c["patron_id"], "barcode": it.get("external_id") or "",
+                     "biblio_id": it.get("biblio_id"), "title": t[0], "author": t[1], "isbn": t[2], "due": due,
+                     "overdue": bool(due) and due < today, "renewals": c.get("renewals_count") or 0})
+    return rows
+
+
+def op_patron(patron_id):
+    p = koha("GET", "/patrons/%d" % patron_id)
+    cos = koha("GET", "/checkouts", query={"q": json.dumps({"patron_id": patron_id}), "_per_page": "200",
+                                           "_order_by": "due_date"}, headers={"x-koha-embed": "item"}) or []
+    d = _shape_patron(p)
+    d["loans"] = _loan_rows(cos)
+    d["category"] = p.get("category_id") or ""
+    return d
+
+
+def op_out():
+    """Everything checked out right now, soonest due first (overdue on top)."""
+    cos = koha("GET", "/checkouts", query={"_per_page": "500", "_order_by": "due_date"}, headers={"x-koha-embed": "item"}) or []
+    rows = _loan_rows(cos)
+    names = {}
+    for pid in sorted({r["patron_id"] for r in rows}):
+        try:
+            names[pid] = _patron_name(koha("GET", "/patrons/%d" % pid))
+        except KohaError:
+            names[pid] = "?"
+    for r in rows:
+        r["who"] = names.get(r["patron_id"], "?")
+    return {"loans": rows}
+
+
+def _item_by_barcode(code):
+    code = (code or "").strip()
+    if not code or len(code) > 40:
+        return None
+    res = koha("GET", "/items", query={"q": json.dumps({"external_id": code}), "_per_page": "1"}) or []
+    return res[0] if res else None
+
+
+def _title_of(biblio_id):
+    try:
+        return (koha("GET", "/biblios/%d" % biblio_id).get("title") or "").rstrip(" /:")
+    except KohaError:
+        return ""
+
+
+def op_checkout(payload):
+    pid, code = payload.get("patron_id"), payload.get("barcode")
+    if not isinstance(pid, int):
+        return 400, {"status": "invalid", "message": "Pick the person first."}
+    it = _item_by_barcode(code)
+    if not it:
+        return 200, {"status": "unknown", "message": "No book has the barcode %s." % str(code)[:40]}
+    title = _title_of(it["biblio_id"])
+    if item_status(it) == "Checked out":
+        return 200, {"status": "already_out", "title": title, "barcode": it["external_id"],
+                     "message": "That one is already checked out. Scan it as a return first."}
+    try:
+        co = koha("POST", "/checkouts", {"patron_id": pid, "item_id": it["item_id"]})
+    except KohaError as e:
+        try:
+            msg = json.loads(e.body).get("error") or ""
+        except ValueError:
+            msg = ""
+        return 200, {"status": "refused", "title": title, "message": msg or "Koha would not allow that checkout."}
+    return 200, {"status": "checked_out", "title": title, "barcode": it["external_id"], "due": (co.get("due_date") or "")[:10]}
+
+
+def op_return(payload):
+    code = str(payload.get("barcode") or "").strip()
+    if not SSO_SECRET:
+        return 200, {"status": "error", "message": "Returns need SSO_SECRET in .env (run the installer's Update)."}
+    req = urllib.request.Request(KOHA_RETURN_URL + "?" + urllib.parse.urlencode({"barcode": code}),
+                                 headers={"X-Quickadd-Secret": SSO_SECRET})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            res = json.loads(r.read())
+    except (urllib.error.URLError, OSError, ValueError):
+        return 502, {"status": "error", "message": "Koha did not answer the return - try again."}
+    it = _item_by_barcode(code) if res.get("status") in ("returned", "not_out") else None
+    res["title"] = _title_of(it["biblio_id"]) if it else ""
+    return 200, res
+
+
+def op_renew(payload):
+    cid = payload.get("checkout_id")
+    if not isinstance(cid, int):
+        return 400, {"status": "invalid"}
+    try:
+        co = koha("POST", "/checkouts/%d/renewal" % cid)
+    except KohaError as e:
+        try:
+            msg = json.loads(e.body).get("error") or ""
+        except ValueError:
+            msg = ""
+        return 200, {"status": "refused", "message": msg or "That one can't be renewed (limit reached or someone is waiting)."}
+    return 200, {"status": "renewed", "due": (co.get("due_date") or "")[:10]}
+
+
+_NAME_CACHE = {"at": 0.0, "value": ""}
+
+
+def library_name():
+    if time.time() - _NAME_CACHE["at"] > 300:
+        try:
+            _NAME_CACHE["value"] = koha("GET", "/libraries/%s" % urllib.parse.quote(LIBRARY)).get("name") or ""
+        except (KohaError, AttributeError):
+            pass
+        _NAME_CACHE["at"] = time.time()
+    return _NAME_CACHE["value"]
+
+
+def op_patron_add(payload):
+    def clean(k, n=60):
+        return re.sub(r"\s+", " ", str(payload.get(k) or "")).strip()[:n]
+    surname, first = clean("surname"), clean("firstname")
+    if not surname:
+        return 400, {"status": "invalid", "message": "A name is needed."}
+    body = {"surname": surname, "firstname": first or None, "category_id": PATRON_CATEGORY, "library_id": LIBRARY,
+            "email": clean("email", 100) or None, "phone": clean("phone", 30) or None}
+    p = koha("POST", "/patrons", body)
+    return 200, dict(_shape_patron(p), status="added")
+
+
 # ------------------------------------------------------------ photo scanning
 MAX_IMAGE = 12 * 1024 * 1024
 ZBAR_TIMEOUT = 20
@@ -1058,11 +1227,24 @@ class Handler(BaseHTTPRequestHandler):
                                     "settings": {}, "staff_port": STAFF_PORT, "staff_url": STAFF_URL,
                                     "opac_url": OPAC_URL, "opac_port": OPAC_PORT, "sources": []})
         if path == "/api/state":
-            return self._send(200, {"role": "admin", "recent": load_recent()[:100], "types": get_item_types(),
+            return self._send(200, {"role": "admin", "library_name": library_name(), "recent": load_recent()[:100], "types": get_item_types(),
                                     "library": LIBRARY, "locations": get_locations(), "settings": load_settings(), "staff_port": STAFF_PORT, "staff_url": STAFF_URL, "opac_url": OPAC_URL, "opac_port": OPAC_PORT,
                                     "sources": [s.split(":", 1)[0] if s.startswith("z3950") else s for s in SOURCES]})
         if path == "/api/settings":
             return self._send(200, settings_view())
+        if path in ("/api/patrons", "/api/out") or path.startswith("/api/patron/"):
+            try:
+                if path == "/api/out":
+                    return self._send(200, op_out())
+                if path == "/api/patrons":
+                    return self._send(200, op_patron_search((urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("q") or [""])[0]))
+                m = re.match(r"^/api/patron/(\d{1,9})$", path)
+                if not m:
+                    return self._send(404, {"error": "not found"})
+                return self._send(200, op_patron(int(m.group(1))))
+            except KohaError as e:
+                return self._send(404 if e.status == 404 else 502, {"status": "error", "message":
+                                  "Koha is not answering yet - try again in a minute." if e.status == 503 else "Failed: %s" % e.body[:120]})
         if path == "/api/library" or path.startswith("/api/book/"):
             try:
                 if path == "/api/library":
@@ -1107,7 +1289,8 @@ class Handler(BaseHTTPRequestHandler):
                    "/api/finish": op_finish, "/api/cancel": op_cancel, "/api/settings": op_settings,
                    "/api/barcodes/reserve": op_reserve, "/api/barcodes/assign": op_assign,
                    "/api/item/update": op_item_update, "/api/item/delete": op_item_delete,
-                   "/api/item/copy": op_item_copy, "/api/book/delete": op_book_delete}
+                   "/api/item/copy": op_item_copy, "/api/book/delete": op_book_delete,
+                   "/api/checkout": op_checkout, "/api/return": op_return, "/api/renew": op_renew, "/api/patron/add": op_patron_add}
             fn = ops.get(self.path)
             if not fn:
                 return self._send(404, {"error": "not found"})
