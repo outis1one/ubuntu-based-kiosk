@@ -1720,6 +1720,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Permissions-Policy", "camera=(self), microphone=()")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Content-Security-Policy",
                          "default-src 'self'; img-src 'self' https: data:; "
@@ -1754,7 +1755,11 @@ class Handler(BaseHTTPRequestHandler):
             # Otherwise: a patron signing in with their card number (or userid) and password.
             addr = self.client_address[0]
             if SSO_SECRET and hmac.compare_digest(self.headers.get("X-Quickadd-Proxy", "").encode(), SSO_SECRET.encode()):
-                addr = self.headers.get("X-Forwarded-For", "").split(",")[-1].strip() or addr
+                # Behind Caddy the list reads "<visitor>, <Caddy>" (Caddy adds the visitor, the staff site's web server
+                # adds Caddy), so the visitor is the one before the last. Used only to count failed sign-ins per
+                # visitor, never to vouch for anyone.
+                hops = [h.strip() for h in self.headers.get("X-Forwarded-For", "").split(",") if h.strip()]
+                addr = (hops[-2] if len(hops) >= 2 else hops[-1]) if hops else addr
             self.addr = addr
             pid = patron_login(u, p, addr)
             if pid:

@@ -297,3 +297,20 @@ New installs of this stack use the same three ports whether you install it from 
 **8098** is the one to use (the Room for Books home page, with Koha behind the menu), 8099 is Add books direct, and 8097 is the
 public catalogue, which stays closed. If one is taken, the next free port is used and the installer prints it. Existing installs
 keep the ports they already have.
+
+## HTTPS with Caddy (and the live camera scanner)
+
+Phones only allow a live camera on an HTTPS page. One command adds Caddy in front of the library:
+
+```bash
+# a real domain that points at this machine (ports 80 and 443 reachable): the certificate is automatic
+sudo ./install.sh --domain library.example.com
+
+# a name only your own network knows (library.home.lan): Caddy makes its own certificate authority
+sudo ./install.sh --domain library.home.lan --lan-tls     # then install caddy-root.crt on your phones
+```
+
+It writes `Caddyfile`, starts a `caddy` container (the compose `caddy` profile), sets `STAFF_URL=https://<name>` and closes the plain-HTTP
+ports to the network (`BIND_ADDR=127.0.0.1`; add `--keep-direct` to leave them open). Then use `https://<name>/`: everything works
+as before, and the **Live scan** buttons appear on Add books and Lend / return. Behind your own Caddy instead, point it at the library
+port: `library.example.com { reverse_proxy <this machine>:8098 }` and set `STAFF_URL=https://library.example.com` in `.env`.
