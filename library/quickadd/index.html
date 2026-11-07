@@ -44,6 +44,34 @@
            padding: 10px 16px; background: var(--card); color: var(--ink); font-weight: 600; }
   button.primary { background: var(--accent); color: var(--accent-ink); border-color: var(--accent); }
   button:focus-visible, a:focus-visible, input:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+  header.top { position: relative; display: flex; align-items: center; justify-content: space-between; gap: 8px; padding: 4px 0 8px; border-bottom: 1px solid var(--line); margin-bottom: 12px; }
+  .brand { display: flex; align-items: center; gap: 8px; text-decoration: none; color: var(--ink); }
+  .brand .logo { font-size: 1.5rem; } .brand h1 { margin: 0; }
+  .menubtn { font-size: 1.5rem; line-height: 1; padding: 6px 14px; }
+  .menu { position: absolute; right: 0; top: 100%; z-index: 20; background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+          box-shadow: 0 8px 24px rgba(0,0,0,.18); padding: 8px; min-width: 250px; display: flex; flex-direction: column; gap: 2px; }
+  .menu[hidden] { display: none; }
+  .menu a { color: var(--ink); text-decoration: none; padding: 9px 12px; border-radius: 8px; font-weight: 600; }
+  .menu a:hover, .menu a:focus-visible { background: var(--bg); }
+  .menu a.on { background: var(--accent); color: var(--accent-ink); }
+  .menu a.ext::after { content: ' \2197'; font-size: .85em; }
+  .menu a[hidden] { display: none; }
+  .menugroup { border-top: 1px solid var(--line); margin-top: 6px; padding-top: 6px; display: flex; flex-direction: column; gap: 2px; }
+  .menugroup[hidden] { display: none; }
+  .menulabel { font-size: .8rem; color: var(--muted); padding: 2px 12px; text-transform: uppercase; letter-spacing: .05em; }
+  .find-form.big input { font-size: 1.5rem; padding: 16px 18px; }
+  .bigacts { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin: 16px 0; }
+  .bigacts[hidden] { display: none; }
+  .bigact { display: flex; flex-direction: column; gap: 4px; padding: 18px 14px; border-radius: 14px; background: var(--accent); color: var(--accent-ink);
+            text-decoration: none; min-height: 96px; justify-content: center; }
+  .bigact strong { font-size: 1.25rem; } .bigact span { font-size: .88rem; opacity: .9; }
+  .bigact:hover, .bigact:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+  .foot { max-width: 760px; margin: 8px auto 28px; padding: 14px 16px 0; border-top: 1px solid var(--line); color: var(--muted); font-size: .9rem; text-align: center; }
+  .foot a { color: var(--accent); }
+  .cand { display: flex; gap: 12px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .cand .cv { width: 54px; height: 78px; border-radius: 4px; background: var(--line); flex: none; object-fit: cover; }
+  .cand .t { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+  @media print { .foot, .menubtn, .menu { display: none !important; } }
   nav.tabs { display: flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
   nav.tabs a { color: var(--accent); text-decoration: none; font-weight: 600; padding: 6px 12px; border-radius: 999px; }
   nav.tabs a.on { background: var(--accent); color: var(--accent-ink); }
@@ -134,7 +162,7 @@
   .libcard .no { font-size: 9pt; text-align: center; letter-spacing: .15em; }
   .cardsheet { display: grid; grid-template-columns: repeat(2, 85.6mm); gap: 6mm; justify-content: start; }
   .cardsheet .libcard { break-inside: avoid; }
-  @media print { header, .noprint, nav { display: none !important; } body { background: #fff; } main { padding: 0; max-width: none; } .libcard { border: 1px solid #000; } }
+  @media print { header, .noprint, nav, .foot { display: none !important; } body { background: #fff; } main { padding: 0; max-width: none; } .libcard { border: 1px solid #000; } }
   #live { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.92); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 12px; }
   #live[hidden] { display: none; }
   #live video { width: min(100%, 640px); max-height: 60vh; border-radius: 12px; background: #000; object-fit: cover; }
@@ -146,18 +174,47 @@
 </head>
 <body>
 <main>
-  <header>
-    <h1 id="title">Room for Books</h1>
-    <nav class="tabs" aria-label="Sections">
-      <a id="tab-library" href="#library" class="on">Library</a>
+  <header class="top">
+    <a href="#home" class="brand" aria-label="Room for Books, home"><span class="logo" aria-hidden="true">&#128214;</span> <h1 id="title">Room for Books</h1></a>
+    <button type="button" id="menubtn" class="menubtn" aria-expanded="false" aria-controls="menu" aria-label="Menu">&#9776;</button>
+    <nav id="menu" class="menu" aria-label="Menu" hidden>
+      <a id="tab-home" href="#home">Home</a>
+      <a id="tab-library" href="#library">Browse all books</a>
       <a id="tab-mine" href="#mine" hidden>My books</a>
-      <a id="tab-lend" href="#lend">Lend / return</a>
-      <a id="tab-people" href="#people">People</a>
-      <a id="tab-add" href="#add">Add books</a>
-      <a id="lnk-staff" class="ext" href="#" target="_blank" rel="noopener">Manage</a>
+      <div class="menugroup" id="menu-admin">
+        <div class="menulabel">Admin</div>
+        <a id="tab-lend" href="#lend">Lend / return</a>
+        <a id="tab-add" href="#add">Add books</a>
+        <a id="tab-people" href="#people">People and library cards</a>
+        <a id="tab-settings" href="#settings">Barcodes and settings</a>
+        <a id="tab-export" href="#export">Export / import</a>
+        <a id="lnk-staff" class="ext" href="#" target="_blank" rel="noopener">Koha (full staff screens)</a>
+      </div>
       <a id="lnk-opac" class="ext" href="#" target="_blank" rel="noopener">Public catalogue</a>
     </nav>
   </header>
+
+  <section id="view-home" hidden>
+    <form class="find-form big" id="homeform" autocomplete="off" role="search">
+      <label class="sr" for="hq">Look up a book or a person</label>
+      <input id="hq" type="search" placeholder="Look up a book (title, author, ISBN)" enterkeyhint="search" autocomplete="off">
+      <button class="primary" type="submit">Look up</button>
+    </form>
+    <div id="homeresults" aria-live="polite"></div>
+    <div class="bigacts" id="homeacts">
+      <a class="bigact" href="#lend"><strong>Check out</strong><span>Scan a card, then the books</span></a>
+      <a class="bigact" href="#return"><strong>Return</strong><span>Scan the books coming back</span></a>
+      <a class="bigact" href="#add"><strong>Add books</strong><span>Scan an ISBN or search by title</span></a>
+      <a class="bigact" href="#newperson"><strong>Add a person</strong><span>Get a library card</span></a>
+    </div>
+    <div class="bigacts" id="patronacts" hidden>
+      <a class="bigact" href="#mine"><strong>My books</strong><span>What I have out, and when it is due</span></a>
+      <a class="bigact" href="#library"><strong>Browse</strong><span>Everything in the library</span></a>
+    </div>
+    <h2 id="recenth">Recently added</h2>
+    <div class="grid" id="recent"></div>
+    <p><a href="#library">Browse all books &rarr;</a></p>
+  </section>
 
   <section id="view-library" hidden>
     <form class="find-form" id="findform" autocomplete="off">
@@ -287,8 +344,8 @@
   </div>
 
   <form class="scan" id="scan" autocomplete="off">
-    <label class="sr" for="code">ISBN or barcode</label>
-    <input id="code" inputmode="numeric" placeholder="Scan or type an ISBN" autofocus>
+    <label class="sr" for="code">ISBN, title or author</label>
+    <input id="code" placeholder="Scan an ISBN, or type a title or author" autofocus autocomplete="off">
     <button class="primary" type="submit">Add</button>
   </form>
   <div class="cam-row">
@@ -341,6 +398,7 @@
   <ul class="list" id="earlier"></ul>
   </section>
 </main>
+<footer class="foot" id="foot"><span id="footname">Room for Books</span> &middot; <a href="#home">Home</a> &middot; <a href="#library">Browse</a><span id="footstaff"> &middot; <a id="footkoha" href="#" target="_blank" rel="noopener">Koha</a></span></footer>
 <div id="live" hidden role="dialog" aria-modal="true" aria-label="Camera scanner">
   <div class="frame"><video id="livevideo" playsinline muted></video></div>
   <div class="msg" id="livemsg" aria-live="polite"></div>
@@ -662,10 +720,38 @@
     f.querySelector('input').focus();
   }
 
+  // An ISBN (or scanned barcode) is added straight away; anything else is a title/author search to pick from.
+  const looksLikeCode = t => /^[0-9][0-9\s-]{6,16}[0-9Xx]?$/.test(t);
+  async function searchTitles(term) {
+    $('status').textContent = 'Searching for "' + term + '"…';
+    $('result').replaceChildren();
+    let r; try { r = await api('/api/lookup?q=' + encodeURIComponent(term)); } catch (e) { r = {}; }
+    $('status').textContent = '';
+    if (!r.candidates) { show('bad', el('div', { className: 'body' }, r.message || 'The search failed - try again.')); return; }
+    if (!r.candidates.length) {
+      beep(SOUND.notfound);
+      const manual = el('button', { type: 'button' }, 'Type the details myself');
+      manual.onclick = () => manualForm('');
+      show('warn', el('div', { className: 'body' }, el('div', { className: 'title' }, 'Nothing found for "' + term + '"'),
+        el('div', { className: 'meta' }, 'Try fewer words, the author, or the ISBN printed on the back.'), el('div', { className: 'actions' }, manual)));
+      return;
+    }
+    const rows = r.candidates.map(c => {
+      const btn = el('button', { type: 'button', className: c.have ? '' : 'primary' }, c.have ? 'Add another copy' : 'Add this one');
+      btn.onclick = () => { $('result').replaceChildren(); add(c.isbn, c.have ? { copy: true } : {}); };
+      const img = el('img', { className: 'cv', alt: '', loading: 'lazy', src: 'https://covers.openlibrary.org/b/isbn/' + c.isbn + '-S.jpg?default=false' });
+      img.onerror = () => { img.style.visibility = 'hidden'; };
+      return el('div', { className: 'cand' }, img, el('div', { className: 't' }, el('strong', {}, c.title),
+        el('div', { className: 'meta' }, [c.author, c.year, c.publisher].filter(Boolean).join(' · ')),
+        el('div', { className: 'small' }, 'ISBN ' + c.isbn + ' · ' + c.source + (c.have ? ' · you already have this' : '')), el('div', { className: 'actions' }, btn)));
+    });
+    $('result').replaceChildren(el('div', { className: 'card' }, el('div', { className: 'body' }, el('div', { className: 'title' }, 'Which one is it?'), ...rows)));
+  }
   $('scan').onsubmit = ev => {
     ev.preventDefault();
     const code = $('code').value.trim(); $('code').value = '';
-    if (code) add(code);
+    if (!code) return;
+    if (looksLikeCode(code)) add(code); else searchTitles(code);
   };
 
   function typeButtons() {
@@ -1179,34 +1265,75 @@
     if (r.status === 'saved') f.reset();
   };
 
+  // ---- home: look up a book or a person, big actions, recently added
+  async function homeLookup(term) {
+    const box = $('homeresults');
+    if (term.length < 2) { box.replaceChildren(); return; }
+    box.replaceChildren(el('div', { className: 'small' }, 'Looking…'));
+    const [lib, ppl] = await Promise.all([
+      api('/api/library?q=' + encodeURIComponent(term)).catch(() => ({})),
+      viewer ? Promise.resolve({ patrons: [] }) : api('/api/patrons?q=' + encodeURIComponent(term)).catch(() => ({ patrons: [] }))]);
+    const parts = [];
+    if ((ppl.patrons || []).length) {
+      parts.push(el('h2', {}, 'People'), ...ppl.patrons.slice(0, 6).map(p => el('div', { className: 'person' },
+        el('span', { className: 't' }, el('strong', {}, p.name), el('div', { className: 'small' }, p.card)),
+        el('a', { href: '#lend/' + p.id }, el('button', { type: 'button', className: 'primary' }, 'Check out / returns')),
+        el('a', { href: '#card/' + p.id }, el('button', { type: 'button' }, 'Card')))));
+    }
+    const books = lib.books || [];
+    parts.push(el('h2', {}, 'Books'));
+    if (books.length) parts.push(el('div', { className: 'grid' }, ...books.slice(0, 12).map(tile)),
+      books.length > 12 || lib.more ? el('p', {}, el('a', { href: '#library', onclick: () => setTimeout(() => { $('q').value = term; loadLibrary(true); }, 0) }, 'See all matches')) : '');
+    else parts.push(el('div', { className: 'small' }, 'No book matches "' + term + '".' + (viewer ? '' : ' ') ), viewer ? '' : el('a', { href: '#add' }, 'Add it'));
+    box.replaceChildren(...parts);
+  }
+  $('homeform').onsubmit = ev => { ev.preventDefault(); homeLookup($('hq').value.trim()); };
+  let recentLoaded = 0;
+  async function loadRecent() {
+    if (Date.now() - recentLoaded < 5000) return; recentLoaded = Date.now();
+    let r; try { r = await api('/api/library?sort=new&page=1'); } catch (e) { return; }
+    const books = (r.books || []).slice(0, 12);
+    $('recent').replaceChildren(...books.map(tile));
+    $('recenth').hidden = !books.length; $('recent').hidden = !books.length;
+  }
+  $('menubtn').onclick = () => { const open = $('menu').hidden; $('menu').hidden = !open; $('menubtn').setAttribute('aria-expanded', String(open)); };
+  document.addEventListener('click', ev => { if (!$('menu').hidden && !ev.target.closest('#menu, #menubtn')) { $('menu').hidden = true; $('menubtn').setAttribute('aria-expanded', 'false'); } });
+  document.addEventListener('keydown', ev => { if (ev.key === 'Escape' && !$('menu').hidden) { $('menu').hidden = true; $('menubtn').setAttribute('aria-expanded', 'false'); $('menubtn').focus(); } });
+
   function route() {
     const h = location.hash.replace(/^#/, '');
-    let m, view = 'library';
+    $('menu').hidden = true; $('menubtn').setAttribute('aria-expanded', 'false');
+    let m, view = 'home';
     if ((m = h.match(/^book\/(\d+)$/))) view = 'book';
+    else if (h === 'library') view = 'library';
     else if (h === 'mine' && isPatron) view = 'mine';
-    else if (viewer) view = 'library';
-    else if (h === 'add') view = 'add';
-    else if ((m = h.match(/^lend(?:\/(\d+))?$/))) view = 'lend';
-    else if (h === 'people') view = 'people';
+    else if (viewer) view = h === 'library' ? 'library' : 'home';
+    else if (h === 'add' || h === 'settings') view = 'add';
+    else if (h === 'return' || (m = h.match(/^lend(?:\/(\d+))?$/))) view = 'lend';
+    else if (h === 'people' || h === 'newperson') view = 'people';
     else if ((m = h.match(/^card\/(\d+)$/))) view = 'card';
     else if (h === 'cards') view = 'cards';
-    for (const v of ['library', 'book', 'add', 'lend', 'people', 'card', 'cards', 'mine']) $('view-' + v).hidden = v !== view;
-    const tab = { library: 'library', book: 'library', add: 'add', lend: 'lend', people: 'people', card: 'people', cards: 'people', mine: 'mine' }[view];
-    for (const t of ['library', 'add', 'lend', 'people', 'mine']) $('tab-' + t).classList.toggle('on', t === tab);
+    else if (h === 'export') view = 'library';
+    for (const v of ['home', 'library', 'book', 'add', 'lend', 'people', 'card', 'cards', 'mine']) $('view-' + v).hidden = v !== view;
+    const tab = { home: 'home', library: 'library', book: 'library', add: 'add', lend: 'lend', people: 'people', card: 'people', cards: 'people', mine: 'mine' }[view];
+    for (const t of ['home', 'library', 'add', 'lend', 'people', 'mine', 'settings', 'export']) $('tab-' + t).classList.toggle('on', t === tab && !(t === 'add' && h === 'settings'));
     $('tab-mine').hidden = !isPatron;
-    for (const t of ['add', 'lend', 'people']) $('tab-' + t).hidden = viewer;
+    $('menu-admin').hidden = viewer;
+    $('footstaff').hidden = viewer;
     $('csvtools').hidden = viewer;
-    const names = { library: 'The library', book: 'The library', add: 'Add books', lend: 'Lend / return', people: 'People', card: 'Library card', cards: 'Library cards', mine: 'My books' };
-    document.title = names[view] + ' - Room for Books';
-    if (view === 'book') loadBook(m[1]);
+    const names = { home: 'Home', library: 'Browse', book: 'Book', add: 'Add books', lend: 'Lend / return', people: 'People', card: 'Library card', cards: 'Library cards', mine: 'My books' };
+    document.title = (view === 'home' ? '' : names[view] + ' - ') + 'Room for Books';
+    window.scrollTo(0, 0);
+    if (view === 'home') { $('homeacts').hidden = viewer; $('patronacts').hidden = !isPatron; loadRecent(); if (h === 'find') $('hq').focus(); }
+    else if (view === 'book') loadBook(m[1]);
     else if (view === 'mine') loadMine();
-    else if (view === 'add') $('code').focus();
+    else if (view === 'add') { if (h === 'settings') { $('settings').open = true; $('settings').scrollIntoView(); } else $('code').focus(); }
     else if (view === 'lend') { loadOut(); curPatron = null; $('patronbox').replaceChildren();
-      if (m && m[1]) openPatron(m[1]); else { $('whoresults').replaceChildren(); $('who').focus(); } }
-    else if (view === 'people') { loadPeople($('pq').value.trim()); loadPwSettings(); }
+      if (m && m[1]) openPatron(m[1]); else if (h === 'return') $('ret').focus(); else { $('whoresults').replaceChildren(); $('who').focus(); } }
+    else if (view === 'people') { loadPeople($('pq').value.trim()); loadPwSettings(); if (h === 'newperson') { $('newperson').open = true; $('personform').querySelector('input').focus(); } }
     else if (view === 'card') loadCard(m[1]);
     else if (view === 'cards') loadCards();
-    else { if (!libLoaded) { libLoaded = true; loadLibrary(true); } if (h === 'find') $('q').focus(); }
+    else { if (!libLoaded) { libLoaded = true; loadLibrary(true); } if (h === 'export') { $('csvtools').open = true; $('csvtools').scrollIntoView(); } }
   }
   window.addEventListener('hashchange', route);
   let libraryDisplay = '';
@@ -1221,7 +1348,8 @@
     $('lnk-opac').hidden = !s.opac_url;
     if (s.opac_url) $('lnk-opac').href = s.opac_url + '/';
     $('lnk-staff').href = staffRoot() + '/';
-    $('lnk-staff').hidden = viewer;
+    $('lnk-staff').hidden = viewer; $('footkoha').href = staffRoot() + '/';
+    $('footname').textContent = 'Room for Books' + (s.library_name ? ' · ' + s.library_name : '');
     $('lnk-labels').href = staffRoot() + '/cgi-bin/koha/labels/label-edit-range.pl';
     if (s.locations && s.locations.length) {
       const sel = $('shelf');

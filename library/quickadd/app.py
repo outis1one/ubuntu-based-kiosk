@@ -1527,6 +1527,101 @@ def op_logins_all(payload):
     return 200, {"status": "done", "made": made}
 
 
+# ------------------------------------------------------------ title / author search
+def z3950_candidates(spec, term, limit=8):
+    """Title search (falling back to any field) on a Z39.50 server; returns summaries with an ISBN."""
+    out = []
+    for attr in ("@attr 1=4", "@attr 1=1016"):
+        with tempfile.TemporaryDirectory() as tmp:
+            dump = os.path.join(tmp, "rec.mrc")
+            q = term.replace('"', " ")
+            script = 'format usmarc\nfind %s "%s"\nshow 1+%d\nquit\n' % (attr, q, limit)
+            try:
+                res = subprocess.run(["yaz-client", "-m", dump, spec], input=script, capture_output=True, text=True,
+                                     timeout=Z3950_TIMEOUT).stdout
+            except (subprocess.TimeoutExpired, OSError):
+                return out
+            m = re.search(r"Number of hits: (\d+)", res)
+            if not m or int(m.group(1)) == 0 or not os.path.exists(dump):
+                continue
+            raw = open(dump, "rb").read()
+            args = ["yaz-marcdump", "-o", "marcxml"]
+            if len(raw) > 9 and raw[9:10] == b" ":
+                args += ["-f", "MARC-8", "-t", "UTF-8", "-l", "9=97"]
+            conv = subprocess.run(args + [dump], capture_output=True, text=True, timeout=15)
+            if conv.returncode != 0:
+                continue
+            try:
+                root = ET.fromstring(conv.stdout if conv.stdout.lstrip().startswith("<collection") else "<c xmlns='%s'>%s</c>" % (NS["m"], conv.stdout))
+            except ET.ParseError:
+                continue
+            for rec in root.iter("{%s}record" % NS["m"]):
+                info = describe(rec)
+                isbn = ""
+                for df in rec.findall("m:datafield[@tag='020']", NS):
+                    for sf in df.findall("m:subfield[@code='a']", NS):
+                        c = clean_code((sf.text or "").split(" ")[0])
+                        if c and len(c) in (10, 13) and not isbn:
+                            isbn = isbn10_to_13(c) if len(c) == 10 else c
+                if isbn:
+                    out.append(dict(info, isbn=isbn, source="Library of Congress"))
+            if out:
+                return out
+    return out
+
+
+def openlibrary_candidates(term, limit=10):
+    url = "https://openlibrary.org/search.json?" + urllib.parse.urlencode(
+        {"q": term, "limit": str(limit), "fields": "title,author_name,first_publish_year,isbn,publisher,cover_i"})
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "library-quickadd/1.0"}), timeout=10) as r:
+            docs = json.load(r).get("docs") or []
+    except (urllib.error.URLError, OSError, ValueError):
+        return []
+    out = []
+    for d in docs:
+        isbns = [clean_code(i) for i in (d.get("isbn") or [])]
+        isbns = [i for i in isbns if i and len(i) == 13 and i[:3] in ("978", "979")] or [isbn10_to_13(i) for i in isbns if i and len(i) == 10]
+        if not isbns or not d.get("title"):
+            continue
+        out.append({"title": d["title"], "author": ", ".join((d.get("author_name") or [])[:2]), "year": str(d.get("first_publish_year") or ""),
+                    "publisher": ((d.get("publisher") or [""])[0])[:60], "isbn": isbns[0], "source": "Open Library"})
+    return out
+
+
+def op_lookup(term):
+    """Books matching a title/author, to choose from; each has an ISBN so choosing one is a normal add."""
+    term = re.sub(r"\s+", " ", term or "").strip()[:100]
+    if len(term) < 3:
+        return {"candidates": []}
+    found, seen = [], set()
+    for src in SOURCES:
+        got = []
+        if src == "openlibrary":
+            got = openlibrary_candidates(term)
+        elif src.startswith("z3950:"):
+            got = z3950_candidates(src[len("z3950:"):], term)
+        for c in got:
+            key = (c["isbn"], (c["title"] + c["author"]).lower()[:40])
+            if c["isbn"] in {k[0] for k in seen} or key in seen:
+                continue
+            seen.add(key)
+            found.append(c)
+    found = found[:12]
+    if found:                                    # which of these do we already own? one query for all
+        conds = [{"isbn": {"-like": "%" + c["isbn"] + "%"}} for c in found] + [{"ean": {"-like": "%" + c["isbn"] + "%"}} for c in found]
+        try:
+            owned = " ".join((b.get("isbn") or "") + " " + (b.get("ean") or "") for b in
+                             (koha("GET", "/biblios", query={"q": json.dumps({"-or": conds}), "_per_page": "50"}) or []))
+        except KohaError:
+            owned = ""
+        for c in found:
+            alt = isbn13_to_10(c["isbn"]) or ""
+            c["have"] = c["isbn"] in owned or bool(alt and alt in owned)
+    have = found
+    return {"candidates": have}
+
+
 # ------------------------------------------------------------ photo scanning
 MAX_IMAGE = 12 * 1024 * 1024
 ZBAR_TIMEOUT = 20
@@ -1726,6 +1821,12 @@ class Handler(BaseHTTPRequestHandler):
             except KohaError as e:
                 return self._send(404 if e.status == 404 else 502, {"status": "error", "message":
                                   "Koha is not answering yet - try again in a minute." if e.status == 503 else "Failed: %s" % e.body[:120]})
+        if path == "/api/lookup":
+            q = (urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("q") or [""])[0]
+            try:
+                return self._send(200, op_lookup(q))
+            except KohaError:
+                return self._send(502, {"status": "error", "message": "Koha is not answering yet - try again in a minute."})
         if path == "/api/me":
             if self.role != "patron":
                 return self._send(403, {"status": "error", "message": "Sign in with a library card to see your books."})

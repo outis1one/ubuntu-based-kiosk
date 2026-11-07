@@ -208,7 +208,18 @@ quickadd/             the scan-to-add service (Python standard library + yaz)
 
 Staff who are signed in to the library site (and allowed to edit the catalogue) open **Add books** without a second login. Koha itself confirms the sign-in; the shared secret is `SSO_SECRET` in `.env`. The read-only `guest` login still uses the Add books prompt, and the direct Add books port never accepts a Koha sign-in. If `SSO_SECRET` is empty, Add books just asks for its own login as before.
 
-## Everyday use (the Library site at `/add/`)
+## The home page (the Room for Books site at `/add/`)
+
+One simple page: a **Look up** box (books by title, author or ISBN, and people by name or card number), four big buttons
+(**Check out**, **Return**, **Add books**, **Add a person**) and **Recently added** books with their covers. The **menu**
+(top right) holds the rest: browse all books, lend / return, people and library cards, barcodes and settings, export / import,
+and a link to Koha's own staff screens. Borrowers and the read-only guest see just the lookup, recent books and (borrowers) My books.
+
+**Adding by title:** on Add books, scan or type an ISBN to add it straight away; type a title or author instead and you get a list
+of matches (cover, author, year, publisher) from Open Library and the Library of Congress to choose from. Books you already have
+are marked, with an *Add another copy* button.
+
+## Everyday use (details)
 
 One page for the day-to-day, so you rarely need Koha's own screens:
 
