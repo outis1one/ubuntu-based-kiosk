@@ -784,10 +784,12 @@
   function art(b, cls) {
     const a = el('span', { className: cls || 'art' }, b.title);
     a.style.setProperty('--tint', tint(b.title));
-    if (b.isbn && /^(\d{13}|\d{9}[\dXx])$/.test(b.isbn.replace(/[^0-9Xx]/g, '').slice(0, 13))) {
-      const img = el('img', { alt: '', hidden: true, loading: 'lazy' });
-      img.onload = () => { if (img.naturalWidth > 1) img.hidden = false; };
-      img.src = 'api/cover/' + b.isbn.replace(/[^0-9Xx]/g, '').slice(0, 13);
+    const key = b.cover || (b.isbn ? b.isbn.replace(/[^0-9Xx]/g, '').slice(0, 13) : '');
+    if (/^(b\d+|\d{13}|\d{9}[\dXx])$/.test(key)) {
+      // (not `hidden`: a lazy-loaded image that is not rendered is never fetched at all)
+      const img = el('img', { alt: '', loading: 'lazy', style: 'opacity:0' });
+      img.onload = () => { if (img.naturalWidth > 1) img.style.opacity = '1'; };
+      img.src = 'api/cover/' + key + (b.coverv ? '?t=' + b.coverv : '');
       a.append(img);
     }
     return a;
@@ -879,7 +881,11 @@
     if (!viewer) {
       const edit = el('button', { type: 'button' }, 'Edit details');
       edit.onclick = () => { const f = editForm(b, refresh); edit.replaceWith(f); f.querySelector('input').focus(); };
-      head.querySelector('.body').append(el('div', { className: 'actions' }, edit));
+      const covBtn = el('button', { type: 'button' }, 'Change cover');
+      const panel = el('div', { className: 'copybox', hidden: true, style: 'width:100%' });
+      covBtn.onclick = () => { panel.hidden = !panel.hidden; if (!panel.hidden && !panel.firstChild) coverPanel(panel, b, head); };
+      head.querySelector('.body').append(el('div', { className: 'actions' }, edit, covBtn), panel);
+      if (reopenCover) { reopenCover = false; panel.hidden = false; coverPanel(panel, b, head); }
     }
     if (!viewer) {
       const more = el('button', { type: 'button' }, 'Add another copy');
@@ -958,6 +964,48 @@
       el('div', { style: 'margin-top:6px' }, open, ' ', arPop, ' ', arFrame, ' ', copy),
       el('div', { className: 'small' }, 'Search for the title there, select the whole book page, copy, and paste it below. (The title is copied for you when you open it.)'), arHolder);
     return wrap;
+  }
+
+  let reopenCover = false;
+  // Change a book's cover: upload your own picture, remove it, ask Open Library again by ISBN, or pick another edition's cover.
+  function coverPanel(panel, b, head) {
+    const key = b.cover; const stamp = Date.now();
+    const msg = el('div', { className: 'small', role: 'status', style: 'margin-top:6px' });
+    const preview = el('div', { style: 'width:110px;flex:none' });
+    const showCurrent = () => { preview.replaceChildren(art(Object.assign({}, b, { coverv: Date.now() }), 'art')); preview.firstChild.style.cssText = 'position:relative;display:flex;aspect-ratio:2/3;width:100%;border-radius:6px;overflow:hidden;background:var(--tint);color:#fff;padding:6px;align-items:flex-end;font-weight:700;font-size:.8rem'; };
+    const done = text => { msg.textContent = text; showCurrent(); head.replaceChild(art(Object.assign({}, b, { coverv: Date.now() })), head.firstChild); };
+    const file = el('input', { type: 'file', accept: 'image/*', hidden: true, 'aria-label': 'Choose a cover picture' });
+    const up = el('button', { type: 'button', className: 'primary' }, 'Upload a picture');
+    up.onclick = () => file.click();
+    file.onchange = async () => {
+      const f = file.files[0]; file.value = ''; if (!f) return;
+      msg.textContent = 'Uploading…';
+      try {
+        const blob = await shrink(f, 1000);
+        const r = await fetch('api/cover/upload?key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'image/jpeg', 'X-Quickadd': '1' }, body: blob });
+        const j = await r.json(); done(j.status === 'saved' ? 'Cover saved.' : (j.message || 'Could not save that picture.'));
+      } catch (e) { msg.textContent = 'Could not read that picture - try a JPEG or PNG.'; }
+    };
+    const rm = el('button', { type: 'button', className: 'danger' }, 'Remove cover');
+    rm.onclick = async () => { if (!confirm('Remove this cover?')) return; await api('/api/cover/delete', { key }); done('Cover removed. It will not be fetched again unless you search again.'); };
+    const again = el('button', { type: 'button' }, 'Try the ISBN again');
+    again.hidden = key.startsWith('b');
+    again.onclick = async () => { msg.textContent = 'Looking…'; const r = await api('/api/cover/refetch', { key }); done(r.status === 'found' ? 'Found a cover.' : 'No cover found for that ISBN.'); };
+    const grid = el('div', { style: 'display:flex;flex-wrap:wrap;gap:10px;margin-top:10px' });
+    const other = el('button', { type: 'button' }, 'Find another cover');
+    other.onclick = async () => {
+      msg.textContent = 'Searching Open Library…'; grid.replaceChildren();
+      const r = await api('/api/cover-candidates?biblio=' + b.id);
+      msg.textContent = (r.covers || []).length ? 'Choose one:' : (r.message || 'No other covers found. Upload a picture instead.');
+      grid.replaceChildren(...(r.covers || []).map(c => { const bt = el('button', { type: 'button', title: [c.title, c.author, c.year].filter(Boolean).join(' · '), style: 'padding:3px;background:var(--card)' },
+        el('img', { src: 'api/cover-preview/' + c.id, alt: c.title, loading: 'lazy', style: 'width:84px;height:124px;object-fit:cover;display:block' }));
+        bt.onclick = async () => { msg.textContent = 'Saving…'; const x = await api('/api/cover/pick', { key, cover_i: c.id }); grid.replaceChildren(); done(x.status === 'saved' ? 'Cover saved.' : (x.message || 'Could not use that one.')); };
+        return bt; }));
+    };
+    showCurrent();
+    panel.replaceChildren(el('strong', {}, 'Cover'), el('div', { style: 'display:flex;gap:14px;flex-wrap:wrap;margin-top:8px' }, preview,
+      el('div', { style: 'flex:1;min-width:200px' }, el('div', { className: 'actions', style: 'margin-top:0' }, up, other, again, rm, file),
+        el('div', { className: 'small', style: 'margin-top:6px' }, 'A phone offers its camera or photos for the upload.'), msg, grid)));
   }
 
   function editForm(b, refresh) {

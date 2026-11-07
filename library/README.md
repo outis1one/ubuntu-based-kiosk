@@ -333,3 +333,10 @@ port: `library.example.com { reverse_proxy <this machine>:8098 }` and set `STAFF
 - **Covers** are fetched once from Open Library when a book is added (or the first time one is shown) and kept in the data
   volume (`covers/`), so browsers never contact another site and covers still show offline. A book with no cover found shows a
   coloured title tile and is retried after a week.
+
+### Changing a cover
+
+On a book's page, **Change cover**: **Upload a picture** (from a phone it offers the camera or photos; it is shrunk to fit), **Remove
+cover** (it is not fetched again unless you ask), **Try the ISBN again** (asks Open Library afresh), or **Find another cover** (a
+grid of covers from other editions of the same title: click one to use it). A book without an ISBN can still have an uploaded
+cover. Covers live in the data volume (`covers/`), so they are backed up with it.

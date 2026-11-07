@@ -774,7 +774,7 @@ def _shape_book(b, items, where):
     shelves = sorted({where.get(i.get("location"), "") for i in mine} - {""})
     colls = {c["value"]: c["label"] for c in get_collections()}
     collections = sorted({colls.get(i.get("collection_code"), "") for i in mine} - {""})
-    return {"tags": _tags_load().get(str(b["biblio_id"]), []), "collections": collections, "id": b["biblio_id"], "title": (b.get("title") or "").rstrip(" /:"), "author": b.get("author") or "",
+    return {"cover": cover_key(b.get("isbn"), b["biblio_id"]), "tags": _tags_load().get(str(b["biblio_id"]), []), "collections": collections, "id": b["biblio_id"], "title": (b.get("title") or "").rstrip(" /:"), "author": b.get("author") or "",
             "year": b.get("copyright_date") or "", "isbn": b.get("isbn") or "", "type": b.get("item_type") or "",
             "copies": len(mine), "out": out, "shelves": shelves,
             "callnumber": next((i.get("callnumber") for i in mine if i.get("callnumber")), "") or ""}
@@ -903,7 +903,7 @@ def op_book(biblio_id, staff, patron_id=None):
         if staff and c["status"] == "Checked out":
             c["out"] = out.get(i["item_id"])
         copies.append(c)
-    res = {"id": b["biblio_id"], "title": (b.get("title") or "").rstrip(" /:"), "subtitle": b.get("subtitle") or "",
+    res = {"cover": cover_key(b.get("isbn"), b["biblio_id"]), "id": b["biblio_id"], "title": (b.get("title") or "").rstrip(" /:"), "subtitle": b.get("subtitle") or "",
             "author": b.get("author") or "", "year": b.get("copyright_date") or b.get("publication_year") or "",
             "isbn": b.get("isbn") or "", "publisher": b.get("publisher") or "", "pages": b.get("pages") or "",
             "edition": b.get("edition_statement") or "", "summary": b.get("abstract") or b.get("notes") or "",
@@ -1860,41 +1860,161 @@ def op_me_history(pid):
 # Covers are fetched once, when a book is added (or the first time one is shown), and kept on disk, so the
 # browser never contacts another site and covers still show offline.
 COVER_DIR = os.path.join(DATA_DIR, "covers")
-_COVER_MISS = {}                    # isbn -> time of the last failed fetch (not retried for a week)
+_COVER_MISS = {}                    # key -> time of the last failed fetch (not retried for a week)
 COVER_MAX = 1_500_000
 
 
-def cover_path(isbn):
-    return os.path.join(COVER_DIR, isbn + ".jpg")
+def cover_key(isbn_raw, biblio_id):
+    """Covers are filed by ISBN-13; a book without an ISBN gets b<id> (it can only have an uploaded cover)."""
+    return _isbn13(isbn_raw) or "b%d" % biblio_id
 
 
-def fetch_cover(isbn, save=True):
-    """Returns the JPEG bytes (cached on disk when save) or None. isbn must be 10/13 digits (X allowed)."""
-    path = cover_path(isbn)
-    try:
-        return open(path, "rb").read()
-    except OSError:
-        pass
-    if time.time() - _COVER_MISS.get(isbn, 0) < 7 * 86400:
-        return None
-    url = "https://covers.openlibrary.org/b/isbn/%s-L.jpg?default=false" % isbn
+def norm_cover_key(raw):
+    if re.fullmatch(r"b[0-9]{1,9}", raw or ""):
+        return raw
+    return _isbn13(raw)
+
+
+def cover_path(key):
+    return os.path.join(COVER_DIR, key + ".jpg")
+
+
+def _no_cover_marker(key):
+    return os.path.join(COVER_DIR, key + ".none")
+
+
+def _is_jpeg(data):
+    return 1500 < len(data) <= COVER_MAX and data[:3] == b"\xff\xd8\xff"       # a real JPEG, not a 1px placeholder
+
+
+def _http_image(url):
     try:
         with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "library-quickadd/1.0"}), timeout=10) as r:
-            data = r.read(COVER_MAX + 1)
+            return r.read(COVER_MAX + 1)
     except (urllib.error.URLError, OSError):
-        data = b""
-    if not (1500 < len(data) <= COVER_MAX and data[:3] == b"\xff\xd8\xff"):      # a real JPEG, not a 1px placeholder
-        _COVER_MISS[isbn] = time.time()
+        return b""
+
+
+def _write_cover(key, data):
+    os.makedirs(COVER_DIR, exist_ok=True)
+    tmp = cover_path(key) + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(data)
+    os.replace(tmp, cover_path(key))
+    try:
+        os.remove(_no_cover_marker(key))
+    except OSError:
+        pass
+
+
+def fetch_cover(key, save=True):
+    """The cover's JPEG bytes (kept on disk when save) or None. Only ISBN keys are looked up online."""
+    try:
+        return open(cover_path(key), "rb").read()
+    except OSError:
+        pass
+    if key.startswith("b") or os.path.exists(_no_cover_marker(key)):       # uploaded-only, or deliberately removed
+        return None
+    if time.time() - _COVER_MISS.get(key, 0) < 7 * 86400:
+        return None
+    data = _http_image("https://covers.openlibrary.org/b/isbn/%s-L.jpg?default=false" % key)
+    if not _is_jpeg(data):
+        _COVER_MISS[key] = time.time()
         return None
     if save:
         try:
-            os.makedirs(COVER_DIR, exist_ok=True)
-            tmp = path + ".tmp"
-            open(tmp, "wb").write(data)
-            os.replace(tmp, path)
+            _write_cover(key, data)
         except OSError:
             pass
     return data
+
+
+def cover_etag(key):
+    try:
+        st = os.stat(cover_path(key))
+        return '"%x-%x"' % (int(st.st_mtime), st.st_size)
+    except OSError:
+        return None
+
+
+def op_cover_upload(key_raw, data):
+    key = norm_cover_key(key_raw)
+    if not key:
+        return 400, {"status": "invalid", "message": "Bad cover name."}
+    if not _is_jpeg(data):
+        return 415, {"status": "error", "message": "Please choose a picture (JPEG or PNG) under 1.5 MB."}
+    with LOCK:
+        _write_cover(key, data)
+    return 200, {"status": "saved"}
+
+
+def op_cover_delete(payload):
+    key = norm_cover_key(payload.get("key"))
+    if not key:
+        return 400, {"status": "invalid"}
+    with LOCK:
+        try:
+            os.remove(cover_path(key))
+        except OSError:
+            pass
+        os.makedirs(COVER_DIR, exist_ok=True)
+        open(_no_cover_marker(key), "w").close()          # do not fetch it again behind your back
+    return 200, {"status": "deleted"}
+
+
+def op_cover_refetch(payload):
+    """Search again by ISBN: forget any removal and any earlier miss, and ask Open Library afresh."""
+    key = norm_cover_key(payload.get("key"))
+    if not key or key.startswith("b"):
+        return 400, {"status": "invalid", "message": "This book has no ISBN to look up."}
+    with LOCK:
+        try:
+            os.remove(_no_cover_marker(key))
+        except OSError:
+            pass
+        _COVER_MISS.pop(key, None)
+        try:
+            os.remove(cover_path(key))
+        except OSError:
+            pass
+    return 200, {"status": "found" if fetch_cover(key) else "none"}
+
+
+def op_cover_candidates(biblio_id):
+    """Other covers to choose from: Open Library editions matching the title and author."""
+    b = koha("GET", "/biblios/%d" % biblio_id)
+    term = ((b.get("title") or "").rstrip(" /:") + " " + (b.get("author") or "")).strip()
+    url = "https://openlibrary.org/search.json?" + urllib.parse.urlencode(
+        {"q": term, "limit": "24", "fields": "title,author_name,first_publish_year,cover_i"})
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "library-quickadd/1.0"}), timeout=10) as r:
+            docs = json.load(r).get("docs") or []
+    except (urllib.error.URLError, OSError, ValueError):
+        return {"covers": [], "message": "Open Library did not answer - try again, or upload a picture."}
+    seen, out = set(), []
+    for d in docs:
+        cid = d.get("cover_i")
+        if isinstance(cid, int) and cid not in seen:
+            seen.add(cid)
+            out.append({"id": cid, "title": d.get("title") or "", "author": ", ".join((d.get("author_name") or [])[:2]),
+                        "year": str(d.get("first_publish_year") or "")})
+    return {"covers": out[:16]}
+
+
+def op_cover_pick(payload):
+    key, cid = norm_cover_key(payload.get("key")), payload.get("cover_i")
+    if not key or not isinstance(cid, int) or cid <= 0:
+        return 400, {"status": "invalid"}
+    data = _http_image("https://covers.openlibrary.org/b/id/%d-L.jpg" % cid)
+    if not _is_jpeg(data):
+        return 200, {"status": "error", "message": "Could not download that cover - try another."}
+    with LOCK:
+        _write_cover(key, data)
+    return 200, {"status": "saved"}
+
+
+def cover_preview(cid):
+    return _http_image("https://covers.openlibrary.org/b/id/%d-M.jpg" % cid)
 
 
 def prefetch_cover(code):
@@ -2114,13 +2234,36 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, op_lookup(q))
             except KohaError:
                 return self._send(502, {"status": "error", "message": "Koha is not answering yet - try again in a minute."})
-        m = re.match(r"^/api/cover/([0-9]{9}[0-9Xx]|[0-9]{13})$", path)
+        m = re.match(r"^/api/cover/(b[0-9]{1,9}|[0-9]{9}[0-9Xx]|[0-9]{13})$", path)
         if m:
+            key = norm_cover_key(m.group(1).upper() if not m.group(1).startswith("b") else m.group(1))
             tmp = "tmp=1" in (urllib.parse.urlparse(self.path).query or "")          # search suggestions are not kept
-            data = fetch_cover(m.group(1).upper(), save=not tmp)
+            data = fetch_cover(key, save=not tmp) if key else None
             if not data:
-                return self._send(404, b"no cover", "text/plain", {"Cache-Control": "private, max-age=3600"})
-            return self._send(200, data, "image/jpeg", {"Cache-Control": "private, max-age=604800"})
+                return self._send(404, b"no cover", "text/plain", {"Cache-Control": "private, max-age=600"})
+            etag = cover_etag(key)
+            if etag and self.headers.get("If-None-Match") == etag:
+                self.send_response(304)
+                self.send_header("ETag", etag)
+                self.send_header("Cache-Control", "private, no-cache")
+                self.end_headers()
+                return
+            extra = {"Cache-Control": "private, no-cache"}
+            if etag:
+                extra["ETag"] = etag
+            return self._send(200, data, "image/jpeg", extra)
+        if path == "/api/cover-candidates":
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            try:
+                return self._send(200, op_cover_candidates(int((qs.get("biblio") or ["0"])[0])))
+            except (ValueError, KohaError):
+                return self._send(502, {"covers": [], "message": "Koha is not answering yet - try again."})
+        m = re.match(r"^/api/cover-preview/([0-9]{1,10})$", path)
+        if m:
+            data = cover_preview(int(m.group(1)))
+            if not _is_jpeg(data):
+                return self._send(404, b"no cover", "text/plain")
+            return self._send(200, data, "image/jpeg", {"Cache-Control": "private, max-age=3600"})
         if path == "/api/history":
             try:
                 return self._send(200, op_history(urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)))
@@ -2209,6 +2352,13 @@ class Handler(BaseHTTPRequestHandler):
         if not self._guard():
             return
         try:
+            if self.path.split("?")[0] == "/api/cover/upload":
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= COVER_MAX:
+                    return self._send(413, {"status": "error", "message": "That picture is too large (1.5 MB at most)."})
+                qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                code, body = op_cover_upload((qs.get("key") or [""])[0], self.rfile.read(length))
+                return self._send(code, body)
             if self.path.split("?")[0] == "/api/scan":
                 length = int(self.headers.get("Content-Length", "0"))
                 if not 0 < length <= MAX_IMAGE:
@@ -2228,7 +2378,7 @@ class Handler(BaseHTTPRequestHandler):
                    "/api/barcodes/reserve": op_reserve, "/api/barcodes/assign": op_assign,
                    "/api/item/update": op_item_update, "/api/item/delete": op_item_delete,
                    "/api/item/copy": op_item_copy, "/api/book/delete": op_book_delete,
-                   "/api/value/add": op_value_add, "/api/book/edit": op_book_edit, "/api/hold/add": op_hold_add, "/api/hold/cancel": op_hold_cancel, "/api/tags/set": op_tags_set, "/api/patron/reset-login": op_reset_login, "/api/logins/all": op_logins_all, "/api/ar/set": op_ar_set, "/api/ar/import": op_ar_import, "/api/checkout": op_checkout, "/api/return": op_return, "/api/renew": op_renew, "/api/patron/add": op_patron_add}
+                   "/api/value/add": op_value_add, "/api/cover/delete": op_cover_delete, "/api/cover/refetch": op_cover_refetch, "/api/cover/pick": op_cover_pick, "/api/book/edit": op_book_edit, "/api/hold/add": op_hold_add, "/api/hold/cancel": op_hold_cancel, "/api/tags/set": op_tags_set, "/api/patron/reset-login": op_reset_login, "/api/logins/all": op_logins_all, "/api/ar/set": op_ar_set, "/api/ar/import": op_ar_import, "/api/checkout": op_checkout, "/api/return": op_return, "/api/renew": op_renew, "/api/patron/add": op_patron_add}
             fn = ops.get(self.path)
             if not fn:
                 return self._send(404, {"error": "not found"})
