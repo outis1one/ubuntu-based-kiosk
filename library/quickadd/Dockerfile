@@ -5,7 +5,7 @@ FROM debian:bookworm-slim
 ENV DEBIAN_FRONTEND=noninteractive PYTHONUNBUFFERED=1
 
 RUN apt-get update \
- && apt-get install -y --no-install-recommends ca-certificates python3 yaz zbar-tools tzdata \
+ && apt-get install -y --no-install-recommends ca-certificates python3 yaz zbar-tools qrencode tzdata \
  && rm -rf /var/lib/apt/lists/*
 
 # Optional: drop extra CA certificates (*.crt) into ./certs/ before building if
@@ -13,7 +13,7 @@ RUN apt-get update \
 COPY certs/ /usr/local/share/ca-certificates/extra/
 RUN update-ca-certificates
 
-RUN command -v yaz-client >/dev/null && command -v yaz-marcdump >/dev/null && command -v python3 >/dev/null && command -v zbarimg >/dev/null
+RUN command -v yaz-client >/dev/null && command -v yaz-marcdump >/dev/null && command -v python3 >/dev/null && command -v zbarimg >/dev/null && command -v qrencode >/dev/null
 
 RUN useradd --system --uid 10001 --home-dir /app quickadd \
  && mkdir -p /app /data && chown quickadd /data

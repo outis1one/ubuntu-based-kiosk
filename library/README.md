@@ -224,3 +224,13 @@ One page for the day-to-day, so you rarely need Koha's own screens:
 - **Add books**: scan an ISBN (or use the phone camera), as before.
 
 The read-only `guest` login only sees the Library and book pages (no copy status names, no editing, no lending).
+
+### Collections, QR cards, more about a book
+
+- **Collections** (Kids, Cookbooks, ...) are per copy, shown on the book page next to the shelf, and filterable on the
+  Library page. Choose **+ New collection...** (or **+ New shelf...**) in the dropdown to add one: no Koha screens needed.
+- **Library cards** carry a Code 39 barcode and a **QR code** of the card number. **Save as picture** makes an image to text
+  or AirDrop to a phone; on Lend / return, **Scan card or phone QR with camera** reads either one from a photo.
+  **Print everyone's cards** (People) lays out a sheet of cards.
+- **More about a book**: a description and subjects from Open Library, plus look-up links (Goodreads, LibraryThing,
+  WorldCat). **AR BookFind** is a link only: Renaissance's terms forbid automated access, so nothing is fetched from it.

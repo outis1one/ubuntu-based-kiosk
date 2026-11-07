@@ -129,7 +129,11 @@
   .libcard { width: 85.6mm; height: 54mm; border: 1px solid #888; border-radius: 3mm; padding: 5mm; background: #fff; color: #000;
              display: flex; flex-direction: column; justify-content: space-between; font-family: system-ui, sans-serif; }
   .libcard .lib { font-size: 11pt; font-weight: 700; } .libcard .nm { font-size: 14pt; font-weight: 700; }
-  .libcard svg { width: 100%; height: 16mm; } .libcard .no { font-size: 9pt; text-align: center; letter-spacing: .15em; }
+  .libcard .codes { display: flex; gap: 3mm; align-items: center; } .libcard .bc { flex: 1; min-width: 0; }
+  .libcard .bc svg { width: 100%; height: 14mm; display: block; } .libcard img.qr { width: 19mm; height: 19mm; flex: none; }
+  .libcard .no { font-size: 9pt; text-align: center; letter-spacing: .15em; }
+  .cardsheet { display: grid; grid-template-columns: repeat(2, 85.6mm); gap: 6mm; justify-content: start; }
+  .cardsheet .libcard { break-inside: avoid; }
   @media print { header, .noprint, nav { display: none !important; } body { background: #fff; } main { padding: 0; max-width: none; } .libcard { border: 1px solid #000; } }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 </style>
@@ -156,6 +160,7 @@
     </form>
     <div class="filters">
       <label class="sr" for="f-shelf">Shelf</label><select id="f-shelf"></select>
+      <label class="sr" for="f-coll">Collection</label><select id="f-coll"></select>
       <label class="sr" for="f-type">Format</label><select id="f-type"></select>
       <label class="sr" for="f-status">Status</label><select id="f-status">
         <option value="">Any status</option><option value="in">On the shelf</option><option value="out">Checked out</option></select>
@@ -175,6 +180,7 @@
         <input id="ret" inputmode="numeric" placeholder="Scan the book's barcode" autocomplete="off">
         <button class="primary" type="submit">Return</button>
       </form>
+      <div class="cam-row"><button type="button" id="retcam">Return with camera</button></div>
       <div id="retresult" role="status" aria-live="polite" class="small" style="margin-top:8px"></div>
     </div>
     <div class="copybox">
@@ -184,6 +190,9 @@
         <input id="who" type="search" placeholder="Name, or scan the library card" enterkeyhint="search" autocomplete="off">
         <button type="submit">Find</button>
       </form>
+      <div class="cam-row"><button type="button" id="whocam">Scan card or phone QR with camera</button>
+        <span class="small">Photograph the library card, or the QR picture on the borrower's phone.</span></div>
+      <div id="whostatus" class="small"></div>
       <div id="whoresults"></div>
       <div id="patronbox"></div>
     </div>
@@ -203,6 +212,7 @@
       </form>
       <div id="personresult" aria-live="polite"></div>
     </details>
+    <p><a href="#cards"><button type="button">Print everyone's cards</button></a></p>
     <form class="find-form" id="peopleform" autocomplete="off">
       <label class="sr" for="pq">Search people</label>
       <input id="pq" type="search" placeholder="Search by name or card number" enterkeyhint="search">
@@ -212,8 +222,14 @@
   </section>
 
   <section id="view-card" hidden>
-    <p class="noprint"><a href="#people">&larr; Back to people</a> &nbsp; <button type="button" id="printcard" class="primary">Print this card</button></p>
+    <p class="noprint"><a href="#people">&larr; Back to people</a> &nbsp; <button type="button" id="printcard" class="primary">Print this card</button> <button type="button" id="savecard">Save as picture (to send to a phone)</button></p>
     <div id="cardbox"></div>
+  </section>
+
+  <section id="view-cards" hidden>
+    <p class="noprint"><a href="#people">&larr; Back to people</a> &nbsp; <button type="button" id="printcards" class="primary">Print these cards</button>
+      <span class="small" id="cardsnote"></span></p>
+    <div class="cardsheet" id="cardsheet"></div>
   </section>
 
   <section id="view-book" hidden>
@@ -426,13 +442,14 @@
   }
 
   // Opens the camera, resolves with the codes found ([] if none, null if cancelled).
-  function takePhoto(kind) {
+  function takePhoto(kind, statusEl) {
+    statusEl = statusEl || $('status');
     return new Promise(resolve => {
       const input = $('camfile');
       input.onchange = async () => {
         const f = input.files[0]; input.value = '';
         if (!f) return resolve(null);
-        $('status').textContent = 'Reading the barcode…';
+        statusEl.textContent = 'Reading the barcode…';
         try {
           const blob = await shrink(f);
           const r = await fetch('api/scan?kind=' + kind, { method: 'POST', headers: { 'Content-Type': 'image/jpeg', 'X-Quickadd': '1' }, body: blob });
@@ -578,8 +595,8 @@
     return a;
   }
 
-  let libPage = 1, libShelves = [], libLoaded = false;
-  const filters = () => ({ q: $('q').value.trim(), shelf: $('f-shelf').value, type: $('f-type').value,
+  let libPage = 1, libShelves = [], libCollections = [], libLoaded = false, filtersReady = false;
+  const filters = () => ({ q: $('q').value.trim(), shelf: $('f-shelf').value, collection: $('f-coll').value, type: $('f-type').value,
                            status: $('f-status').value, sort: $('f-sort').value });
   const filterQuery = () => { const f = filters(); return Object.entries(f).filter(([, v]) => v).map(([k, v]) => k + '=' + encodeURIComponent(v)).join('&'); };
 
@@ -604,8 +621,12 @@
     try { r = await api('/api/library?' + filterQuery() + '&page=' + libPage); } catch (e) { r = {}; }
     if (seq !== libSeq) return;
     if (!r.books) { $('libstatus').textContent = r.message || 'Koha is not answering yet - try again in a minute.'; return; }
-    if (!libShelves.length && r.shelves) {
+    if (r.collections) libCollections = r.collections;
+    if (!filtersReady && r.shelves) {
+      filtersReady = true;
       libShelves = r.shelves;
+      $('f-coll').replaceChildren(el('option', { value: '' }, 'Any collection'), el('option', { value: '-' }, '(no collection)'),
+        ...(r.collections || []).map(l => el('option', { value: l.value }, l.label)));
       $('f-shelf').replaceChildren(el('option', { value: '' }, 'Any shelf'), el('option', { value: '-' }, '(no shelf set)'),
         ...r.shelves.map(l => el('option', { value: l.value }, l.label)));
       $('f-type').replaceChildren(el('option', { value: '' }, 'Any format'),
@@ -615,12 +636,12 @@
     $('more').hidden = !r.more;
     const shown = grid.children.length;
     const f = filters();
-    $('libstatus').textContent = shown ? shown + (r.more ? '+' : '') + (shown === 1 ? ' book' : ' books') + (f.q || f.shelf || f.type || f.status ? ' match' : '') :
-      (f.q || f.shelf || f.type || f.status ? 'No books match.' : (viewer ? 'Nothing here yet.' : 'Nothing here yet - open Add books and scan an ISBN.'));
+    $('libstatus').textContent = shown ? shown + (r.more ? '+' : '') + (shown === 1 ? ' book' : ' books') + (f.q || f.shelf || f.collection || f.type || f.status ? ' match' : '') :
+      (f.q || f.shelf || f.collection || f.type || f.status ? 'No books match.' : (viewer ? 'Nothing here yet.' : 'Nothing here yet - open Add books and scan an ISBN.'));
   }
   $('more').onclick = () => { libPage += 1; loadLibrary(false); };
   $('findform').onsubmit = ev => { ev.preventDefault(); loadLibrary(true); };
-  for (const id of ['f-shelf', 'f-type', 'f-status', 'f-sort']) $(id).onchange = () => loadLibrary(true);
+  for (const id of ['f-shelf', 'f-coll', 'f-type', 'f-status', 'f-sort']) $(id).onchange = () => loadLibrary(true);
 
   // ---- one book
   async function loadBook(id) {
@@ -631,6 +652,7 @@
     if (!b.copies) { box.replaceChildren(el('div', { className: 'card warn' }, el('div', { className: 'body' }, b.message || 'Book not found.'))); return; }
     document.title = b.title;
     if (b.shelves && b.shelves.length) libShelves = b.shelves;
+    if (b.collections) libCollections = b.collections;
     const facts = [b.author, b.year, b.publisher, b.pages, b.edition, b.series].filter(Boolean);
     const head = el('div', { className: 'bookhead' }, art(b),
       el('div', { className: 'body' }, el('h2', {}, b.title), b.subtitle ? el('div', { className: 'meta' }, b.subtitle) : '',
@@ -638,6 +660,9 @@
         b.summary ? el('p', {}, b.summary) : ''));
     box.replaceChildren(head);
     const refresh = () => loadBook(id);
+    const moreBox = el('div', { className: 'copybox' }, el('div', { className: 'small' }, 'Looking for more about this book…'));
+    box.append(moreBox);
+    api('/api/more/' + id).then(m => fillMore(moreBox, b, m)).catch(() => moreBox.remove());
     for (const c of b.copies) box.append(copyBox(b, c, refresh));
     if (!b.copies.length) box.append(el('div', { className: 'small' }, 'No copies recorded.'));
     if (!viewer) {
@@ -654,6 +679,37 @@
     }
   }
 
+  // A shelf/collection chooser whose last entry adds a new one (Koha's own screens are not needed).
+  function valueSelect(kind, label, none, list, current) {
+    const sel = el('select', { 'aria-label': label });
+    const fill = (items, cur) => { sel.replaceChildren(el('option', { value: '' }, none), ...items.map(l => el('option', { value: l.value }, l.label)),
+                                   el('option', { value: '__new' }, '+ New ' + kind + '…')); sel.value = cur || ''; };
+    fill(list, current);
+    let last = current || '';
+    sel.onchange = async () => {
+      if (sel.value !== '__new') { last = sel.value; return; }
+      const name = prompt('Name of the new ' + kind + ':');
+      if (!name || !name.trim()) { sel.value = last; return; }
+      const r = await api('/api/value/add', { kind, name });
+      if (r.status !== 'added') { alert(r.message || 'Could not add that.'); sel.value = last; return; }
+      const items = (kind === 'shelf' ? libShelves : libCollections); items.push({ value: r.value, label: r.label });
+      fill(items, r.value); last = r.value;
+    };
+    return sel;
+  }
+
+  function fillMore(box, b, m) {
+    const parts = [];
+    if (m.description && !b.summary) parts.push(el('p', {}, m.description), el('div', { className: 'small' }, 'Description from Open Library.'));
+    if (m.subjects && m.subjects.length) parts.push(el('div', { style: 'margin:8px 0' }, ...m.subjects.map(t => el('span', { className: 'chip', style: 'margin:0 6px 6px 0;display:inline-block' }, t))));
+    if (m.first_published) parts.push(el('div', { className: 'small' }, 'First published: ' + m.first_published));
+    const row = el('div', { className: 'small', style: 'margin-top:8px' }, 'Look it up: ');
+    (m.links || []).forEach((l, i) => { if (i) row.append(' · '); row.append(el('a', { href: l.url, target: '_blank', rel: 'noopener noreferrer' }, l.label)); });
+    parts.push(row);
+    if ((m.links || []).some(l => l.note)) parts.push(el('div', { className: 'small' }, 'AR BookFind has no public feed and its terms forbid automated look-ups, so open it and search for "' + b.title + '" yourself.'));
+    box.replaceChildren(...parts);
+  }
+
   function copyBox(b, c, refresh) {
     const box = el('div', { className: 'copybox' });
     const out = c.status === 'Checked out';
@@ -664,14 +720,13 @@
       box.append(el('div', { className: 'meta' }, [c.shelf_label || 'no shelf set', c.callnumber && 'Call no. ' + c.callnumber].filter(Boolean).join(' · ')));
       return box;
     }
-    const sel = el('select', { 'aria-label': 'Shelf' }, el('option', { value: '' }, '(no shelf set)'),
-      ...libShelves.map(l => el('option', { value: l.value }, l.label)));
-    sel.value = c.shelf;
+    const sel = valueSelect('shelf', 'Shelf', '(no shelf set)', libShelves, c.shelf);
+    const csel = valueSelect('collection', 'Collection', '(no collection)', libCollections, c.collection);
     const cn = el('input', { type: 'text', value: c.callnumber, placeholder: 'Call number', 'aria-label': 'Call number', maxLength: 80 });
     const save = el('button', { type: 'button', className: 'primary' }, 'Save');
     save.onclick = async () => {
       save.disabled = true;
-      const r = await api('/api/item/update', { item_id: c.item_id, shelf: sel.value, callnumber: cn.value });
+      const r = await api('/api/item/update', { item_id: c.item_id, shelf: sel.value, collection: csel.value, callnumber: cn.value });
       save.textContent = r.status === 'saved' ? 'Saved ✓' : 'Failed'; setTimeout(() => { save.textContent = 'Save'; save.disabled = false; }, 1500);
     };
     const rm = el('button', { type: 'button', className: 'danger' }, 'Remove copy');
@@ -681,7 +736,8 @@
       const r = await api('/api/item/delete', { item_id: c.item_id, biblio_id: b.id });
       if (r.status === 'undone') { if (b.copies.length <= 1) location.hash = '#library'; else refresh(); }
     };
-    box.append(el('div', { className: 'row' }, sel, cn, save, rm));
+    const lab = el('a', { href: printLink(c.barcode, c.barcode), target: '_blank', rel: 'noopener' }, el('button', { type: 'button' }, 'Print label'));
+    box.append(el('div', { className: 'row' }, sel, csel, cn, save, c.barcode ? lab : '', rm));
     return box;
   }
 
@@ -702,6 +758,23 @@
     return r;
   }
   $('retform').onsubmit = async ev => { ev.preventDefault(); const c = $('ret').value.trim(); $('ret').value = ''; if (c) { await doReturn(c, $('retresult')); $('ret').focus(); } };
+
+  $('retcam').onclick = async () => {
+    const codes = await takePhoto('sticker', $('retresult'));
+    if (codes === null) { $('retresult').textContent = ''; return; }
+    if (!codes.length) { $('retresult').textContent = "Couldn't read a barcode from that photo - move closer and try again."; return; }
+    doReturn(codes[0], $('retresult'));
+  };
+  $('whocam').onclick = async () => {
+    const codes = await takePhoto('sticker', $('whostatus'));
+    if (codes === null) { $('whostatus').textContent = ''; return; }
+    $('whostatus').textContent = '';
+    if (!codes.length) { $('whostatus').textContent = "Couldn't read a code from that photo - move closer and try again."; return; }
+    const r = await api('/api/patrons?q=' + encodeURIComponent(codes[0]));
+    const hit = (r.patrons || []).filter(p => p.card === codes[0]);
+    if (hit.length === 1) { beep(SOUND.added); location.hash = '#lend/' + hit[0].id; }
+    else { beep(SOUND.notfound); $('whostatus').textContent = 'No library card matches ' + codes[0] + '.'; }
+  };
 
   async function loadOut() {
     let r; try { r = await api('/api/out'); } catch (e) { return; }
@@ -749,9 +822,16 @@
       } catch (e) { say(out, 'bad', 'Could not reach the service.'); }
       lendBusy = false; await openPatron(p.id, true); loadOut(); document.querySelector('#patronbox form input').focus();
     };
+    const bookCam = el('button', { type: 'button' }, 'Scan book with camera');
+    bookCam.onclick = async () => {
+      const codes = await takePhoto('sticker', out);
+      if (codes === null) { out.textContent = ''; return; }
+      if (!codes.length) { out.textContent = "Couldn't read a barcode from that photo - move closer and try again."; return; }
+      scan.value = codes[0]; form.requestSubmit();
+    };
     const loans = p.loans.length ? p.loans.map(l => loanRow(l, false)) : [el('div', { className: 'small' }, 'Nothing checked out to ' + p.name + ' yet.')];
     $('patronbox').replaceChildren(el('div', { className: 'title', style: 'margin-top:10px' }, p.name, ' ', el('span', { className: 'badge' }, p.card || 'no card')),
-      form, out, el('h2', {}, 'Has out'), ...loans,
+      form, el('div', { className: 'cam-row' }, bookCam), out, el('h2', {}, 'Has out'), ...loans,
       el('div', { className: 'small', style: 'margin-top:8px' }, el('a', { href: '#card/' + p.id }, 'Print library card'), ' · ',
         el('a', { href: '#lend' }, 'Choose someone else')));
     if (!quiet) scan.focus();
@@ -785,12 +865,17 @@
   $('peopleform').onsubmit = ev => { ev.preventDefault(); loadPeople($('pq').value.trim()); };
   $('personform').onsubmit = async ev => {
     ev.preventDefault();
-    const f = ev.target, r = await api('/api/patron/add', Object.fromEntries(new FormData(f)));
+    const f = ev.target, confirm = f.dataset.confirm === '1'; delete f.dataset.confirm;
+    const r = await api('/api/patron/add', Object.assign(Object.fromEntries(new FormData(f)), confirm ? { confirm: true } : {}));
     if (r.status === 'added') {
       f.reset();
       $('personresult').replaceChildren(el('div', { className: 'result-note' }, r.name + ' added with library card number ', el('span', { className: 'badge' }, r.card), '. ',
         el('a', { href: '#card/' + r.id }, 'Print the card'), ' or ', el('a', { href: '#lend/' + r.id }, 'check something out')));
       loadPeople('');
+    } else if (r.status === 'duplicate') {
+      const again = el('button', { type: 'button', className: 'primary' }, 'Add another person with this name');
+      again.onclick = () => { f.requestSubmit && (f.dataset.confirm = '1'); f.requestSubmit(); };
+      $('personresult').replaceChildren(el('div', { className: 'card warn' }, el('div', { className: 'body' }, r.message + ' ', again)));
     } else $('personresult').replaceChildren(el('div', { className: 'card bad' }, el('div', { className: 'body' }, r.message || 'Could not add that person.')));
   };
 
@@ -806,14 +891,39 @@
     }
     return '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ' + (x + 9) + ' 50" preserveAspectRatio="none" fill="#000" role="img" aria-label="Barcode ' + text + '">' + bars + '</svg>';
   }
+  function cardEl(p) {
+    const svg = el('div', { className: 'bc' });
+    svg.innerHTML = code39(p.card);
+    const qr = el('img', { className: 'qr', alt: 'QR code ' + p.card, src: 'api/qr?t=' + encodeURIComponent(p.card) });
+    return el('div', { className: 'libcard' }, el('div', { className: 'lib' }, libraryDisplay || 'Library card'), el('div', { className: 'nm' }, p.name),
+      el('div', {}, el('div', { className: 'codes' }, svg, qr), el('div', { className: 'no' }, p.card)));
+  }
   async function loadCard(id) {
     let p; try { p = await api('/api/patron/' + id); } catch (e) { p = {}; }
     if (!p.name) { $('cardbox').textContent = 'Could not load that person.'; return; }
-    const lib = el('div', { className: 'libcard' }, el('div', { className: 'lib' }, libraryDisplay || 'Library card'), el('div', { className: 'nm' }, p.name),
-      el('div', {}, el('div', { id: 'cardsvg' }), el('div', { className: 'no' }, p.card)));
-    $('cardbox').replaceChildren(lib);
-    $('cardsvg').innerHTML = code39(p.card);
+    curCard = p;
+    $('cardbox').replaceChildren(cardEl(p));
   }
+  let curCard = null;
+  async function loadCards() {
+    let r; try { r = await api('/api/patrons?q=' + encodeURIComponent(($('pq').value || '').trim())); } catch (e) { r = {}; }
+    const list = (r.patrons || []).filter(p => p.card);
+    $('cardsheet').replaceChildren(...list.map(cardEl));
+    $('cardsnote').textContent = list.length ? list.length + ' card' + (list.length === 1 ? '' : 's') + (($('pq').value || '').trim() ? ' (matching your search)' : '') : 'Nobody to print yet.';
+  }
+  $('printcards').onclick = () => window.print();
+  // A picture of the QR (name + number under it) the person can keep on their phone and hold up to be scanned.
+  $('savecard').onclick = async () => {
+    if (!curCard) return;
+    const svgText = await (await fetch('api/qr?t=' + encodeURIComponent(curCard.card), { headers: { 'X-Quickadd': '1' } })).text();
+    const img = new Image(); await new Promise((ok, no) => { img.onload = ok; img.onerror = no; img.src = 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svgText); });
+    const c = document.createElement('canvas'); c.width = 640; c.height = 780; const g = c.getContext('2d');
+    g.fillStyle = '#fff'; g.fillRect(0, 0, c.width, c.height); g.fillStyle = '#000'; g.textAlign = 'center';
+    g.font = 'bold 34px sans-serif'; g.fillText(libraryDisplay || 'Library card', 320, 60);
+    g.imageSmoothingEnabled = false; g.drawImage(img, 70, 90, 500, 500);
+    g.font = 'bold 40px sans-serif'; g.fillText(curCard.name, 320, 650); g.font = '34px monospace'; g.fillText(curCard.card, 320, 705);
+    const a = document.createElement('a'); a.href = c.toDataURL('image/png'); a.download = 'library-card-' + curCard.card + '.png'; a.click();
+  };
   $('printcard').onclick = () => window.print();
 
   function route() {
@@ -825,11 +935,12 @@
     else if ((m = h.match(/^lend(?:\/(\d+))?$/))) view = 'lend';
     else if (h === 'people') view = 'people';
     else if ((m = h.match(/^card\/(\d+)$/))) view = 'card';
-    for (const v of ['library', 'book', 'add', 'lend', 'people', 'card']) $('view-' + v).hidden = v !== view;
-    const tab = { library: 'library', book: 'library', add: 'add', lend: 'lend', people: 'people', card: 'people' }[view];
+    else if (h === 'cards') view = 'cards';
+    for (const v of ['library', 'book', 'add', 'lend', 'people', 'card', 'cards']) $('view-' + v).hidden = v !== view;
+    const tab = { library: 'library', book: 'library', add: 'add', lend: 'lend', people: 'people', card: 'people', cards: 'people' }[view];
     for (const t of ['library', 'add', 'lend', 'people']) $('tab-' + t).classList.toggle('on', t === tab);
     for (const t of ['add', 'lend', 'people']) $('tab-' + t).hidden = viewer;
-    const names = { library: 'Library', book: 'Library', add: 'Add books', lend: 'Lend / return', people: 'People', card: 'Library card' };
+    const names = { library: 'Library', book: 'Library', add: 'Add books', lend: 'Lend / return', people: 'People', card: 'Library card', cards: 'Library cards' };
     $('title').textContent = names[view]; document.title = names[view];
     if (view === 'book') loadBook(m[1]);
     else if (view === 'add') $('code').focus();
@@ -837,6 +948,7 @@
       if (m && m[1]) openPatron(m[1]); else { $('whoresults').replaceChildren(); $('who').focus(); } }
     else if (view === 'people') { loadPeople($('pq').value.trim()); }
     else if (view === 'card') loadCard(m[1]);
+    else if (view === 'cards') loadCards();
     else { if (!libLoaded) { libLoaded = true; loadLibrary(true); } if (h === 'find') $('q').focus(); }
   }
   window.addEventListener('hashchange', route);

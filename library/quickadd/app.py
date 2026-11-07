@@ -306,6 +306,26 @@ def get_locations():
     return _LOC_CACHE["value"]
 
 
+_COLL_CACHE = {"at": 0.0, "value": []}
+
+
+def get_collections():
+    """Collections (Koha authorised-value category CCODE): 'Kids', 'Cookbooks', ... one per copy."""
+    if time.time() - _COLL_CACHE["at"] < 30:
+        return _COLL_CACHE["value"]
+    try:
+        vals = koha("GET", "/authorised_value_categories/CCODE/authorised_values") or []
+        _COLL_CACHE["value"] = [{"value": v["value"], "label": v.get("description") or v["value"]} for v in vals]
+        _COLL_CACHE["at"] = time.time()
+    except KohaError:
+        pass
+    return _COLL_CACHE["value"]
+
+
+def valid_collection(code):
+    return code if code and any(c["value"] == code for c in get_collections()) else None
+
+
 def valid_location(code):
     return code if code and any(l["value"] == code for l in get_locations()) else None
 
@@ -741,7 +761,9 @@ def _shape_book(b, items, where):
     mine = [i for i in items if i["biblio_id"] == b["biblio_id"]]
     out = sum(1 for i in mine if item_status(i) == "Checked out")
     shelves = sorted({where.get(i.get("location"), "") for i in mine} - {""})
-    return {"id": b["biblio_id"], "title": (b.get("title") or "").rstrip(" /:"), "author": b.get("author") or "",
+    colls = {c["value"]: c["label"] for c in get_collections()}
+    collections = sorted({colls.get(i.get("collection_code"), "") for i in mine} - {""})
+    return {"collections": collections, "id": b["biblio_id"], "title": (b.get("title") or "").rstrip(" /:"), "author": b.get("author") or "",
             "year": b.get("copyright_date") or "", "isbn": b.get("isbn") or "", "type": b.get("item_type") or "",
             "copies": len(mine), "out": out, "shelves": shelves,
             "callnumber": next((i.get("callnumber") for i in mine if i.get("callnumber")), "") or ""}
@@ -752,7 +774,7 @@ def op_library(qs):
     def one(k):
         return (qs.get(k) or [""])[0]
     term = re.sub(r"[%_\\]", "", one("q")).strip()[:80]
-    shelf, itype, status = one("shelf"), one("type"), one("status")
+    shelf, itype, status, coll = one("shelf"), one("type"), one("status"), one("collection")
     sort = one("sort") or "title"
     try:
         page = max(1, int(one("page") or 1))
@@ -770,6 +792,10 @@ def op_library(qs):
         item_q["location"] = shelf
     if itype:
         item_q["item_type_id"] = itype
+    if coll == "-":
+        item_q["collection_code"] = None
+    elif coll:
+        item_q["collection_code"] = coll
     if status == "out":
         item_q["checked_out_date"] = {"!=": None}
     elif status == "in":
@@ -823,6 +849,8 @@ def op_book(biblio_id, staff):
     for i in items:
         c = {"item_id": i["item_id"], "barcode": i.get("external_id") or "", "callnumber": i.get("callnumber") or "",
              "shelf": i.get("location") or "", "shelf_label": where.get(i.get("location"), ""),
+             "collection": i.get("collection_code") or "",
+             "collection_label": {c["value"]: c["label"] for c in get_collections()}.get(i.get("collection_code"), ""),
              "status": item_status(i), "type": i.get("item_type_id") or ""}
         if staff and c["status"] == "Checked out":
             c["out"] = out.get(i["item_id"])
@@ -832,7 +860,7 @@ def op_book(biblio_id, staff):
             "isbn": b.get("isbn") or "", "publisher": b.get("publisher") or "", "pages": b.get("pages") or "",
             "edition": b.get("edition_statement") or "", "summary": b.get("abstract") or b.get("notes") or "",
             "series": b.get("series_title") or "", "type": b.get("item_type") or "", "copies": copies,
-            "shelves": get_locations()}
+            "shelves": get_locations(), "collections": get_collections()}
 
 
 def op_item_update(payload):
@@ -843,6 +871,8 @@ def op_item_update(payload):
         it = koha("GET", "/items/%d" % item_id)
         if "shelf" in payload:
             it["location"] = valid_location(payload.get("shelf")) or None
+        if "collection" in payload:
+            it["collection_code"] = valid_collection(payload.get("collection")) or None
         if "callnumber" in payload:
             it["callnumber"] = (str(payload.get("callnumber") or "").strip()[:80]) or None
         # Koha's update route rejects the computed fields the GET adds.
@@ -1057,8 +1087,128 @@ def op_patron_add(payload):
         return 400, {"status": "invalid", "message": "A name is needed."}
     body = {"surname": surname, "firstname": first or None, "category_id": PATRON_CATEGORY, "library_id": LIBRARY,
             "email": clean("email", 100) or None, "phone": clean("phone", 30) or None}
-    p = koha("POST", "/patrons", body)
+    try:
+        p = koha("POST", "/patrons", body, headers={"x-confirm-not-duplicate": "1"} if payload.get("confirm") else None)
+    except KohaError as e:
+        if e.status == 409 or "already exists" in e.body:
+            return 200, {"status": "duplicate", "message": "Someone named %s is already in the library." % _patron_name(body)}
+        raise
     return 200, dict(_shape_patron(p), status="added")
+
+
+# ------------------------------------------------ new shelves / collections, QR codes, book info
+KOHA_VALUE_URL = KOHA_API.rsplit("/api/v1", 1)[0] + "/cgi-bin/koha/quickadd-value.pl"
+
+
+def op_value_add(payload):
+    """Add a shelf/room or a collection (Koha's REST API cannot; a small guarded Koha script does)."""
+    kind = payload.get("kind")
+    cat = {"shelf": "LOC", "collection": "CCODE"}.get(kind)
+    name = re.sub(r"\s+", " ", str(payload.get("name") or "")).strip()[:60]
+    if not cat or not name:
+        return 400, {"status": "invalid", "message": "A name is needed."}
+    if not SSO_SECRET:
+        return 200, {"status": "error", "message": "Adding these needs SSO_SECRET in .env (run the installer's Update)."}
+    existing = get_locations() if cat == "LOC" else get_collections()
+    for v in existing:                      # same name again: hand back the one that exists
+        if v["label"].strip().lower() == name.lower():
+            return 200, {"status": "added", "value": v["value"], "label": v["label"]}
+    base = re.sub(r"[^A-Z0-9]+", "", name.upper())[:12] or "X"
+    have = {v["value"] for v in existing}
+    code, n = base, 2
+    while code in have:
+        code = base[:10] + str(n)
+        n += 1
+    req = urllib.request.Request(KOHA_VALUE_URL + "?" + urllib.parse.urlencode({"category": cat, "value": code, "description": name}),
+                                 headers={"X-Quickadd-Secret": SSO_SECRET})
+    try:
+        with urllib.request.urlopen(req, timeout=20) as r:
+            res = json.loads(r.read())
+    except (urllib.error.URLError, OSError, ValueError):
+        return 502, {"status": "error", "message": "Koha did not answer - try again."}
+    if res.get("status") != "added":
+        return 200, {"status": "error", "message": "Koha would not add that."}
+    _LOC_CACHE["at"] = _COLL_CACHE["at"] = 0.0
+    return 200, {"status": "added", "value": code, "label": name}
+
+
+def qr_svg(text):
+    if not re.fullmatch(r"[A-Za-z0-9-]{1,40}", text or ""):
+        raise ValueError("bad text")
+    return subprocess.run(["qrencode", "-t", "SVG", "-m", "2", "-s", "8", "-l", "M", "-o", "-", text],
+                          capture_output=True, timeout=10, check=True).stdout
+
+
+MORE_FILE = os.path.join(DATA_DIR, "more.json")
+MORE_TTL = 30 * 86400
+
+
+def _http_json(url):
+    req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": "library-quickadd/1 (home library)"})
+    with urllib.request.urlopen(req, timeout=8) as r:
+        return json.loads(r.read())
+
+
+def _ol_text(v):
+    if isinstance(v, dict):
+        v = v.get("value")
+    return re.sub(r"\s+", " ", v).strip() if isinstance(v, str) else ""
+
+
+def op_more(biblio_id):
+    """Extra details from Open Library (description, subjects) plus look-up links, cached on disk.
+    AR BookFind is a link only: its terms forbid automated access, so nothing is fetched from it."""
+    b = koha("GET", "/biblios/%d" % biblio_id)
+    isbn = re.sub(r"[^0-9Xx]", "", (b.get("isbn") or "").split(" ")[0].split("|")[0])
+    title = (b.get("title") or "").rstrip(" /:")
+    out = {"links": [], "description": "", "subjects": [], "first_published": ""}
+    q = urllib.parse.quote(title + " " + (b.get("author") or ""))
+    if isbn:
+        out["links"] = [
+            {"label": "Open Library", "url": "https://openlibrary.org/isbn/" + isbn},
+            {"label": "Goodreads", "url": "https://www.goodreads.com/book/isbn/" + isbn},
+            {"label": "LibraryThing", "url": "https://www.librarything.com/isbn/" + isbn},
+            {"label": "WorldCat", "url": "https://search.worldcat.org/search?q=bn%3A" + isbn}]
+    out["links"].append({"label": "AR BookFind (reading level)", "url": "https://www.arbookfind.com/", "note": "search for: " + title})
+    if not isbn:
+        return out
+    with LOCK:
+        try:
+            cache = json.load(open(MORE_FILE))
+        except (OSError, ValueError):
+            cache = {}
+    hit = cache.get(isbn)
+    if hit and time.time() - hit["at"] < (MORE_TTL if hit["ok"] else 3600):
+        return dict(out, **hit["data"])
+    data, ok = {}, False
+    try:
+        ed = _http_json("https://openlibrary.org/isbn/%s.json" % isbn)
+        work = (ed.get("works") or [{}])[0].get("key")
+        data["description"] = _ol_text(ed.get("description"))
+        data["subjects"] = []
+        if work:
+            w = _http_json("https://openlibrary.org%s.json" % work)
+            data["description"] = _ol_text(w.get("description")) or data["description"]
+            data["subjects"] = [str(x) for x in (w.get("subjects") or [])][:12]
+            data["first_published"] = str(w.get("first_publish_date") or "")
+            out["links"][0] = {"label": "Open Library", "url": "https://openlibrary.org" + work}
+        data["description"] = data["description"].split("----------")[0].strip()[:1500]
+        ok = True
+    except Exception:
+        pass
+    if ok:
+        data["link0"] = out["links"][0]
+    cache[isbn] = {"at": time.time(), "ok": ok, "data": data}
+    with LOCK:
+        try:
+            tmp = MORE_FILE + ".tmp"
+            json.dump(cache, open(tmp, "w"))
+            os.replace(tmp, MORE_FILE)
+        except OSError:
+            pass
+    if ok and data.get("link0"):
+        out["links"][0] = data.pop("link0")
+    return dict(out, **data)
 
 
 # ------------------------------------------------------------ photo scanning
@@ -1245,11 +1395,25 @@ class Handler(BaseHTTPRequestHandler):
             except KohaError as e:
                 return self._send(404 if e.status == 404 else 502, {"status": "error", "message":
                                   "Koha is not answering yet - try again in a minute." if e.status == 503 else "Failed: %s" % e.body[:120]})
+        if path == "/api/qr":
+            try:
+                svg = qr_svg((urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query).get("t") or [""])[0])
+            except (ValueError, OSError, subprocess.SubprocessError):
+                return self._send(400, b"bad", "text/plain")
+            return self._send(200, svg, "image/svg+xml")
+        if path.startswith("/api/more/"):
+            m = re.match(r"^/api/more/(\d{1,9})$", path)
+            if not m:
+                return self._send(404, {"error": "not found"})
+            try:
+                return self._send(200, op_more(int(m.group(1))))
+            except KohaError:
+                return self._send(502, {"status": "error"})
         if path == "/api/library" or path.startswith("/api/book/"):
             try:
                 if path == "/api/library":
                     return self._send(200, dict(op_library(urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)),
-                                                shelves=get_locations(), types=get_item_types()))
+                                                shelves=get_locations(), collections=get_collections(), types=get_item_types()))
                 m = re.match(r"^/api/book/(\d{1,9})$", path)
                 if not m:
                     return self._send(404, {"error": "not found"})
@@ -1290,7 +1454,7 @@ class Handler(BaseHTTPRequestHandler):
                    "/api/barcodes/reserve": op_reserve, "/api/barcodes/assign": op_assign,
                    "/api/item/update": op_item_update, "/api/item/delete": op_item_delete,
                    "/api/item/copy": op_item_copy, "/api/book/delete": op_book_delete,
-                   "/api/checkout": op_checkout, "/api/return": op_return, "/api/renew": op_renew, "/api/patron/add": op_patron_add}
+                   "/api/value/add": op_value_add, "/api/checkout": op_checkout, "/api/return": op_return, "/api/renew": op_renew, "/api/patron/add": op_patron_add}
             fn = ops.get(self.path)
             if not fn:
                 return self._send(404, {"error": "not found"})

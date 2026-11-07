@@ -42,8 +42,8 @@ RUN for c in koha-create koha-plack koha-zebra koha-rebuild-zebra koha-upgrade-s
 # The endpoint Quick Add uses to recognise a signed-in staff user (see the file header).
 COPY quickadd-session.pl /usr/share/koha/intranet/cgi-bin/svc/quickadd-session
 # (the return script lives beside the staff .pl scripts, not under svc/: Koha's svc Plack app 500s on it)
-COPY quickadd-return.pl /usr/share/koha/intranet/cgi-bin/quickadd-return.pl
-RUN chmod 0755 /usr/share/koha/intranet/cgi-bin/svc/quickadd-session /usr/share/koha/intranet/cgi-bin/quickadd-return.pl
+COPY quickadd-return.pl quickadd-value.pl /usr/share/koha/intranet/cgi-bin/
+RUN chmod 0755 /usr/share/koha/intranet/cgi-bin/svc/quickadd-session /usr/share/koha/intranet/cgi-bin/quickadd-return.pl /usr/share/koha/intranet/cgi-bin/quickadd-value.pl
 
 COPY bootstrap.pl ensure.pl entrypoint.sh /opt/koha-init/
 COPY seed/ /opt/koha-init/seed/
