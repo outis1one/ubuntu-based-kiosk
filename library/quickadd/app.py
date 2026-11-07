@@ -985,7 +985,8 @@ def _loan_rows(cos):
         due = (c.get("due_date") or "")[:10]
         rows.append({"checkout_id": c["checkout_id"], "patron_id": c["patron_id"], "barcode": it.get("external_id") or "",
                      "biblio_id": it.get("biblio_id"), "title": t[0], "author": t[1], "isbn": t[2], "due": due,
-                     "overdue": bool(due) and due < today, "renewals": c.get("renewals_count") or 0})
+                     "overdue": bool(due) and due < today, "renewals": c.get("renewals_count") or 0,
+                     "checkout_date": (c.get("checkout_date") or "")[:10]})
     return rows
 
 

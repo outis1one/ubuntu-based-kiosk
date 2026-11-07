@@ -11,7 +11,7 @@
 #   LIBRARY_CODE=HOME                     short code for the library (letters/digits)
 #   SHELVES="LR=Living room;BR=Bedroom"   shelves/rooms to offer (first install only)
 #   ITEM_TYPES="CD=Compact disc"          extra item types (first install only)
-#   OPAC_PORT=8080 STAFF_PORT=8081        preferred host ports (next free is used)
+#   OPAC_PORT=8097 STAFF_PORT=8098        preferred host ports (next free is used)
 #   EXTRA_CA=/path/to/proxy-ca.crt        trust an extra CA while building
 set -euo pipefail
 
@@ -117,9 +117,9 @@ LIBRARY_CODE=${LIBRARY_CODE:-HOME}
 SHELVES="${SHELVES:-}"
 ITEM_TYPES="${ITEM_TYPES:-}"
 TZ=${TZ_NOW}
-OPAC_PORT=$(free_port "${OPAC_PORT:-8080}")
-STAFF_PORT=$(free_port "${STAFF_PORT:-8081}")
-QUICKADD_PORT=$(free_port "${QUICKADD_PORT:-8082}")
+OPAC_PORT=$(free_port "${OPAC_PORT:-8097}")
+STAFF_PORT=$(free_port "${STAFF_PORT:-8098}")
+QUICKADD_PORT=$(free_port "${QUICKADD_PORT:-8099}")
 BIND_ADDR=${BIND_ADDR:-0.0.0.0}
 # The public catalogue is off by default: 127.0.0.1 = not reachable from the network.
 OPAC_BIND=${OPAC_BIND:-127.0.0.1}
@@ -139,7 +139,7 @@ else
     c_info "Re-using existing .env"
     # Settings added in later versions: append them to an older .env.
     if ! grep -q '^QUICKADD_PORT=' .env; then
-        echo "QUICKADD_PORT=$(free_port 8082)" >> .env
+        echo "QUICKADD_PORT=$(free_port 8099)" >> .env
     fi
     if ! grep -q '^VIEWER_PASSWORD=' .env; then
         { echo "VIEWER_USER=guest"; echo "VIEWER_PASSWORD=$(rand 14)"; } >> .env
@@ -170,7 +170,7 @@ with_retry dc up -d
 c_info "First start installs the database - waiting until Koha reports healthy..."
 for i in $(seq 1 180); do
     health="$(docker inspect -f '{{if .State.Health}}{{.State.Health.Status}}{{else}}none{{end}}' library-koha 2>/dev/null || echo missing)"
-    if [ "$health" = healthy ] && curl -fsS -o /dev/null -m 5 "http://127.0.0.1:${QUICKADD_PORT:-8082}/healthz" 2>/dev/null; then READY=1; break; fi
+    if [ "$health" = healthy ] && curl -fsS -o /dev/null -m 5 "http://127.0.0.1:${QUICKADD_PORT:-8099}/healthz" 2>/dev/null; then READY=1; break; fi
     # One restart is tolerated (Docker's restart policy); a crash loop is not.
     if [ "$(docker inspect -f '{{.RestartCount}}' library-koha 2>/dev/null || echo 99)" -ge 3 ]; then
         c_err "library-koha keeps crashing - see: docker logs library-koha"; exit 1

@@ -12,9 +12,9 @@ it never overwrites your `.env` (passwords) or your data.
 
 | What | Address | Login |
 |---|---|---|
-| **Your library**: add books, find a book, people, lending, labels, settings | `http://<this machine>:8081` | `admin` and the generated password |
-| **Add books** (scan an ISBN, or use the phone camera) | `http://<this machine>:8081/add/` | same login (asked once more) |
-| **Public catalogue** (search only, for a kiosk or visitors) | `http://<this machine>:8080` | none |
+| **Your library**: add books, find a book, people, lending, labels, settings | `http://<this machine>:8098` | `admin` and the generated password |
+| **Add books** (scan an ISBN, or use the phone camera) | `http://<this machine>:8098/add/` | same login (asked once more) |
+| **Public catalogue** (search only, for a kiosk or visitors) | `http://<this machine>:8097` | none |
 
 For home use you only need the first address: sign in to **Your library**, and use the **Add books**
 button on its home page. The Add books page has a **Find a book** tab (title, author or ISBN, with the
@@ -24,7 +24,7 @@ staff sites the same URL shapes, so they cannot share one address; Add books can
 
 Ports move up to the next free number if one is taken; the final addresses are printed
 at the end and by `sudo ./install.sh --status`. Add books is also reachable directly on its own port
-(`8082`), which is handy behind a proxy but not needed otherwise.
+(`8099`), which is handy behind a proxy but not needed otherwise.
 
 ## What it is made of
 
@@ -290,3 +290,10 @@ points, quiz number and interest level fill in by themselves; check them and pre
 The book page's AR box has **Open beside this page** (a pop-up window next to the book) and **Show it here** (AR BookFind inside the
 page; some browsers block its cookies inside another page, then use the pop-up). Either copies the title first so you can paste
 it into AR's search; AR's own page cannot be pre-filled from here.
+
+### Same ports on every install
+
+New installs of this stack use the same three ports whether you install it from the kiosk add-on or from `ubuntu-post-install`:
+**8098** is the one to use (the Room for Books home page, with Koha behind the menu), 8099 is Add books direct, and 8097 is the
+public catalogue, which stays closed. If one is taken, the next free port is used and the installer prints it. Existing installs
+keep the ports they already have.

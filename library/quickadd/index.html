@@ -201,6 +201,7 @@
       <button class="primary" type="submit">Look up</button>
     </form>
     <div id="homeresults" aria-live="polite"></div>
+    <div id="homemine" hidden></div>
     <div class="bigacts" id="homeacts">
       <a class="bigact" href="#lend"><strong>Check out</strong><span>Scan a card, then the books</span></a>
       <a class="bigact" href="#return"><strong>Return</strong><span>Scan the books coming back</span></a>
@@ -1243,21 +1244,37 @@
   };
   $('printcard').onclick = () => window.print();
 
-  async function loadMine() {
-    let r; try { r = await api('/api/me'); } catch (e) { r = {}; }
-    if (!r.loans) { $('meloans').textContent = r.message || 'Could not load your books.'; return; }
-    $('mename').textContent = r.name; $('mecard').textContent = r.card;
+  // A borrower's loans: title, who wrote it, when it was borrowed, when it is due (days left / overdue), renewals, Renew.
+  function renderLoans(target, r, reload) {
     const today = new Date(); today.setHours(12, 0, 0, 0);
     const rows = r.loans.map(l => {
       const days = Math.round((new Date(l.due + 'T12:00:00') - today) / 86400000);
       const when = l.overdue ? 'Overdue by ' + (-days) + (days === -1 ? ' day' : ' days') : days === 0 ? 'Due today' : 'Due ' + fmtDue(l.due) + ' (in ' + days + (days === 1 ? ' day)' : ' days)');
       const ren = el('button', { type: 'button' }, 'Renew');
       ren.onclick = async () => { ren.disabled = true; const x = await api('/api/me/renew', { checkout_id: l.checkout_id });
-        if (x.status === 'renewed') loadMine(); else { ren.disabled = false; alert(x.message || 'That one cannot be renewed.'); } };
-      return el('div', { className: 'loan' }, el('span', { className: 't' }, el('a', { href: '#book/' + l.biblio_id }, l.title), el('div', { className: 'small' }, l.author)),
-        el('span', { className: 'chip ' + (l.overdue ? 'late' : 'in') }, when), ren);
+        if (x.status === 'renewed') reload(); else { ren.disabled = false; alert(x.message || 'That one cannot be renewed (the limit is reached, or someone is waiting for it).'); } };
+      const facts = ['Borrowed ' + fmtDue(l.checkout_date), l.renewals ? 'renewed ' + (l.renewals === 1 ? 'once' : l.renewals + ' times') : ''].filter(Boolean).join(' · ');
+      return el('div', { className: 'loan' }, el('span', { className: 't' }, el('a', { href: '#book/' + l.biblio_id }, l.title),
+          el('div', { className: 'small' }, [l.author, facts].filter(Boolean).join(' · '))),
+        el('span', { className: 'chip ' + (l.overdue ? 'late' : days <= 3 ? 'out' : 'in') }, when), ren);
     });
-    $('meloans').replaceChildren(...(rows.length ? rows : [el('div', { className: 'card ok' }, el('div', { className: 'body' }, 'You have nothing checked out right now.'))]));
+    const late = r.loans.filter(l => l.overdue).length;
+    const head = r.loans.length ? 'You have ' + r.loans.length + (r.loans.length === 1 ? ' book' : ' books') + ' out' + (late ? ', ' + late + ' overdue' : '') + '.' : 'You have nothing checked out right now.';
+    target.replaceChildren(el('div', { className: 'card ' + (late ? 'warn' : 'ok') }, el('div', { className: 'body' }, el('strong', {}, head))), ...rows);
+  }
+  async function loadMine() {
+    let r; try { r = await api('/api/me'); } catch (e) { r = {}; }
+    if (!r.loans) { $('meloans').textContent = r.message || 'Could not load your books.'; return; }
+    $('mename').textContent = r.name; $('mecard').textContent = r.card;
+    renderLoans($('meloans'), r, loadMine);
+  }
+  async function loadHomeMine() {
+    let r; try { r = await api('/api/me'); } catch (e) { return; }
+    if (!r.loans) return;
+    const box = $('homemine'); box.hidden = false;
+    const inner = el('div', {});
+    box.replaceChildren(el('h2', {}, 'Hello, ' + r.name), inner);
+    renderLoans(inner, r, loadHomeMine);
   }
   $('mepwform').onsubmit = async ev => {
     ev.preventDefault(); const f = ev.target; const r = await api('/api/me/password', Object.fromEntries(new FormData(f)));
@@ -1324,7 +1341,7 @@
     const names = { home: 'Home', library: 'Browse', book: 'Book', add: 'Add books', lend: 'Lend / return', people: 'People', card: 'Library card', cards: 'Library cards', mine: 'My books' };
     document.title = (view === 'home' ? '' : names[view] + ' - ') + 'Room for Books';
     window.scrollTo(0, 0);
-    if (view === 'home') { $('homeacts').hidden = viewer; $('patronacts').hidden = !isPatron; loadRecent(); if (h === 'find') $('hq').focus(); }
+    if (view === 'home') { $('homeacts').hidden = viewer; $('patronacts').hidden = !isPatron; $('homemine').hidden = !isPatron; if (isPatron) loadHomeMine(); loadRecent(); if (h === 'find') $('hq').focus(); }
     else if (view === 'book') loadBook(m[1]);
     else if (view === 'mine') loadMine();
     else if (view === 'add') { if (h === 'settings') { $('settings').open = true; $('settings').scrollIntoView(); } else $('code').focus(); }
