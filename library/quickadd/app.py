@@ -1247,12 +1247,13 @@ def _num(v, maxlen=8):
 def op_ar_set(payload):
     key = _isbn13(payload.get("isbn"))
     level, points, quiz = _num(payload.get("level")), _num(payload.get("points")), re.sub(r"[^0-9]", "", str(payload.get("quiz") or ""))[:8]
+    interest = re.sub(r"[^A-Za-z+]", "", str(payload.get("interest") or ""))[:4].upper()
     if not key or level is None or points is None:
         return 400, {"status": "invalid", "message": "Level and points are numbers like 4.5 and 6."}
     with LOCK:
         d = _ar_load()
-        if level or points or quiz:
-            d[key] = {"level": level, "points": points, "quiz": quiz}
+        if level or points or quiz or interest:
+            d[key] = {"level": level, "points": points, "quiz": quiz, "interest": interest}
         else:
             d.pop(key, None)
         _ar_save(d)
@@ -1272,6 +1273,7 @@ def op_ar_import(payload):
             if n in head:
                 return head.index(n)
         return None
+    cint = col("interest", "interestlevel", "il")
     ci, cl, cp, cq = col("isbn", "isbn13"), col("level", "arlevel", "bl", "booklevel"), col("points", "arpoints", "pts"), col("quiz", "quizno", "quiznumber")
     if ci is None or (cl is None and cp is None and cq is None):
         return 400, {"status": "invalid", "message": "Need a header row with an isbn column and at least one of: level, points, quiz."}
@@ -1287,7 +1289,8 @@ def op_ar_import(payload):
                 continue
             old = d.get(key, {})
             d[key] = {"level": lv or old.get("level", ""), "points": pt or old.get("points", ""),
-                      "quiz": re.sub(r"[^0-9]", "", get(cq))[:8] or old.get("quiz", "")}
+                      "quiz": re.sub(r"[^0-9]", "", get(cq))[:8] or old.get("quiz", ""),
+                      "interest": re.sub(r"[^A-Za-z+]", "", get(cint))[:4].upper() or old.get("interest", "")}
             done += 1
         _ar_save(d)
     return 200, {"status": "imported", "count": done, "skipped": skipped}
@@ -1301,7 +1304,7 @@ def export_csv():
     ar = _ar_load()
     out = io.StringIO()
     w = csv.writer(out)
-    w.writerow(["title", "author", "isbn", "year", "barcode", "call number", "shelf", "collection", "status", "ar level", "ar points", "ar quiz"])
+    w.writerow(["title", "author", "isbn", "year", "barcode", "call number", "shelf", "collection", "status", "ar level", "ar points", "ar quiz", "ar interest"])
     page = 1
     while True:
         books = koha("GET", "/biblios", query={"_per_page": "200", "_page": str(page), "_order_by": "title"}) or []
@@ -1316,7 +1319,7 @@ def export_csv():
             for i in mine:
                 w.writerow([(b.get("title") or "").rstrip(" /:"), b.get("author") or "", isbn, b.get("copyright_date") or "",
                             i.get("external_id") or "", i.get("callnumber") or "", where.get(i.get("location"), ""),
-                            colls.get(i.get("collection_code"), ""), item_status(i) if i else "", a.get("level", ""), a.get("points", ""), a.get("quiz", "")])
+                            colls.get(i.get("collection_code"), ""), item_status(i) if i else "", a.get("level", ""), a.get("points", ""), a.get("quiz", ""), a.get("interest", "")])
         if len(books) < 200:
             break
         page += 1

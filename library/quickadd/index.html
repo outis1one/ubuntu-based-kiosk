@@ -135,6 +135,12 @@
   .cardsheet { display: grid; grid-template-columns: repeat(2, 85.6mm); gap: 6mm; justify-content: start; }
   .cardsheet .libcard { break-inside: avoid; }
   @media print { header, .noprint, nav { display: none !important; } body { background: #fff; } main { padding: 0; max-width: none; } .libcard { border: 1px solid #000; } }
+  #live { position: fixed; inset: 0; z-index: 50; background: rgba(0,0,0,.92); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 12px; }
+  #live[hidden] { display: none; }
+  #live video { width: min(100%, 640px); max-height: 60vh; border-radius: 12px; background: #000; object-fit: cover; }
+  #live .frame { position: relative; width: min(100%, 640px); }
+  #live .frame::after { content: ''; position: absolute; inset: 18% 12%; border: 3px solid rgba(255,255,255,.85); border-radius: 12px; pointer-events: none; }
+  #live .msg { color: #fff; font-weight: 600; text-align: center; min-height: 3em; max-width: 640px; }
   .sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 </style>
 </head>
@@ -190,7 +196,7 @@
         <input id="ret" inputmode="numeric" placeholder="Scan the book's barcode" autocomplete="off">
         <button class="primary" type="submit">Return</button>
       </form>
-      <div class="cam-row"><button type="button" id="retcam">Return with camera</button></div>
+      <div class="cam-row"><button type="button" id="retcam">Return with camera</button> <button type="button" id="retlive" hidden>Live return</button></div>
       <div id="retresult" role="status" aria-live="polite" class="small" style="margin-top:8px"></div>
     </div>
     <div class="copybox">
@@ -200,7 +206,7 @@
         <input id="who" type="search" placeholder="Name, or scan the library card" enterkeyhint="search" autocomplete="off">
         <button type="submit">Find</button>
       </form>
-      <div class="cam-row"><button type="button" id="whocam">Scan card or phone QR with camera</button>
+      <div class="cam-row"><button type="button" id="whocam">Scan card or phone QR with camera</button> <button type="button" id="wholive" hidden>Live scan</button>
         <span class="small">Photograph the library card, or the QR picture on the borrower's phone.</span></div>
       <div id="whostatus" class="small"></div>
       <div id="whoresults"></div>
@@ -262,6 +268,7 @@
   </form>
   <div class="cam-row">
     <button type="button" id="cam">Scan with camera</button>
+    <button type="button" id="livecam" hidden>Live scan</button>
     <input type="file" id="camfile" accept="image/*" capture="environment" hidden>
     <span class="small">Opens your phone's camera: fill the frame with the barcode and hold steady.</span>
   </div>
@@ -309,6 +316,11 @@
   <ul class="list" id="earlier"></ul>
   </section>
 </main>
+<div id="live" hidden role="dialog" aria-modal="true" aria-label="Camera scanner">
+  <div class="frame"><video id="livevideo" playsinline muted></video></div>
+  <div class="msg" id="livemsg" aria-live="polite"></div>
+  <button type="button" id="livestop" class="primary">Done</button>
+</div>
 
 <script>
 (() => {
@@ -470,6 +482,57 @@
     });
   }
 
+  // ---- live camera: works where the browser allows camera access (HTTPS, or the machine itself).
+  // Chrome/Android read codes in the browser (BarcodeDetector); everything else sends small frames to
+  // the server's decoder a couple of times a second. Plain-HTTP pages fall back to the photo buttons.
+  const liveOK = !!(window.isSecureContext && navigator.mediaDevices && navigator.mediaDevices.getUserMedia);
+  let liveStop = null;
+  // onCode(code) may return text to show; continuous keeps scanning, otherwise the first code closes it.
+  async function liveScan(kind, title, onCode, continuous) {
+    const box = $('live'), video = $('livevideo'), msg = $('livemsg');
+    let stream;
+    try { stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: { ideal: 'environment' }, width: { ideal: 1280 } }, audio: false }); }
+    catch (e) { alert('The camera is not available (' + (e.name === 'NotAllowedError' ? 'permission was refused' : e.message) + '). Use the photo button instead.'); return; }
+    box.hidden = false; msg.textContent = title; video.srcObject = stream; await video.play().catch(() => {});
+    let alive = true, busy = false, lastCode = '', lastAt = 0;
+    const detector = 'BarcodeDetector' in window ? new BarcodeDetector({ formats: ['qr_code', 'code_39', 'code_128', 'ean_13', 'ean_8', 'upc_a', 'upc_e'] }) : null;
+    const canvas = document.createElement('canvas');
+    const finish = () => { alive = false; stream.getTracks().forEach(t => t.stop()); video.srcObject = null; box.hidden = true; liveStop = null; };
+    liveStop = finish; $('livestop').onclick = finish;
+    const accept = async code => {
+      if (!code || busy) return;
+      if (kind === 'isbn') { code = clean(code); if (!code) return; }
+      const now = Date.now();
+      if (code === lastCode && now - lastAt < 4000) return;      // the same book still in view
+      lastCode = code; lastAt = now; busy = true;
+      beep(SOUND.added);
+      try { const t = await onCode(code); if (t) msg.textContent = t; } catch (e) {}
+      busy = false;
+      if (!continuous) finish();
+    };
+    const clean = c => { c = String(c).replace(/[\s-]/g, '').toUpperCase(); if (!/^(\d{8,14}|\d{9}X)$/.test(c)) return ''; return c.length === 13 && c[0] === '0' ? c.slice(1) : c; };
+    while (alive) {
+      try {
+        if (video.readyState >= 2 && !busy) {
+          if (detector) {
+            const found = await detector.detect(video);
+            if (found.length) await accept(found[0].rawValue);
+          } else {
+            const k = Math.min(1, 1280 / Math.max(video.videoWidth, video.videoHeight));
+            canvas.width = Math.round(video.videoWidth * k); canvas.height = Math.round(video.videoHeight * k);
+            canvas.getContext('2d').drawImage(video, 0, 0, canvas.width, canvas.height);
+            const blob = await new Promise(ok => canvas.toBlob(ok, 'image/jpeg', 0.85));
+            const r = await fetch('api/scan?kind=' + (kind === 'isbn' ? 'isbn' : 'sticker'), { method: 'POST', headers: { 'Content-Type': 'image/jpeg', 'X-Quickadd': '1' }, body: blob });
+            const codes = r.ok ? (await r.json()).codes : [];
+            if (codes.length && alive) await accept(codes[0]);
+          }
+        }
+      } catch (e) {}
+      await new Promise(ok => setTimeout(ok, detector ? 200 : 650));
+    }
+  }
+  window.addEventListener('hashchange', () => { if (liveStop) liveStop(); });
+
   function noBarcode() {
     beep(SOUND.notfound);
     $('status').textContent = '';
@@ -477,6 +540,8 @@
       el('div', { className: 'meta' }, 'Move closer so the barcode fills the frame, keep the phone steady and the barcode flat and well lit, then try again. You can also type the number.')));
   }
 
+  $('livecam').hidden = !liveOK;
+  $('livecam').onclick = () => liveScan('isbn', 'Hold each book\'s barcode in the frame', async code => { await add(code); return 'Added - next book'; }, true);
   $('cam').onclick = async () => {
     const codes = await takePhoto('isbn');
     if (codes === null) { $('status').textContent = ''; return; }
@@ -718,19 +783,29 @@
   function arBox(b, m) {
     const ar = m.ar || {};
     const f = (ph, v, w) => el('input', { type: 'text', placeholder: ph, value: v || '', 'aria-label': ph, inputMode: 'decimal', style: 'width:' + w + 'em;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)' });
-    const lvl = f('Level', ar.level, 5), pts = f('Points', ar.points, 5), quiz = f('Quiz no.', ar.quiz, 7);
+    const lvl = f('Level', ar.level, 5), pts = f('Points', ar.points, 5), quiz = f('Quiz no.', ar.quiz, 7), inter = f('Interest (LG/MG/UG)', ar.interest, 9);
     const wrap = el('div', { className: 'small', style: 'margin-top:10px;border-top:1px solid var(--line);padding-top:8px' });
     const copy = el('button', { type: 'button' }, 'Copy title');
     copy.onclick = async () => { try { await navigator.clipboard.writeText(b.title); copy.textContent = 'Copied ✓'; } catch (e) { copy.textContent = 'Copy failed'; } setTimeout(() => copy.textContent = 'Copy title', 1500); };
     const open = el('a', { href: 'https://www.arbookfind.com/', target: '_blank', rel: 'noopener noreferrer' }, 'Open AR BookFind');
-    if (viewer) { wrap.append(el('strong', {}, 'Reading level: '), ar.level ? 'AR ' + ar.level + (ar.points ? ', ' + ar.points + ' points' : '') : 'not recorded'); return wrap; }
+    if (viewer) { wrap.append(el('strong', {}, 'Reading level: '), ar.level ? 'AR ' + ar.level + (ar.points ? ', ' + ar.points + ' points' : '') + (ar.interest ? ', interest ' + ar.interest : '') : 'not recorded'); return wrap; }
     const save = el('button', { type: 'button', className: 'primary' }, 'Save');
     const msg = el('span', {});
     save.onclick = async () => {
-      const r = await api('/api/ar/set', { isbn: m.isbn, level: lvl.value, points: pts.value, quiz: quiz.value });
+      const r = await api('/api/ar/set', { isbn: m.isbn, level: lvl.value, points: pts.value, quiz: quiz.value, interest: inter.value });
       msg.textContent = r.status === 'saved' ? ' Saved ✓' : ' ' + (r.message || 'Could not save.');
     };
-    wrap.append(el('strong', {}, 'Reading level (AR): '), lvl, ' ', pts, ' ', quiz, ' ', save, msg,
+    // Easiest path: on AR BookFind's book page select everything (Ctrl/Cmd+A), copy, and paste it here.
+    const paste = el('textarea', { rows: 2, placeholder: 'Paste the AR BookFind book page here (select all, copy, paste)', 'aria-label': 'Pasted AR BookFind text',
+      style: 'width:100%;margin-top:6px;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)' });
+    paste.oninput = () => {
+      const t = paste.value, g = re => (t.match(re) || [])[1] || '';
+      const found = { level: g(/Book\s*Level:?\s*([0-9]{1,2}(?:\.[0-9]{1,2})?)/i), points: g(/(?:AR\s*)?Points:?\s*([0-9]{1,3}(?:\.[0-9]{1,2})?)/i),
+                      quiz: g(/Quiz\s*(?:No\.?|Number|#)\s*:?\s*([0-9]{3,6})/i), interest: g(/Interest\s*Level:?\s*(LG|MG\+?|UG)/i) };
+      if (found.level) lvl.value = found.level; if (found.points) pts.value = found.points; if (found.quiz) quiz.value = found.quiz; if (found.interest) inter.value = found.interest;
+      msg.textContent = (found.level || found.points || found.quiz) ? ' Filled in from what you pasted - check it, then Save.' : (t.trim() ? " Couldn't find a level or points in that text." : '');
+    };
+    wrap.append(el('strong', {}, 'Reading level (AR): '), lvl, ' ', pts, ' ', quiz, ' ', inter, ' ', save, msg, paste,
       el('div', { style: 'margin-top:6px' }, open, ' (a new tab: search for the title there, then type what it shows) ', copy));
     return wrap;
   }
@@ -796,6 +871,17 @@
   }
   $('retform').onsubmit = async ev => { ev.preventDefault(); const c = $('ret').value.trim(); $('ret').value = ''; if (c) { await doReturn(c, $('retresult')); $('ret').focus(); } };
 
+  $('retlive').hidden = $('wholive').hidden = !liveOK;
+  $('retlive').onclick = () => liveScan('sticker', 'Scan each returned book', async code => {
+    const r = await doReturn(code, $('retresult')); return $('retresult').innerText; }, true);
+  async function pickByCode(code) {
+    const r = await api('/api/patrons?q=' + encodeURIComponent(code));
+    const hit = (r.patrons || []).filter(p => p.card === code);
+    if (hit.length === 1) { location.hash = '#lend/' + hit[0].id; return true; }
+    return false;
+  }
+  $('wholive').onclick = () => liveScan('sticker', 'Hold the library card or the phone QR in the frame', async code => {
+    if (await pickByCode(code)) return; beep(SOUND.notfound); $('whostatus').textContent = 'No library card matches ' + code + '.'; }, false);
   $('retcam').onclick = async () => {
     const codes = await takePhoto('sticker', $('retresult'));
     if (codes === null) { $('retresult').textContent = ''; return; }
@@ -866,9 +952,16 @@
       if (!codes.length) { out.textContent = "Couldn't read a barcode from that photo - move closer and try again."; return; }
       scan.value = codes[0]; form.requestSubmit();
     };
+    const bookLive = el('button', { type: 'button', hidden: !liveOK }, 'Live scan books');
+    bookLive.onclick = () => liveScan('sticker', 'Scan each book to check out to ' + p.name, async code => {
+      const r = await api('/api/checkout', { patron_id: p.id, barcode: code });
+      openPatron(p.id, true); loadOut();
+      if (r.status === 'checked_out') return (r.title || code) + ' - due ' + fmtDue(r.due);
+      beep(SOUND.notfound); return (r.title ? r.title + ': ' : '') + (r.message || 'That did not work.');
+    }, true);
     const loans = p.loans.length ? p.loans.map(l => loanRow(l, false)) : [el('div', { className: 'small' }, 'Nothing checked out to ' + p.name + ' yet.')];
     $('patronbox').replaceChildren(el('div', { className: 'title', style: 'margin-top:10px' }, p.name, ' ', el('span', { className: 'badge' }, p.card || 'no card')),
-      form, el('div', { className: 'cam-row' }, bookCam), out, el('h2', {}, 'Has out'), ...loans,
+      form, el('div', { className: 'cam-row' }, bookCam, ' ', bookLive), out, el('h2', {}, 'Has out'), ...loans,
       el('div', { className: 'small', style: 'margin-top:8px' }, el('a', { href: '#card/' + p.id }, 'Print library card'), ' · ',
         el('a', { href: '#lend' }, 'Choose someone else')));
     if (!quiet) scan.focus();

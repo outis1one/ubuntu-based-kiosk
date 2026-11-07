@@ -243,3 +243,15 @@ Instead: the book page has an **Open AR BookFind** link (plus **Copy title** to 
 `library.csv` (one row per copy, with any reading level) and imports a CSV of `isbn, level, points[, quiz]` you made yourself
 (for example from a spreadsheet or a Renaissance report you are entitled to export). Levels are stored in `reading-levels.json`
 in the Add books data volume, keyed by ISBN, so they survive a Koha reinstall and are included in the usual backups of that folder.
+
+### Live camera scanning (needs HTTPS)
+
+Browsers only allow a live camera on HTTPS pages (or on the machine itself). Put the library site behind Caddy with a real
+certificate and **Live scan** buttons appear: Add books (scan a stack of ISBNs one after another), Lend / return (live card or
+phone-QR scan, live book check-out for the chosen person, live returns). Chrome on Android reads codes in the browser; other
+browsers send small camera frames to the server's decoder a couple of times a second. On plain HTTP the photo buttons stay.
+
+### Copying reading levels from AR BookFind
+
+On the AR BookFind book page, select everything (Ctrl/Cmd+A), copy, and paste into the box on the book page here: the level,
+points, quiz number and interest level fill in by themselves; check them and press Save.
