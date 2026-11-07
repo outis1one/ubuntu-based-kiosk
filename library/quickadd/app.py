@@ -776,6 +776,23 @@ def _shape_book(b, items, where):
             "callnumber": next((i.get("callnumber") for i in mine if i.get("callnumber")), "") or ""}
 
 
+def _extra_matches(term):
+    """Book ids whose tag, shelf/room or collection name contains the search words (so one box finds them all)."""
+    t = term.lower()
+    ids = {int(k) for k, v in _tags_load().items() if any(t in x.lower() for x in v)}
+    locs = [l["value"] for l in get_locations() if t in l["label"].lower() or t == l["value"].lower()]
+    colls = [c["value"] for c in get_collections() if t in c["label"].lower() or t == c["value"].lower()]
+    conds = ([{"location": locs}] if locs else []) + ([{"collection_code": colls}] if colls else [])
+    if conds:
+        try:
+            its = koha("GET", "/items", query={"q": json.dumps(conds[0] if len(conds) == 1 else {"-or": conds}),
+                                               "_per_page": str(ITEM_FILTER_CAP)}) or []
+            ids |= {i["biblio_id"] for i in its}
+        except KohaError:
+            pass
+    return sorted(ids)[:ITEM_FILTER_CAP]
+
+
 def op_library(qs):
     """The Library grid: filter by shelf / format / status, search, sort, page."""
     def one(k):
@@ -790,7 +807,11 @@ def op_library(qs):
     conds = []
     if term:
         like = {"-like": "%" + term + "%"}
-        conds.append({"-or": [{"title": like}, {"author": like}, {"isbn": like}, {"ean": like}]})
+        match = [{"title": like}, {"author": like}, {"isbn": like}, {"ean": like}]
+        extra = _extra_matches(term)
+        if extra:
+            match.append({"biblio_id": extra})
+        conds.append({"-or": match})
     if tag:
         ids_t = sorted(int(k) for k, v in _tags_load().items() if any(t.lower() == tag.lower() for t in v))
         if not ids_t:

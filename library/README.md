@@ -220,6 +220,8 @@ One simple page: a **Look up** box (books by title, author or ISBN, and people b
 (top right) holds the rest: browse all books, lend / return, people and library cards, barcodes and settings, export / import,
 and a link to Koha's own staff screens. Borrowers and the read-only guest see just the lookup, recent books and (borrowers) My books.
 
+**One search box for everything:** it matches a book's title, author, ISBN, **tags**, **shelf / room** and **collection** (type `kids`, `garage`, `to read`...), and people by name or card number.
+
 **Adding by title:** on Add books, scan or type an ISBN to add it straight away; type a title or author instead and you get a list
 of matches (cover, author, year, publisher) from Open Library and the Library of Congress to choose from. Books you already have
 are marked, with an *Add another copy* button.
