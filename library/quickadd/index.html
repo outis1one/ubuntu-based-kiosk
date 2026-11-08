@@ -965,14 +965,27 @@
       msg.textContent = r.status === 'saved' ? ' Saved ✓' : ' ' + (r.message || 'Could not save.');
       if (r.status === 'saved') sumEl.textContent = arSummary({ level: lvl.value, points: pts.value, quiz: quiz.value, interest: inter.value }) || 'not recorded';
     };
-    const copyTitle = async () => { try { await navigator.clipboard.writeText(b.title); } catch (e) {} };
+    // What to paste into AR BookFind's search: the ISBN when the book has one (exact), otherwise the title.
+    const digits = (m.isbn || '').replace(/[^0-9Xx]/g, '').toUpperCase();
+    const to13 = d => { if (d.length === 13) return d; if (d.length !== 10) return ''; const c = '978' + d.slice(0, 9); let t = 0; for (let i = 0; i < 12; i++) t += +c[i] * (i % 2 ? 3 : 1); return c + ((10 - t % 10) % 10); };
+    const to10 = d13 => { if (d13.length !== 13 || d13.slice(0, 3) !== '978') return ''; const c = d13.slice(3, 12); let t = 0; for (let i = 0; i < 9; i++) t += +c[i] * (10 - i); const k = (11 - t % 11) % 11; return c + (k === 10 ? 'X' : k); };
+    const isbn13 = to13(digits), isbn10 = isbn13 ? to10(isbn13) : '';
+    const copiedNote = el('span', { className: 'small' });
+    const copyText = async (text, what) => {
+      try { await navigator.clipboard.writeText(text); copiedNote.textContent = ' Copied ' + what + ': ' + text; }
+      catch (e) { copiedNote.textContent = ' Could not copy (' + what + ': ' + text + ') - select and copy it yourself.'; }
+    };
+    const copyTitle = () => copyText(b.title, 'the title');
+    const copyDefault = () => isbn13 ? copyText(isbn13, 'the ISBN') : copyTitle();
     const arPop = el('button', { type: 'button' }, 'Open AR BookFind beside this page');
-    arPop.onclick = async () => { await copyTitle();
+    arPop.onclick = async () => { await copyDefault();
       const w = Math.min(560, Math.floor(screen.availWidth / 2)), h = screen.availHeight - 80;
       arWin = window.open('https://www.arbookfind.com/', 'arbookfind', 'popup=yes,width=' + w + ',height=' + h + ',left=' + (screen.availWidth - w) + ',top=40');
       if (!arWin) msg.textContent = ' The browser blocked the pop-up: allow pop-ups for this site, or use the link to open AR BookFind in a tab.'; };
-    const copy = el('button', { type: 'button' }, 'Copy title');
-    copy.onclick = async () => { await copyTitle(); copy.textContent = 'Copied ✓'; setTimeout(() => copy.textContent = 'Copy title', 1500); };
+    const copyBtns = [];
+    if (isbn13) { const x = el('button', { type: 'button' }, 'Copy ISBN-13'); x.onclick = () => copyText(isbn13, 'the ISBN-13'); copyBtns.push(x); }
+    if (isbn10) { const x = el('button', { type: 'button' }, 'Copy ISBN-10'); x.onclick = () => copyText(isbn10, 'the ISBN-10'); copyBtns.push(x); }
+    const copy = el('button', { type: 'button' }, 'Copy title'); copy.onclick = copyTitle;
     const paste = el('textarea', { rows: 3, placeholder: 'Paste the AR BookFind book page here (open the book there, select all, copy, paste): the fields above fill in by themselves',
       'aria-label': 'Pasted AR BookFind text', style: css + ';width:100%;margin-top:6px' });
     // Only the four fields are taken from what was copied; the rest of the text is thrown away, never stored.
@@ -1027,7 +1040,8 @@
     };
     document.addEventListener('paste', onPaste);
     wrap.append(edit, el('div', { style: 'margin-top:8px' }, save, msg),
-      el('div', { style: 'margin-top:8px' }, el('a', { href: 'https://www.arbookfind.com/', target: '_blank', rel: 'noopener noreferrer' }, 'Open AR BookFind'), ' ', arPop, ' ', copy),
+      el('div', { style: 'margin-top:8px' }, el('a', { href: 'https://www.arbookfind.com/', target: '_blank', rel: 'noopener noreferrer' }, 'Open AR BookFind'), ' ', arPop, ' ', ...copyBtns.flatMap(x => [x, ' ']), copy, copiedNote,
+        el('div', { className: 'small' }, isbn13 ? 'Opening AR BookFind from here copies the ISBN (the exact edition). If AR BookFind finds nothing with it, press Copy title and search for that instead.' : 'This book has no ISBN, so the title is copied.')),
       el('div', { style: 'margin-top:8px' }, fromClip, el('span', { className: 'small' }, ' or just press Ctrl/Cmd+V on this page after copying on AR BookFind (Ctrl/Cmd+A, then Ctrl/Cmd+C)')), paste);
     return wrap;
   }

@@ -380,3 +380,6 @@ connection to it. The staff site's web server now closes that connection after e
 **AR pop-up:** the "Show it here" (AR BookFind inside the page) option was removed: browsers block AR BookFind's cookies when it is shown inside another site, so it
 never worked reliably. **Open AR BookFind beside this page** opens it in a window next to the book, copies the title for you, and closes that window by itself once a paste has
 filled the fields (a paste that finds nothing leaves it open).
+
+**ISBN first:** *Open AR BookFind beside this page* now copies the book's **ISBN-13** when it has one (the title when it does not), and says what it copied. *Copy ISBN-13*, *Copy ISBN-10*
+and *Copy title* buttons sit beside it, for when AR BookFind finds nothing with the first (it lists particular editions, so a different printing's ISBN may miss).
