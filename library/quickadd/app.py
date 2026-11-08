@@ -2401,7 +2401,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Content-Security-Policy",
                          "default-src 'self'; img-src 'self' https: data:; "
-                         "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-src https://www.arbookfind.com")
+                         "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'")
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.end_headers()
