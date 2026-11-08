@@ -56,7 +56,7 @@ if [ ! -d "/etc/koha/sites/$INST" ]; then
         -e 's|^#\s*Include /etc/koha/apache-shared-intranet-plack.conf|   Include /etc/koha/apache-shared-intranet-plack.conf|' "$SITE"
     koha-plack --enable "$INST" >/dev/null 2>&1 || true   # koha-create may already have enabled it
 
-    # One address: serve the Add books page (Quick Add) inside the staff site at /add/.
+    # One address: serve Room for Books (Quick Add) at the root of the staff site's address.
     # (The staff and public catalogue sites cannot share one address: Koha gives both the
     # same URL shapes. The staff site is the natural home for a home library.)
     if [ -n "${KOHA_QUICKADD_URL:-}" ]; then
@@ -70,23 +70,24 @@ if [ ! -d "/etc/koha/sites/$INST" ]; then
             install -m 0640 -o root -g "$INST-koha" /dev/null /etc/koha/quickadd-sso.secret
             printf '%s' "$KOHA_SSO_SECRET" > /etc/koha/quickadd-sso.secret
             SSO_BLOCK="    <IfModule mod_headers.c>
-        <Location /add/>
+        <LocationMatch \"^/(api/(?!v[0-9]+/)|\$)\">
             RequestHeader set X-Quickadd-Proxy \"$KOHA_SSO_SECRET\"
-        </Location>
+        </LocationMatch>
     </IfModule>"
         fi
+        # Room for Books is served at the ROOT of this address (no /add/): the page itself at "/" and its own
+        # calls at /api/<name>. Koha keeps everything else - /cgi-bin/koha/... and its REST API at /api/v1/...
+        # (the pattern below leaves /api/v<number>/ alone). This file is included BEFORE Koha's own proxy rules
+        # so that /api/<name> is claimed here first. /add and /add/ (old bookmarks, the kiosk tab) redirect to /.
         cat > /etc/koha/apache-quickadd.conf << APACHE
 <IfModule mod_proxy_http.c>
-    RedirectMatch ^/add\$ /add/
-    # The bare address (http://ip:port/ or https://your-domain/) opens the Room for Books home page;
-    # Koha's own staff screens stay at /cgi-bin/koha/mainpage.pl.
-    RedirectMatch ^/\$ /add/
-    ProxyPass /add/ ${KOHA_QUICKADD_URL%/}/
-    ProxyPassReverse /add/ ${KOHA_QUICKADD_URL%/}/
+    RedirectMatch ^/add(/.*)?\$ /
+    ProxyPassMatch "^/\$" "${KOHA_QUICKADD_URL%/}/"
+    ProxyPassMatch "^(/api/(?!v[0-9]+/).*)\$" "${KOHA_QUICKADD_URL%/}\$1"
 ${SSO_BLOCK}
 </IfModule>
 APACHE
-        sed -i 's|^\(\s*\)Include /etc/koha/apache-shared-intranet.conf|&\n\1Include /etc/koha/apache-quickadd.conf|' "/etc/apache2/sites-available/$INST.conf"
+        sed -i 's|^\(\s*\)Include /etc/koha/apache-shared-intranet-plack.conf|\1Include /etc/koha/apache-quickadd.conf\n&|' "/etc/apache2/sites-available/$INST.conf"
     fi
 
     # koha-create insists on mpm_itk being enabled, but inside a container it can

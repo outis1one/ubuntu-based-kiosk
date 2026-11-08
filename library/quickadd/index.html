@@ -673,7 +673,7 @@
   }
 
   let staffBase = '';
-  const staffRoot = () => staffBase || (location.pathname.startsWith('/add/') ? location.origin : 'http://' + location.hostname + ':' + staffPort);
+  const staffRoot = () => staffBase || ((location.port === '' || String(location.port) === String(staffPort)) ? location.origin : 'http://' + location.hostname + ':' + staffPort);
   const printLink = (from, to) => staffRoot() +
     '/cgi-bin/koha/labels/label-print.pl?from=' + encodeURIComponent(from) + '&to=' + encodeURIComponent(to);
 
@@ -774,8 +774,6 @@
     }));
   }
 
-  // ---- under the staff site (/add/) everything is same-origin
-  const embedded = location.pathname.startsWith('/add/');
   let viewer = false, isPatron = false;                       // the read-only guest login: search only
 
   // ---- views: Library / Book / Add books
