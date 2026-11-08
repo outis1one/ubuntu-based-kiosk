@@ -2215,6 +2215,131 @@ def decode_photo(data, kind):
     return codes
 
 
+# ------------------------------------------------------------------ sign-in sessions
+# A sign-in form sets a signed cookie, so browsers show a proper login page (no pop-up), password managers work, and
+# there is a Sign out. HTTP Basic logins still work (scripts, the kiosk's own page, which signs in at /kiosk).
+SESSION_COOKIE = "rfb"
+_SKEY = {"key": None}
+
+
+def _skey():
+    if _SKEY["key"] is None:
+        path = os.path.join(DATA_DIR, "session.key")
+        k = ""
+        try:
+            k = open(path).read().strip()
+        except OSError:
+            pass
+        if len(k) < 32:
+            k = secrets.token_hex(32)
+            try:
+                os.makedirs(DATA_DIR, exist_ok=True)
+                fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+                with os.fdopen(fd, "w") as f:
+                    f.write(k)
+            except OSError:
+                pass                       # fall back to a key that lives only as long as this process
+        # changing the admin or guest password signs everybody out
+        _SKEY["key"] = hashlib.sha256((k + "|" + PASSWORD + "|" + (VIEWER_PASSWORD or "")).encode()).digest()
+    return _SKEY["key"]
+
+
+def make_session(role, name, pid, days):
+    exp = int(time.time()) + days * 86400
+    body = base64.urlsafe_b64encode(json.dumps([role, name, pid, exp]).encode()).decode().rstrip("=")
+    return body + "." + hmac.new(_skey(), body.encode(), hashlib.sha256).hexdigest()[:43]
+
+
+def read_session(tok):
+    try:
+        body, sig = tok.rsplit(".", 1)
+        want = hmac.new(_skey(), body.encode(), hashlib.sha256).hexdigest()[:43]
+        if not hmac.compare_digest(sig.encode(), want.encode()):
+            return None
+        role, name, pid, exp = json.loads(base64.urlsafe_b64decode(body + "=" * (-len(body) % 4)))
+        if role not in ("admin", "viewer", "patron") or exp < time.time():
+            return None
+        return role, name, pid
+    except (ValueError, TypeError, KeyError):
+        return None
+
+
+def check_credentials(u, p, addr):
+    """(role, patron_id, display name) for a valid admin / guest / borrower login, else None."""
+    ub, pb = (u or "").encode(), (p or "").encode()
+    # Both comparisons always run, so timing does not reveal which account exists.
+    is_admin = hmac.compare_digest(ub, USER.encode()) & hmac.compare_digest(pb, PASSWORD.encode())
+    is_viewer = bool(VIEWER_USER and VIEWER_PASSWORD) & hmac.compare_digest(ub, VIEWER_USER.encode()) \
+        & hmac.compare_digest(pb, VIEWER_PASSWORD.encode())
+    if is_admin:
+        return "admin", None, "Admin"
+    if is_viewer:
+        return "viewer", None, "Guest"
+    pid = patron_login(u, p, addr)           # a borrower: card number (or userid) and password; counts failed tries
+    if pid:
+        try:
+            name = _patron_name(koha("GET", "/patrons/%d" % pid))
+        except KohaError:
+            name = "Borrower"
+        return "patron", pid, name
+    return None
+
+
+def session_cookie(value, days, secure):
+    return "%s=%s; Path=/; Max-Age=%d; HttpOnly; SameSite=Lax%s" % (SESSION_COOKIE, value, days * 86400 if value else 0, "; Secure" if secure else "")
+
+
+LOGIN_HTML = """<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in - Room for Books</title>
+<style>
+  :root { --bg:#f6f5f1; --card:#fff; --ink:#1d2320; --muted:#5b655f; --line:#dcdad2; --accent:#2f6b4f; --accent-ink:#fff; --bad:#a3321f; --bad-bg:#f9e5e1; --focus:#1a5fb4; }
+  @media (prefers-color-scheme: dark) { :root { --bg:#151a17; --card:#1e2521; --ink:#e8ece9; --muted:#a2ada6; --line:#333c36; --accent:#5bb58a; --accent-ink:#0d1a13; --bad:#f08a78; --bad-bg:#3a2220; --focus:#7ab0ff; } }
+  * { box-sizing: border-box; }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,sans-serif; display:flex; min-height:100vh; align-items:center; justify-content:center; padding:16px; }
+  main { width:100%; max-width:380px; }
+  h1 { font-size:1.5rem; margin:0 0 4px; text-align:center; } .logo { text-align:center; font-size:2.4rem; }
+  p.sub { color:var(--muted); text-align:center; margin:0 0 18px; }
+  form { background:var(--card); border:1px solid var(--line); border-radius:14px; padding:18px; display:grid; gap:12px; }
+  label { display:grid; gap:4px; font-weight:600; font-size:.92rem; }
+  input { font:inherit; padding:12px 14px; border:2px solid var(--line); border-radius:10px; background:var(--card); color:var(--ink); width:100%; }
+  input:focus { border-color:var(--accent); outline:none; box-shadow:0 0 0 3px color-mix(in srgb, var(--accent) 30%, transparent); }
+  button { font:inherit; font-weight:700; padding:12px; border-radius:10px; border:0; background:var(--accent); color:var(--accent-ink); cursor:pointer; }
+  button:focus-visible { outline:3px solid var(--focus); outline-offset:2px; } button[disabled] { opacity:.6; }
+  .err { background:var(--bad-bg); color:var(--bad); border:1px solid var(--bad); border-radius:10px; padding:8px 12px; }
+  .err[hidden] { display:none; }
+  .hint { color:var(--muted); font-size:.88rem; text-align:center; margin-top:14px; }
+</style></head>
+<body><main>
+  <div class="logo" aria-hidden="true">&#128214;</div>
+  <h1>Room for Books</h1>
+  <p class="sub">Sign in</p>
+  <form id="f" method="post" action="#">
+    <div class="err" id="err" role="alert" hidden></div>
+    <label>Username or library card number<input name="username" autocomplete="username" autocapitalize="none" autocorrect="off" spellcheck="false" required autofocus></label>
+    <label>Password<input name="password" type="password" autocomplete="current-password" required></label>
+    <button type="submit" id="go">Sign in</button>
+  </form>
+  <p class="hint">Borrowers: your library card number and password. Staff: the admin login. Visitors: the guest login.</p>
+</main>
+<script>
+document.getElementById('f').addEventListener('submit', async ev => {
+  ev.preventDefault();
+  const f = ev.target, go = document.getElementById('go'), err = document.getElementById('err');
+  go.disabled = true; err.hidden = true;
+  try {
+    const r = await fetch('api/login', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ user: f.username.value.trim(), password: f.password.value }) });
+    const j = await r.json().catch(() => ({}));
+    if (r.ok && j.status === 'ok') { location.reload(); return; }
+    err.textContent = j.message || 'That sign-in is not right.'; err.hidden = false;
+  } catch (e) { err.textContent = 'Could not reach the library - try again.'; err.hidden = false; }
+  go.disabled = false; f.password.select();
+});
+</script></body></html>
+""".encode()
+
+
 # ----------------------------------------------------------------------- HTTP
 INDEX = open(os.path.join(os.path.dirname(os.path.abspath(__file__)), "index.html"), "rb").read()
 
@@ -2271,11 +2396,29 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _proxied(self):
+        return bool(SSO_SECRET) and hmac.compare_digest(self.headers.get("X-Quickadd-Proxy", "").encode(), SSO_SECRET.encode())
+
+    def _visitor(self):
+        """The visitor's address, used only to count failed sign-ins (never to vouch for anyone)."""
+        addr = self.client_address[0]
+        if self._proxied():
+            # Behind Caddy the list reads "<visitor>, <Caddy>" (Caddy adds the visitor, the staff site's web server
+            # adds Caddy), so the visitor is the one before the last.
+            hops = [h.strip() for h in self.headers.get("X-Forwarded-For", "").split(",") if h.strip()]
+            addr = (hops[-2] if len(hops) >= 2 else hops[-1]) if hops else addr
+        return addr
+
+    def _secure(self):
+        return self.headers.get("X-Forwarded-Proto", "").lower() == "https"
+
     def _role(self):
-        """'admin', 'viewer' (read-only guest) or None. Sets self.via to 'koha' for a staff-site login."""
+        """'admin', 'viewer' (guest), 'patron' or None. self.via is 'koha' (staff-site login) or 'session' (our cookie)
+        for logins a web page could trigger by itself, which is why those need the X-Quickadd header on changes."""
         self.via = None
         self.patron_id = None
-        self.addr = self.client_address[0]
+        self.who = ""
+        self.addr = self._visitor()
         if not PASSWORD:
             return None
         header = self.headers.get("Authorization", "")
@@ -2284,32 +2427,22 @@ class Handler(BaseHTTPRequestHandler):
                 u, _, p = base64.b64decode(header[6:]).decode().partition(":")
             except (ValueError, UnicodeDecodeError):
                 return None
-            ub, pb = u.encode(), p.encode()
-            # Both comparisons always run, so timing does not reveal which account exists.
-            is_admin = hmac.compare_digest(ub, USER.encode()) & hmac.compare_digest(pb, PASSWORD.encode())
-            is_viewer = bool(VIEWER_USER and VIEWER_PASSWORD) & hmac.compare_digest(ub, VIEWER_USER.encode()) \
-                & hmac.compare_digest(pb, VIEWER_PASSWORD.encode())
-            if is_admin:
-                return "admin"
-            if is_viewer:
-                return "viewer"
-            # Otherwise: a patron signing in with their card number (or userid) and password.
-            addr = self.client_address[0]
-            if SSO_SECRET and hmac.compare_digest(self.headers.get("X-Quickadd-Proxy", "").encode(), SSO_SECRET.encode()):
-                # Behind Caddy the list reads "<visitor>, <Caddy>" (Caddy adds the visitor, the staff site's web server
-                # adds Caddy), so the visitor is the one before the last. Used only to count failed sign-ins per
-                # visitor, never to vouch for anyone.
-                hops = [h.strip() for h in self.headers.get("X-Forwarded-For", "").split(",") if h.strip()]
-                addr = (hops[-2] if len(hops) >= 2 else hops[-1]) if hops else addr
-            self.addr = addr
-            pid = patron_login(u, p, addr)
-            if pid:
-                self.patron_id = pid
-                return "patron"
-            return None
-        # No Basic login: accept a staff-site login, but only for requests that came through the staff
-        # site's web server (it overwrites X-Quickadd-Proxy with the shared secret on every request).
-        if SSO_SECRET and hmac.compare_digest(self.headers.get("X-Quickadd-Proxy", "").encode(), SSO_SECRET.encode()):
+            got = check_credentials(u, p, self.addr)
+            if not got:
+                return None
+            self.patron_id, self.who = got[1], got[2]
+            return got[0]
+        # Our own sign-in cookie
+        for part in self.headers.get("Cookie", "").split(";"):
+            k, _, v = part.strip().partition("=")
+            if k == SESSION_COOKIE:
+                sess = read_session(v)
+                if sess:
+                    self.via, self.patron_id, self.who = "session", sess[2], sess[1]
+                    return sess[0]
+        # A staff-site (Koha) login, accepted only for requests that came through the staff site's web server
+        # (it overwrites X-Quickadd-Proxy with the shared secret on every request).
+        if self._proxied():
             sid = ""
             for part in self.headers.get("Cookie", "").split(";"):
                 k, _, v = part.strip().partition("=")
@@ -2317,21 +2450,22 @@ class Handler(BaseHTTPRequestHandler):
                     sid = v
             # the browser's address as the web server saw it: the LAST entry (the one it appended)
             ip = self.headers.get("X-Forwarded-For", "").split(",")[-1].strip()
-            if sid and ip and koha_session_user(sid, ip):
-                self.via = "koha"
-                return "admin"
+            if sid and ip:
+                user = koha_session_user(sid, ip)
+                if user:
+                    self.via, self.who = "koha", "Staff (%s)" % user if user != "staff" else "Staff"
+                    return "admin"
         return None
 
     def _guard(self, need_admin=True):
         role = self._role()
         if role is None:
-            self._send(401, b"Login required", "text/plain",
-                       {"WWW-Authenticate": 'Basic realm="Library"'})
+            self._send(401, {"status": "error", "message": "Please sign in."})
             return False
         if need_admin and role != "admin":
             self._send(403, {"status": "error", "message": "This login can search but not change anything."})
             return False
-        if self.via == "koha" and self.command == "POST" and self.headers.get("X-Quickadd") != "1":
+        if self.via in ("koha", "session") and self.command == "POST" and self.headers.get("X-Quickadd") != "1":
             self._send(403, {"status": "error", "message": "Missing request header."})
             return False
         self.role = role
@@ -2341,16 +2475,30 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/healthz":
             return self._send(200, b"ok", "text/plain")
         path = self.path.split("?")[0]
+        if path == "/" and self._role() is None:
+            return self._send(200, LOGIN_HTML, "text/html; charset=utf-8")
+        if path == "/kiosk" or path == "/add" or path.startswith("/add/"):
+            # Sign-in by HTTP Basic (what the kiosk's own page uses: the address carries the guest login), then on to the page
+            # with a cookie, so nothing after this needs Basic. Also where old /add/ links land.
+            role = self._role() if self.headers.get("Authorization", "").startswith("Basic ") else None
+            if role is None:
+                return self._send(401, b"Sign in", "text/plain", {"WWW-Authenticate": 'Basic realm="Room for Books"'})
+            tok = make_session(role, self.who, self.patron_id, 30)
+            # An absolute address WITHOUT the user name and password: a relative one would carry them along into the page's
+            # own address, and the browser then refuses every request the page makes.
+            host = re.sub(r"[^A-Za-z0-9.:\[\]-]", "", self.headers.get("Host", "")) or "localhost"
+            where = ("https://" if self._secure() else "http://") + host + "/"
+            return self._send(302, b"", "text/plain", {"Location": where, "Set-Cookie": session_cookie(tok, 30, self._secure())})
         if not self._guard(need_admin=path not in ("/", "/api/state", "/api/search", "/api/library", "/api/me", "/api/me/history") and not path.startswith(("/api/book/", "/api/more/", "/api/cover/"))):
             return
         if path == "/":
             return self._send(200, INDEX, "text/html; charset=utf-8")
         if path == "/api/state" and self.role in ("viewer", "patron"):
-            return self._send(200, {"role": self.role, "library_name": library_name(), "library": LIBRARY, "recent": [], "types": {}, "locations": [],
+            return self._send(200, {"role": self.role, "user": self.who, "via": self.via or "", "library_name": library_name(), "library": LIBRARY, "recent": [], "types": {}, "locations": [],
                                     "settings": {}, "staff_port": STAFF_PORT, "staff_url": STAFF_URL,
                                     "opac_url": OPAC_URL, "opac_port": OPAC_PORT, "sources": []})
         if path == "/api/state":
-            return self._send(200, {"role": "admin", "library_name": library_name(), "recent": load_recent()[:100], "types": get_item_types(),
+            return self._send(200, {"role": "admin", "user": self.who, "via": self.via or "", "library_name": library_name(), "recent": load_recent()[:100], "types": get_item_types(),
                                     "library": LIBRARY, "locations": get_locations(), "settings": load_settings(), "staff_port": STAFF_PORT, "staff_url": STAFF_URL, "opac_url": OPAC_URL, "opac_port": OPAC_PORT,
                                     "sources": [s.split(":", 1)[0] if s.startswith("z3950") else s for s in SOURCES]})
         if path == "/api/settings":
@@ -2467,6 +2615,20 @@ class Handler(BaseHTTPRequestHandler):
         self._send(404, {"error": "not found"})
 
     def do_POST(self):
+        if self.path == "/api/logout":
+            return self._send(200, {"status": "ok"}, extra={"Set-Cookie": session_cookie("", 0, self._secure())})
+        if self.path == "/api/login":
+            try:
+                length = int(self.headers.get("Content-Length", "0"))
+                payload = json.loads(self.rfile.read(min(length, 2000)) or b"{}")
+            except ValueError:
+                return self._send(400, {"status": "invalid"})
+            got = check_credentials(str(payload.get("user") or "").strip(), str(payload.get("password") or ""), self._visitor())
+            if not got:
+                return self._send(401, {"status": "error", "message": "That sign-in is not right (or there have been too many tries: wait a few minutes)."})
+            days = 14 if got[0] == "patron" else 30
+            tok = make_session(got[0], got[2], got[1], days)
+            return self._send(200, {"status": "ok", "role": got[0]}, extra={"Set-Cookie": session_cookie(tok, days, self._secure())})
         if self.path.startswith("/api/me/"):
             if not self._guard(need_admin=False):
                 return

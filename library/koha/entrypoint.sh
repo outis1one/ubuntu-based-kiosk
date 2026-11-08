@@ -70,7 +70,7 @@ if [ ! -d "/etc/koha/sites/$INST" ]; then
             install -m 0640 -o root -g "$INST-koha" /dev/null /etc/koha/quickadd-sso.secret
             printf '%s' "$KOHA_SSO_SECRET" > /etc/koha/quickadd-sso.secret
             SSO_BLOCK="    <IfModule mod_headers.c>
-        <LocationMatch \"^/(api/(?!v[0-9]+/)|\$)\">
+        <LocationMatch \"^/(api/(?!v[0-9]+/)|kiosk\$|add|\$)\">
             RequestHeader set X-Quickadd-Proxy \"$KOHA_SSO_SECRET\"
         </LocationMatch>
     </IfModule>"
@@ -81,7 +81,8 @@ if [ ! -d "/etc/koha/sites/$INST" ]; then
         # so that /api/<name> is claimed here first. /add and /add/ (old bookmarks, the kiosk tab) redirect to /.
         cat > /etc/koha/apache-quickadd.conf << APACHE
 <IfModule mod_proxy_http.c>
-    RedirectMatch ^/add(/.*)?\$ /
+    # /kiosk is the kiosk's sign-in; /add and /add/ (old bookmarks, and the kiosk tab saved by an earlier version) are the same thing
+    ProxyPassMatch "^(/(?:kiosk|add(?:/.*)?))\$" "${KOHA_QUICKADD_URL%/}\$1"
     ProxyPassMatch "^/\$" "${KOHA_QUICKADD_URL%/}/"
     ProxyPassMatch "^(/api/(?!v[0-9]+/).*)\$" "${KOHA_QUICKADD_URL%/}\$1"
 ${SSO_BLOCK}
