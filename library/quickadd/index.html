@@ -985,7 +985,9 @@
     const looksLikeAR = t => /Book\s*Level|AR\s*Points|Interest\s*Level/i.test(t);
     const norm = x => x.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
     const applyText = (t, from) => {
-      const f = parseAR(t);
+      // A results page can list several books: read from this book's title onward when it appears in the text.
+      const at = t.toLowerCase().indexOf(b.title.toLowerCase().split(':')[0].trim());
+      const f = parseAR(at >= 0 ? t.slice(at, at + 1800) : t);
       if (!(f.level || f.points || f.quiz || f.interest)) { msg.textContent = t.trim() ? " Couldn't find a level or points in that text." : ''; return false; }
       if (f.level) lvl.value = f.level; if (f.points) pts.value = f.points; if (f.quiz) quiz.value = f.quiz; if (f.interest) inter.value = f.interest;
       const words = norm(b.title).split(' ').filter(w => w.length > 3).slice(0, 3);
@@ -1011,9 +1013,18 @@
       } catch (e) {}
     };
     window.addEventListener('focus', onFocus);
+    // Ctrl/Cmd+V anywhere on the page (not in a text box) fills the fields: no button, no permission prompt, works on plain HTTP too.
+    const onPaste = ev => {
+      if (!document.contains(wrap)) { document.removeEventListener('paste', onPaste); return; }
+      const tg = ev.target;
+      if (tg && /^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName)) return;
+      const t = (ev.clipboardData && ev.clipboardData.getData('text')) || '';
+      if (t && looksLikeAR(t)) { ev.preventDefault(); applyText(t, 'what you pasted'); wrap.scrollIntoView({ block: 'nearest' }); }
+    };
+    document.addEventListener('paste', onPaste);
     wrap.append(edit, el('div', { style: 'margin-top:8px' }, save, msg),
       el('div', { style: 'margin-top:8px' }, el('a', { href: 'https://www.arbookfind.com/', target: '_blank', rel: 'noopener noreferrer' }, 'Open AR BookFind'), ' ', arPop, ' ', arFrame, ' ', copy),
-      el('div', { style: 'margin-top:8px' }, fromClip, el('span', { className: 'small' }, ' after copying on AR BookFind (Ctrl/Cmd+A, then Ctrl/Cmd+C)')), paste, arHolder);
+      el('div', { style: 'margin-top:8px' }, fromClip, el('span', { className: 'small' }, ' or just press Ctrl/Cmd+V on this page after copying on AR BookFind (Ctrl/Cmd+A, then Ctrl/Cmd+C)')), paste, arHolder);
     return wrap;
   }
 

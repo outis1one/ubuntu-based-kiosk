@@ -356,3 +356,7 @@ Books for this ISBN plus other Open Library editions), **Upload a picture**, or 
 **Fewer steps for AR:** copy the book's page on AR BookFind (Ctrl/Cmd+A, Ctrl/Cmd+C), come back to the book page and press **Fill from
 clipboard** (or just return to the window: where the browser already allows clipboard reading it fills in by itself). Only the four AR fields
 are kept; everything else you copied is discarded, and a warning appears if the text does not mention the book's title.
+
+**The quickest AR route:** *Open AR BookFind beside this page* (the title is copied for you) -> in AR BookFind press Ctrl/Cmd+V and Enter, open the book,
+Ctrl/Cmd+A then Ctrl/Cmd+C -> back here press **Ctrl/Cmd+V** anywhere on the book page (no need to click a field). The four AR fields fill in; if the copied text
+lists several books, the one matching this title is used.
