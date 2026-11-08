@@ -975,17 +975,30 @@
       try { await navigator.clipboard.writeText(text); copiedNote.textContent = ' Copied ' + what + ': ' + text; }
       catch (e) { copiedNote.textContent = ' Could not copy (' + what + ': ' + text + ') - select and copy it yourself.'; }
     };
-    const copyTitle = () => copyText(b.title, 'the title');
-    const copyDefault = () => isbn13 ? copyText(isbn13, 'the ISBN') : copyTitle();
-    const arPop = el('button', { type: 'button' }, 'Open AR BookFind beside this page');
+    // What the pop-up button copies: whichever you last chose (ISBN-13 by default; the title when the book has no ISBN). Remembered on this device.
+    const terms = {};
+    if (isbn13) terms.isbn13 = [isbn13, 'the ISBN-13'];
+    if (isbn10) terms.isbn10 = [isbn10, 'the ISBN-10'];
+    terms.title = [b.title, 'the title'];
+    let want = 'title';
+    try { want = localStorage.getItem('rfb-ar-term') || ''; } catch (e) {}
+    if (!terms[want]) want = terms.isbn13 ? 'isbn13' : 'title';
+    const termBtns = {};
+    const mark = () => { for (const [k, btn] of Object.entries(termBtns)) { btn.className = k === want ? 'primary' : ''; btn.setAttribute('aria-pressed', String(k === want)); }
+      if (typeof arPop !== 'undefined') arPop.textContent = 'Open AR BookFind beside this page (copies ' + terms[want][1] + ')'; };
+    const choose = async k => { want = k; try { localStorage.setItem('rfb-ar-term', k); } catch (e) {} mark(); await copyText(terms[k][0], terms[k][1]); };
+    const copyDefault = () => copyText(terms[want][0], terms[want][1]);
+    var arPop = el('button', { type: 'button' }, 'Open AR BookFind beside this page');
     arPop.onclick = async () => { await copyDefault();
       const w = Math.min(560, Math.floor(screen.availWidth / 2)), h = screen.availHeight - 80;
       arWin = window.open('https://www.arbookfind.com/', 'arbookfind', 'popup=yes,width=' + w + ',height=' + h + ',left=' + (screen.availWidth - w) + ',top=40');
       if (!arWin) msg.textContent = ' The browser blocked the pop-up: allow pop-ups for this site, or use the link to open AR BookFind in a tab.'; };
     const copyBtns = [];
-    if (isbn13) { const x = el('button', { type: 'button' }, 'Copy ISBN-13'); x.onclick = () => copyText(isbn13, 'the ISBN-13'); copyBtns.push(x); }
-    if (isbn10) { const x = el('button', { type: 'button' }, 'Copy ISBN-10'); x.onclick = () => copyText(isbn10, 'the ISBN-10'); copyBtns.push(x); }
-    const copy = el('button', { type: 'button' }, 'Copy title'); copy.onclick = copyTitle;
+    const addTerm = (k, label) => { const x = el('button', { type: 'button' }, label); x.onclick = () => choose(k); termBtns[k] = x; copyBtns.push(x); };
+    if (isbn13) addTerm('isbn13', 'Copy ISBN-13');
+    if (isbn10) addTerm('isbn10', 'Copy ISBN-10');
+    const copy = el('button', { type: 'button' }, 'Copy title'); copy.onclick = () => choose('title'); termBtns.title = copy;
+    mark();
     const paste = el('textarea', { rows: 3, placeholder: 'Paste the AR BookFind book page here (open the book there, select all, copy, paste): the fields above fill in by themselves',
       'aria-label': 'Pasted AR BookFind text', style: css + ';width:100%;margin-top:6px' });
     // Only the four fields are taken from what was copied; the rest of the text is thrown away, never stored.
@@ -1041,7 +1054,7 @@
     document.addEventListener('paste', onPaste);
     wrap.append(edit, el('div', { style: 'margin-top:8px' }, save, msg),
       el('div', { style: 'margin-top:8px' }, el('a', { href: 'https://www.arbookfind.com/', target: '_blank', rel: 'noopener noreferrer' }, 'Open AR BookFind'), ' ', arPop, ' ', ...copyBtns.flatMap(x => [x, ' ']), copy, copiedNote,
-        el('div', { className: 'small' }, isbn13 ? 'Opening AR BookFind from here copies the ISBN (the exact edition). If AR BookFind finds nothing with it, press Copy title and search for that instead.' : 'This book has no ISBN, so the title is copied.')),
+        el('div', { className: 'small' }, isbn13 ? 'The highlighted button is what opening AR BookFind from here copies (your last choice is remembered). If AR BookFind finds nothing with the ISBN, press Copy title.' : 'This book has no ISBN, so the title is copied.')),
       el('div', { style: 'margin-top:8px' }, fromClip, el('span', { className: 'small' }, ' or just press Ctrl/Cmd+V on this page after copying on AR BookFind (Ctrl/Cmd+A, then Ctrl/Cmd+C)')), paste);
     return wrap;
   }
