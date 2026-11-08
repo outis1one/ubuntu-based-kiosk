@@ -920,18 +920,52 @@
     return sel;
   }
 
-  // Reading level (AR): typed in here or imported from a CSV. AR BookFind itself is only a link: it has no
-  // public feed and its terms forbid automated look-ups.
+  // Reading level (AR BookFind): ATOS book level, interest level, AR points, quiz number. AR BookFind has no public feed and
+  // its terms forbid automated look-ups, so you copy the book's page there and paste it here; the fields fill themselves.
+  const INTEREST = { LG: 'Lower Grades (LG K-3)', MG: 'Middle Grades (MG 4-8)', 'MG+': 'Middle Grades Plus (MG+ 6 and up)', UG: 'Upper Grades (UG 9-12)' };
+  function arSummary(ar) {
+    const bits = [];
+    if (ar.level) bits.push('ATOS book level ' + ar.level);
+    if (ar.interest) bits.push(INTEREST[ar.interest] || ar.interest);
+    if (ar.points) bits.push(ar.points + ' AR points');
+    if (ar.quiz) bits.push('quiz ' + ar.quiz);
+    return bits.join(' · ');
+  }
+  function parseAR(t) {
+    const g = re => (t.match(re) || [])[1] || '';
+    let interest = '';
+    const il = (t.match(/Interest\s*Level:?\s*([^\n\r]{0,60})/i) || [])[1] || '';
+    if (/MG\s*\+|Middle Grades Plus/i.test(il)) interest = 'MG+';
+    else if (/\bLG\b|Lower Grades/i.test(il)) interest = 'LG';
+    else if (/\bMG\b|Middle Grades/i.test(il)) interest = 'MG';
+    else if (/\bUG\b|Upper Grades/i.test(il)) interest = 'UG';
+    return { level: g(/(?:ATOS\s*)?Book\s*Level:?\s*([0-9]{1,2}(?:\.[0-9]{1,2})?)/i), points: g(/(?:AR\s*)?Points:?\s*([0-9]{1,3}(?:\.[0-9]{1,2})?)/i),
+             quiz: g(/Quiz\s*(?:No\.?|Number|#)\s*:?\s*([0-9]{3,6})/i), interest };
+  }
   function arBox(b, m) {
     const ar = m.ar || {};
-    const f = (ph, v, w) => el('input', { type: 'text', placeholder: ph, value: v || '', 'aria-label': ph, inputMode: 'decimal', style: 'width:' + w + 'em;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)' });
-    const lvl = f('Level', ar.level, 5), pts = f('Points', ar.points, 5), quiz = f('Quiz no.', ar.quiz, 7), inter = f('Interest (LG/MG/UG)', ar.interest, 9);
     const wrap = el('div', { className: 'small', style: 'margin-top:10px;border-top:1px solid var(--line);padding-top:8px' });
-    const copy = el('button', { type: 'button' }, 'Copy title');
-    copy.onclick = async () => { try { await navigator.clipboard.writeText(b.title); copy.textContent = 'Copied ✓'; } catch (e) { copy.textContent = 'Copy failed'; } setTimeout(() => copy.textContent = 'Copy title', 1500); };
-    const open = el('a', { href: 'https://www.arbookfind.com/', target: '_blank', rel: 'noopener noreferrer' }, 'Open AR BookFind');
+    const sumEl = el('span', {}, arSummary(ar) || 'not recorded');
+    wrap.append(el('strong', {}, 'Accelerated Reader: '), sumEl);
+    if (viewer) return wrap;
+    const field = (label, input) => el('label', { className: 'small', style: 'display:flex;flex-direction:column;gap:2px;min-width:7em' }, label, input);
+    const css = 'font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)';
+    const lvl = el('input', { type: 'text', value: ar.level || '', inputMode: 'decimal', placeholder: 'e.g. 5.4', style: css + ';width:6em', 'aria-label': 'ATOS book level' });
+    const pts = el('input', { type: 'text', value: ar.points || '', inputMode: 'decimal', placeholder: 'e.g. 6.0', style: css + ';width:6em', 'aria-label': 'AR points' });
+    const quiz = el('input', { type: 'text', value: ar.quiz || '', inputMode: 'numeric', placeholder: 'optional', style: css + ';width:7em', 'aria-label': 'Quiz number' });
+    const inter = el('select', { style: css, 'aria-label': 'Interest level' }, el('option', { value: '' }, '(not set)'), ...Object.entries(INTEREST).map(([k, v]) => el('option', { value: k }, v)));
+    inter.value = ar.interest || '';
+    const edit = el('div', { style: 'display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;align-items:flex-end' },
+      field('ATOS book level', lvl), field('Interest level', inter), field('AR points', pts), field('Quiz number', quiz));
+    const save = el('button', { type: 'button', className: 'primary' }, 'Save');
+    const msg = el('span', {});
+    save.onclick = async () => {
+      const r = await api('/api/ar/set', { isbn: m.isbn, level: lvl.value, points: pts.value, quiz: quiz.value, interest: inter.value });
+      msg.textContent = r.status === 'saved' ? ' Saved ✓' : ' ' + (r.message || 'Could not save.');
+      if (r.status === 'saved') sumEl.textContent = arSummary({ level: lvl.value, points: pts.value, quiz: quiz.value, interest: inter.value }) || 'not recorded';
+    };
     const copyTitle = async () => { try { await navigator.clipboard.writeText(b.title); } catch (e) {} };
-    const arPop = el('button', { type: 'button' }, 'Open beside this page');
+    const arPop = el('button', { type: 'button' }, 'Open AR BookFind beside this page');
     arPop.onclick = async () => { await copyTitle();
       const w = Math.min(560, Math.floor(screen.availWidth / 2)), h = screen.availHeight - 80;
       window.open('https://www.arbookfind.com/', 'arbookfind', 'popup=yes,width=' + w + ',height=' + h + ',left=' + (screen.availWidth - w) + ',top=40'); };
@@ -942,27 +976,18 @@
       arFrame.textContent = 'Hide it';
       arHolder.replaceChildren(el('iframe', { src: 'https://www.arbookfind.com/', title: 'AR BookFind', loading: 'lazy', referrerPolicy: 'no-referrer',
         style: 'width:100%;height:520px;border:1px solid var(--line);border-radius:8px;margin-top:8px;background:#fff' }),
-        el('div', { className: 'small' }, 'If it keeps asking who you are, your browser is blocking its cookies inside another page: use "Open beside this page" instead.')); };
-    if (viewer) { wrap.append(el('strong', {}, 'Reading level: '), ar.level ? 'AR ' + ar.level + (ar.points ? ', ' + ar.points + ' points' : '') + (ar.interest ? ', interest ' + ar.interest : '') : 'not recorded'); return wrap; }
-    const save = el('button', { type: 'button', className: 'primary' }, 'Save');
-    const msg = el('span', {});
-    save.onclick = async () => {
-      const r = await api('/api/ar/set', { isbn: m.isbn, level: lvl.value, points: pts.value, quiz: quiz.value, interest: inter.value });
-      msg.textContent = r.status === 'saved' ? ' Saved ✓' : ' ' + (r.message || 'Could not save.');
-    };
-    // Easiest path: on AR BookFind's book page select everything (Ctrl/Cmd+A), copy, and paste it here.
-    const paste = el('textarea', { rows: 2, placeholder: 'Paste the AR BookFind book page here (select all, copy, paste)', 'aria-label': 'Pasted AR BookFind text',
-      style: 'width:100%;margin-top:6px;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)' });
+        el('div', { className: 'small' }, 'If it keeps asking who you are, your browser is blocking its cookies inside another page: use the pop-up instead.')); };
+    const copy = el('button', { type: 'button' }, 'Copy title');
+    copy.onclick = async () => { await copyTitle(); copy.textContent = 'Copied ✓'; setTimeout(() => copy.textContent = 'Copy title', 1500); };
+    const paste = el('textarea', { rows: 3, placeholder: 'Paste the AR BookFind book page here (open the book there, select all, copy, paste): the fields above fill in by themselves',
+      'aria-label': 'Pasted AR BookFind text', style: css + ';width:100%;margin-top:6px' });
     paste.oninput = () => {
-      const t = paste.value, g = re => (t.match(re) || [])[1] || '';
-      const found = { level: g(/Book\s*Level:?\s*([0-9]{1,2}(?:\.[0-9]{1,2})?)/i), points: g(/(?:AR\s*)?Points:?\s*([0-9]{1,3}(?:\.[0-9]{1,2})?)/i),
-                      quiz: g(/Quiz\s*(?:No\.?|Number|#)\s*:?\s*([0-9]{3,6})/i), interest: g(/Interest\s*Level:?\s*(LG|MG\+?|UG)/i) };
-      if (found.level) lvl.value = found.level; if (found.points) pts.value = found.points; if (found.quiz) quiz.value = found.quiz; if (found.interest) inter.value = found.interest;
-      msg.textContent = (found.level || found.points || found.quiz) ? ' Filled in from what you pasted - check it, then Save.' : (t.trim() ? " Couldn't find a level or points in that text." : '');
+      const f = parseAR(paste.value);
+      if (f.level) lvl.value = f.level; if (f.points) pts.value = f.points; if (f.quiz) quiz.value = f.quiz; if (f.interest) inter.value = f.interest;
+      msg.textContent = (f.level || f.points || f.quiz || f.interest) ? ' Filled in from what you pasted - check it, then Save.' : (paste.value.trim() ? " Couldn't find a level or points in that text." : '');
     };
-    wrap.append(el('strong', {}, 'Reading level (AR): '), lvl, ' ', pts, ' ', quiz, ' ', inter, ' ', save, msg, paste,
-      el('div', { style: 'margin-top:6px' }, open, ' ', arPop, ' ', arFrame, ' ', copy),
-      el('div', { className: 'small' }, 'Search for the title there, select the whole book page, copy, and paste it below. (The title is copied for you when you open it.)'), arHolder);
+    wrap.append(edit, el('div', { style: 'margin-top:8px' }, save, msg),
+      el('div', { style: 'margin-top:8px' }, el('a', { href: 'https://www.arbookfind.com/', target: '_blank', rel: 'noopener noreferrer' }, 'Open AR BookFind'), ' ', arPop, ' ', arFrame, ' ', copy), paste, arHolder);
     return wrap;
   }
 
@@ -990,22 +1015,27 @@
     rm.onclick = async () => { if (!confirm('Remove this cover?')) return; await api('/api/cover/delete', { key }); done('Cover removed. It will not be fetched again unless you search again.'); };
     const again = el('button', { type: 'button' }, 'Try the ISBN again');
     again.hidden = key.startsWith('b');
-    again.onclick = async () => { msg.textContent = 'Looking…'; const r = await api('/api/cover/refetch', { key }); done(r.status === 'found' ? 'Found a cover.' : 'No cover found for that ISBN.'); };
+    again.onclick = async () => { msg.textContent = 'Looking…'; const r = await api('/api/cover/refetch', { key }); done(r.status === 'found' ? 'Found a cover (' + r.source + ').' : 'No cover found for that ISBN (tried ' + (r.tried || 'the usual sources') + '). Try Find another cover, upload a picture, or use an image address.'); };
     const grid = el('div', { style: 'display:flex;flex-wrap:wrap;gap:10px;margin-top:10px' });
     const other = el('button', { type: 'button' }, 'Find another cover');
     other.onclick = async () => {
       msg.textContent = 'Searching Open Library…'; grid.replaceChildren();
       const r = await api('/api/cover-candidates?biblio=' + b.id);
       msg.textContent = (r.covers || []).length ? 'Choose one:' : (r.message || 'No other covers found. Upload a picture instead.');
-      grid.replaceChildren(...(r.covers || []).map(c => { const bt = el('button', { type: 'button', title: [c.title, c.author, c.year].filter(Boolean).join(' · '), style: 'padding:3px;background:var(--card)' },
+      grid.replaceChildren(...(r.covers || []).map(c => { const bt = el('button', { type: 'button', title: [c.title, c.author, c.year, c.source].filter(Boolean).join(' · '), style: 'padding:3px;background:var(--card)' },
         el('img', { src: 'api/cover-preview/' + c.id, alt: c.title, loading: 'lazy', style: 'width:84px;height:124px;object-fit:cover;display:block' }));
-        bt.onclick = async () => { msg.textContent = 'Saving…'; const x = await api('/api/cover/pick', { key, cover_i: c.id }); grid.replaceChildren(); done(x.status === 'saved' ? 'Cover saved.' : (x.message || 'Could not use that one.')); };
+        bt.onclick = async () => { msg.textContent = 'Saving…'; const x = await api('/api/cover/pick', { key, cover: c.id }); grid.replaceChildren(); done(x.status === 'saved' ? 'Cover saved.' : (x.message || 'Could not use that one.')); };
         return bt; }));
     };
+    const urlIn = el('input', { type: 'url', placeholder: 'https://… address of a cover picture', 'aria-label': 'Address of a cover picture', style: 'flex:1;min-width:12em;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)' });
+    const useUrl = el('button', { type: 'button' }, 'Use this address');
+    useUrl.onclick = async () => { if (!urlIn.value.trim()) return; msg.textContent = 'Fetching…'; const r = await api('/api/cover/from-url', { key, url: urlIn.value.trim() });
+      if (r.status === 'saved') { urlIn.value = ''; done('Cover saved.'); } else msg.textContent = r.message || 'Could not use that address.'; };
     showCurrent();
     panel.replaceChildren(el('strong', {}, 'Cover'), el('div', { style: 'display:flex;gap:14px;flex-wrap:wrap;margin-top:8px' }, preview,
       el('div', { style: 'flex:1;min-width:200px' }, el('div', { className: 'actions', style: 'margin-top:0' }, up, other, again, rm, file),
-        el('div', { className: 'small', style: 'margin-top:6px' }, 'A phone offers its camera or photos for the upload.'), msg, grid)));
+        el('div', { className: 'small', style: 'margin-top:6px' }, 'A phone offers its camera or photos for the upload. On AR BookFind (or any site) you can right-click a cover, choose Copy image address, and paste it below.'),
+        el('div', { style: 'display:flex;gap:8px;margin-top:6px;flex-wrap:wrap' }, urlIn, useUrl), msg, grid)));
   }
 
   function editForm(b, refresh) {

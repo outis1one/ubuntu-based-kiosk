@@ -340,3 +340,15 @@ On a book's page, **Change cover**: **Upload a picture** (from a phone it offers
 cover** (it is not fetched again unless you ask), **Try the ISBN again** (asks Open Library afresh), or **Find another cover** (a
 grid of covers from other editions of the same title: click one to use it). A book without an ISBN can still have an uploaded
 cover. Covers live in the data volume (`covers/`), so they are backed up with it.
+
+### AR fields, and finding covers
+
+The book page has **ATOS book level**, **Interest level** (Lower Grades / Middle Grades / Middle Grades Plus / Upper Grades), **AR points**
+and **Quiz number** fields, shown to everyone as a one-line summary ("ATOS book level 5.4 - Middle Grades (MG 4-8) - 6.0 AR points").
+Copy a book's page on AR BookFind, paste it in the box, and the fields fill in by themselves (the format `ATOS Book Level: 5.4 /
+Interest Level: Middle Grades (MG 4-8) / AR Points: 6.0` is understood). *Export / import* uses the same columns (`atos book level`,
+`interest level`, `ar points`, `quiz number`).
+
+Covers are looked for in Open Library (ISBN-13 and ISBN-10) and then Google Books. If none is found: **Find another cover** (Google
+Books for this ISBN plus other Open Library editions), **Upload a picture**, or **Use this address** (right-click the cover anywhere,
+*Copy image address*, paste; https addresses of public sites only).
