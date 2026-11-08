@@ -360,3 +360,11 @@ are kept; everything else you copied is discarded, and a warning appears if the 
 **The quickest AR route:** *Open AR BookFind beside this page* (the title is copied for you) -> in AR BookFind press Ctrl/Cmd+V and Enter, open the book,
 Ctrl/Cmd+A then Ctrl/Cmd+C -> back here press **Ctrl/Cmd+V** anywhere on the book page (no need to click a field). The four AR fields fill in; if the copied text
 lists several books, the one matching this title is used.
+
+### Signing in (a proper page, no pop-up)
+
+Opening the address shows a **sign-in page** (not the browser's grey pop-up): borrowers use their library card number and password, staff the admin
+login, visitors the guest login. A staff member already signed in to Koha is let straight in. You stay signed in for 30 days (14 for borrowers) on
+that browser; **Sign out** is at the bottom of the menu. The cookie is signed, HttpOnly and, over HTTPS, Secure; changing the admin or guest password
+signs everyone out. Scripts can still use HTTP Basic. The kiosk's tab signs in through `/kiosk` (the tab saved by an earlier version, `/add/#find`,
+lands there too), which sets the cookie and redirects to the clean address, so the kiosk's guest password never stays in the page's address.

@@ -192,6 +192,7 @@
         <a id="lnk-staff" class="ext" href="#" target="_blank" rel="noopener">Koha (full staff screens)</a>
       </div>
       <a id="lnk-opac" class="ext" href="#" target="_blank" rel="noopener">Public catalogue</a>
+      <div class="menugroup" id="menu-who"><div class="menulabel" id="whoami"></div><a id="signout" href="#">Sign out</a></div>
     </nav>
   </header>
 
@@ -452,6 +453,7 @@
     // that carry it, which a page on another website cannot add (cross-site request forgery).
     const r = await fetch(path.replace(/^\//, ''), body ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Quickadd': '1' },
                                          body: JSON.stringify(body) } : { headers: { 'X-Quickadd': '1' } });
+    if (r.status === 401) { location.reload(); return new Promise(() => {}); }      // the sign-in ran out: back to the sign-in page
     return r.json();
   }
 
@@ -1623,6 +1625,13 @@
     if (s.opac_url) $('lnk-opac').href = s.opac_url + '/';
     $('lnk-staff').href = staffRoot() + '/cgi-bin/koha/mainpage.pl';
     $('lnk-staff').hidden = viewer; $('footkoha').href = staffRoot() + '/cgi-bin/koha/mainpage.pl';
+    $('whoami').textContent = s.user ? 'Signed in as ' + s.user : 'Signed in';
+    $('signout').onclick = async ev => {
+      ev.preventDefault();
+      try { await fetch('api/logout', { method: 'POST', headers: { 'X-Quickadd': '1' } }); } catch (e) {}
+      // a staff member signed in through Koha is signed out of Koha too
+      location.href = s.via === 'koha' ? staffRoot() + '/cgi-bin/koha/mainpage.pl?logout.x=1' : location.pathname;
+    };
     $('footname').textContent = 'Room for Books' + (s.library_name ? ' · ' + s.library_name : '');
     $('lnk-labels').href = staffRoot() + '/cgi-bin/koha/labels/label-edit-range.pl';
     if (s.locations && s.locations.length) {
