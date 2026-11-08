@@ -960,7 +960,7 @@
     const save = el('button', { type: 'button', className: 'primary' }, 'Save');
     const msg = el('span', {});
     save.onclick = async () => {
-      const r = await api('/api/ar/set', { isbn: m.isbn, level: lvl.value, points: pts.value, quiz: quiz.value, interest: inter.value });
+      const r = await api('/api/ar/set', { biblio_id: b.id, isbn: m.isbn, level: lvl.value, points: pts.value, quiz: quiz.value, interest: inter.value });
       msg.textContent = r.status === 'saved' ? ' Saved ✓' : ' ' + (r.message || 'Could not save.');
       if (r.status === 'saved') sumEl.textContent = arSummary({ level: lvl.value, points: pts.value, quiz: quiz.value, interest: inter.value }) || 'not recorded';
     };
@@ -988,18 +988,27 @@
       // A results page can list several books: read from this book's title onward when it appears in the text.
       const at = t.toLowerCase().indexOf(b.title.toLowerCase().split(':')[0].trim());
       const f = parseAR(at >= 0 ? t.slice(at, at + 1800) : t);
-      if (!(f.level || f.points || f.quiz || f.interest)) { msg.textContent = t.trim() ? " Couldn't find a level or points in that text." : ''; return false; }
+      const found = [f.level && 'ATOS book level ' + f.level, f.interest && 'interest level ' + f.interest, f.points && f.points + ' AR points', f.quiz && 'quiz ' + f.quiz].filter(Boolean);
+      const size = t.length.toLocaleString() + ' characters from ' + from;
+      if (!found.length) {
+        msg.textContent = ' Got ' + size + ' but found no ATOS level, interest level or AR points in it. It began: "' + t.trim().replace(/\s+/g, ' ').slice(0, 90) + '". Open the book itself on AR BookFind, then select all (Ctrl/Cmd+A) and copy (Ctrl/Cmd+C).';
+        return false;
+      }
       if (f.level) lvl.value = f.level; if (f.points) pts.value = f.points; if (f.quiz) quiz.value = f.quiz; if (f.interest) inter.value = f.interest;
       const words = norm(b.title).split(' ').filter(w => w.length > 3).slice(0, 3);
       const same = !words.length || words.every(w => norm(t).includes(w));
-      msg.textContent = ' Filled in from ' + from + ' - check it' + (same ? '' : ' (that text does not mention "' + b.title + '": is it the right book?)') + ', then Save.';
+      msg.textContent = ' Got ' + size + ': found ' + found.join(', ') + (same ? '' : ' (that text does not mention "' + b.title + '": is it the right book?)') + '. Check it, then press Save.';
       return true;
     };
     paste.oninput = () => applyText(paste.value, 'what you pasted');
     const fromClip = el('button', { type: 'button' }, 'Fill from clipboard');
     fromClip.onclick = async () => {
+      if (!navigator.clipboard || !navigator.clipboard.readText) {
+        msg.textContent = " This browser only lets a page read the clipboard over https (or on this machine). Press Ctrl/Cmd+V on this page instead, or paste into the box below.";
+        return;
+      }
       try { applyText(await navigator.clipboard.readText(), 'the clipboard'); }
-      catch (e) { msg.textContent = " Couldn't read the clipboard here - paste into the box below instead."; }
+      catch (e) { msg.textContent = " The browser did not allow reading the clipboard (" + (e && e.name || 'blocked') + "). Press Ctrl/Cmd+V on this page instead, or paste into the box below."; }
     };
     // After you copy on AR BookFind and come back to this window, fill in automatically (when the browser already allows reading the clipboard).
     let lastClip = '';
@@ -1019,7 +1028,7 @@
       const tg = ev.target;
       if (tg && /^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName)) return;
       const t = (ev.clipboardData && ev.clipboardData.getData('text')) || '';
-      if (t && looksLikeAR(t)) { ev.preventDefault(); applyText(t, 'what you pasted'); wrap.scrollIntoView({ block: 'nearest' }); }
+      if (t) { ev.preventDefault(); applyText(t, 'what you pasted'); wrap.scrollIntoView({ block: 'nearest' }); }
     };
     document.addEventListener('paste', onPaste);
     wrap.append(edit, el('div', { style: 'margin-top:8px' }, save, msg),

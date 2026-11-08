@@ -79,7 +79,11 @@ if [ ! -d "/etc/koha/sites/$INST" ]; then
         # calls at /api/<name>. Koha keeps everything else - /cgi-bin/koha/... and its REST API at /api/v1/...
         # (the pattern below leaves /api/v<number>/ alone). This file is included BEFORE Koha's own proxy rules
         # so that /api/<name> is claimed here first. /add and /add/ (old bookmarks, the kiosk tab) redirect to /.
+        # Koha's Plack server (Starman) does not cope with Apache re-using a kept-alive connection: every second request stalled for
+        # about a second. Closing the connection after each request removes that delay (a fresh connection to a local socket is cheap).
         cat > /etc/koha/apache-quickadd.conf << APACHE
+SetEnv proxy-nokeepalive 1
+SetEnv proxy-initial-not-pooled 1
 <IfModule mod_proxy_http.c>
     # /kiosk is the kiosk's sign-in; /add and /add/ (old bookmarks, and the kiosk tab saved by an earlier version) are the same thing
     ProxyPassMatch "^(/(?:kiosk|add(?:/.*)?))\$" "${KOHA_QUICKADD_URL%/}\$1"
