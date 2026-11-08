@@ -89,7 +89,7 @@ show_status() {
     echo "  Your library:        http://$ip:$STAFF_PORT"
     echo "      sign in here: find a book, add books (scan an ISBN or use the phone camera), lending, labels, people"
     echo "  Admin login:         $ADMIN_USER  /  $ADMIN_PASSWORD   (also stored in $HERE/.env)"
-    echo "  Read-only login:     ${VIEWER_USER:-guest}  /  ${VIEWER_PASSWORD:-?}   (to hand out, with this address: http://$ip:$STAFF_PORT/add/)"
+    echo "  Read-only login:     ${VIEWER_USER:-guest}  /  ${VIEWER_PASSWORD:-?}   (to hand out, with this address: http://$ip:$STAFF_PORT/)"
     echo "      It opens the Find a book page: search only, it cannot add or change anything."
     if [ "${OPAC_BIND:-127.0.0.1}" != "127.0.0.1" ]; then
         echo "  Public catalogue:    http://$ip:$OPAC_PORT   (search only, asks for a library card login)"

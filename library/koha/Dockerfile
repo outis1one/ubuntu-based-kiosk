@@ -52,5 +52,5 @@ RUN chmod 0755 /opt/koha-init/entrypoint.sh && chmod -R a+rX /opt/koha-init
 EXPOSE 80 8081
 VOLUME ["/var/lib/koha"]
 HEALTHCHECK --interval=10s --timeout=10s --start-period=300s --retries=6 \
-  CMD test -f /run/koha-ready && curl -fsS -o /dev/null http://127.0.0.1:80/ && curl -fsS -o /dev/null http://127.0.0.1:8081/ || exit 1
+  CMD test -f /run/koha-ready && curl -fsS -o /dev/null http://127.0.0.1:80/ && curl -fsS -o /dev/null http://127.0.0.1:8081/cgi-bin/koha/mainpage.pl || exit 1
 ENTRYPOINT ["/opt/koha-init/entrypoint.sh"]

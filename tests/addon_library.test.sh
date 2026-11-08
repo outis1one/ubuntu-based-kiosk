@@ -183,7 +183,7 @@ printf '\n' | action_library_show_access > "$T/access.out" 2>&1
 check "shows the admin login"                  grep -q 'admin  /  s3cretPASS' "$T/access.out"
 check "shows the read-only login to share"     grep -q 'guest  /  guestPASS' "$T/access.out"
 check "shows the one library address"          grep -q 'sign in here.*:8081/' "$T/access.out"
-check "shows the add-books path on that address" grep -q ':8081/add/' "$T/access.out"
+check "shows the one address (no /add/ path)" grep -q ':8081/ ' "$T/access.out"
 
 # ============================================================================
 echo "== update"

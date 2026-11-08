@@ -13,7 +13,7 @@ it never overwrites your `.env` (passwords) or your data.
 | What | Address | Login |
 |---|---|---|
 | **Your library**: add books, find a book, people, lending, labels, settings | `http://<this machine>:8098` | `admin` and the generated password |
-| **Add books** (scan an ISBN, or use the phone camera) | `http://<this machine>:8098/add/` | same login (asked once more) |
+| **Add books** (scan an ISBN, or use the phone camera) | the same address, **Add books** button | same login |
 | **Public catalogue** (search only, for a kiosk or visitors) | `http://<this machine>:8097` | none |
 
 For home use you only need the first address: sign in to **Your library**, and use the **Add books**
@@ -208,10 +208,10 @@ quickadd/             the scan-to-add service (Python standard library + yaz)
 
 Staff who are signed in to the library site (and allowed to edit the catalogue) open **Add books** without a second login. Koha itself confirms the sign-in; the shared secret is `SSO_SECRET` in `.env`. The read-only `guest` login still uses the Add books prompt, and the direct Add books port never accepts a Koha sign-in. If `SSO_SECRET` is empty, Add books just asks for its own login as before.
 
-## The home page (the Room for Books site at `/add/`)
+## The home page (Room for Books)
 
-**One address.** `http://<ip>:<port>/` (and later `https://your-domain/` behind Caddy) opens this page; there is no separate
-port to remember. Koha's own staff screens live on the same address at `/cgi-bin/koha/mainpage.pl`, reached from the menu
+**One address, no path.** `http://<ip>:<port>/` (and later `https://your-domain/` behind Caddy) is this page; there is no separate
+port to remember and no `/add/` on the end (old `/add/` links, such as the kiosk tab, redirect to the plain address). Koha's own staff screens live on the same address at `/cgi-bin/koha/mainpage.pl`, reached from the menu
 (*Koha (full staff screens)*). Everyone signs in at the same prompt: staff with the admin login, borrowers with their card number
 and password, the guest with the guest login.
 

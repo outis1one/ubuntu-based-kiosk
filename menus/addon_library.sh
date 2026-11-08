@@ -226,10 +226,10 @@ action_library_show_access() {
         echo "(Network access is limited to this kiosk.)"
     fi
     echo "  Your library (sign in here):  http://${ip}:$(library_env_get STAFF_PORT)/"
-    echo "      Find a book / Add books:  http://${ip}:$(library_env_get STAFF_PORT)/add/"
+    echo "      Find a book / Add books:  http://${ip}:$(library_env_get STAFF_PORT)/"
     echo "  Admin login:                  ${user}  /  ${pass}"
     echo "  Read-only login to share:     $(library_env_get VIEWER_USER)  /  $(library_env_get VIEWER_PASSWORD)"
-    echo "      Give it out with http://${ip}:$(library_env_get STAFF_PORT)/add/ - it opens Find a book: search only,"
+    echo "      Give it out with http://${ip}:$(library_env_get STAFF_PORT)/ - it opens Find a book: search only,"
     echo "      it cannot add or change anything (and it has no login on the staff site itself)."
     echo
     echo "  Passwords live in $LIBRARY_DIR/.env (root only)."
