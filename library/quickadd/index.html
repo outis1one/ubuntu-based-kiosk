@@ -942,6 +942,7 @@
     return { level: g(/(?:ATOS\s*)?Book\s*Level:?\s*([0-9]{1,2}(?:\.[0-9]{1,2})?)/i), points: g(/(?:AR\s*)?Points:?\s*([0-9]{1,3}(?:\.[0-9]{1,2})?)/i),
              quiz: g(/Quiz\s*(?:No\.?|Number|#)\s*:?\s*([0-9]{3,6})/i), interest };
   }
+  let arWin = null;          // the AR BookFind pop-up this page opened (so it can be closed once the fields are filled)
   function arBox(b, m) {
     const ar = m.ar || {};
     const wrap = el('div', { className: 'small', style: 'margin-top:10px;border-top:1px solid var(--line);padding-top:8px' });
@@ -960,7 +961,7 @@
     const save = el('button', { type: 'button', className: 'primary' }, 'Save');
     const msg = el('span', {});
     save.onclick = async () => {
-      const r = await api('/api/ar/set', { isbn: m.isbn, level: lvl.value, points: pts.value, quiz: quiz.value, interest: inter.value });
+      const r = await api('/api/ar/set', { biblio_id: b.id, isbn: m.isbn, level: lvl.value, points: pts.value, quiz: quiz.value, interest: inter.value });
       msg.textContent = r.status === 'saved' ? ' Saved ✓' : ' ' + (r.message || 'Could not save.');
       if (r.status === 'saved') sumEl.textContent = arSummary({ level: lvl.value, points: pts.value, quiz: quiz.value, interest: inter.value }) || 'not recorded';
     };
@@ -968,15 +969,8 @@
     const arPop = el('button', { type: 'button' }, 'Open AR BookFind beside this page');
     arPop.onclick = async () => { await copyTitle();
       const w = Math.min(560, Math.floor(screen.availWidth / 2)), h = screen.availHeight - 80;
-      window.open('https://www.arbookfind.com/', 'arbookfind', 'popup=yes,width=' + w + ',height=' + h + ',left=' + (screen.availWidth - w) + ',top=40'); };
-    const arHolder = el('div', {});
-    const arFrame = el('button', { type: 'button' }, 'Show it here');
-    arFrame.onclick = async () => { await copyTitle();
-      if (arHolder.firstChild) { arHolder.replaceChildren(); arFrame.textContent = 'Show it here'; return; }
-      arFrame.textContent = 'Hide it';
-      arHolder.replaceChildren(el('iframe', { src: 'https://www.arbookfind.com/', title: 'AR BookFind', loading: 'lazy', referrerPolicy: 'no-referrer',
-        style: 'width:100%;height:520px;border:1px solid var(--line);border-radius:8px;margin-top:8px;background:#fff' }),
-        el('div', { className: 'small' }, 'If it keeps asking who you are, your browser is blocking its cookies inside another page: use the pop-up instead.')); };
+      arWin = window.open('https://www.arbookfind.com/', 'arbookfind', 'popup=yes,width=' + w + ',height=' + h + ',left=' + (screen.availWidth - w) + ',top=40');
+      if (!arWin) msg.textContent = ' The browser blocked the pop-up: allow pop-ups for this site, or use the link to open AR BookFind in a tab.'; };
     const copy = el('button', { type: 'button' }, 'Copy title');
     copy.onclick = async () => { await copyTitle(); copy.textContent = 'Copied ✓'; setTimeout(() => copy.textContent = 'Copy title', 1500); };
     const paste = el('textarea', { rows: 3, placeholder: 'Paste the AR BookFind book page here (open the book there, select all, copy, paste): the fields above fill in by themselves',
@@ -988,18 +982,28 @@
       // A results page can list several books: read from this book's title onward when it appears in the text.
       const at = t.toLowerCase().indexOf(b.title.toLowerCase().split(':')[0].trim());
       const f = parseAR(at >= 0 ? t.slice(at, at + 1800) : t);
-      if (!(f.level || f.points || f.quiz || f.interest)) { msg.textContent = t.trim() ? " Couldn't find a level or points in that text." : ''; return false; }
+      const found = [f.level && 'ATOS book level ' + f.level, f.interest && 'interest level ' + f.interest, f.points && f.points + ' AR points', f.quiz && 'quiz ' + f.quiz].filter(Boolean);
+      const size = t.length.toLocaleString() + ' characters from ' + from;
+      if (!found.length) {
+        msg.textContent = ' Got ' + size + ' but found no ATOS level, interest level or AR points in it. It began: "' + t.trim().replace(/\s+/g, ' ').slice(0, 90) + '". Open the book itself on AR BookFind, then select all (Ctrl/Cmd+A) and copy (Ctrl/Cmd+C).';
+        return false;
+      }
       if (f.level) lvl.value = f.level; if (f.points) pts.value = f.points; if (f.quiz) quiz.value = f.quiz; if (f.interest) inter.value = f.interest;
       const words = norm(b.title).split(' ').filter(w => w.length > 3).slice(0, 3);
       const same = !words.length || words.every(w => norm(t).includes(w));
-      msg.textContent = ' Filled in from ' + from + ' - check it' + (same ? '' : ' (that text does not mention "' + b.title + '": is it the right book?)') + ', then Save.';
+      try { if (arWin && !arWin.closed) arWin.close(); } catch (e) {}       // the pop-up has done its job
+      msg.textContent = ' Got ' + size + ': found ' + found.join(', ') + (same ? '' : ' (that text does not mention "' + b.title + '": is it the right book?)') + '. Check it, then press Save.';
       return true;
     };
     paste.oninput = () => applyText(paste.value, 'what you pasted');
     const fromClip = el('button', { type: 'button' }, 'Fill from clipboard');
     fromClip.onclick = async () => {
+      if (!navigator.clipboard || !navigator.clipboard.readText) {
+        msg.textContent = " This browser only lets a page read the clipboard over https (or on this machine). Press Ctrl/Cmd+V on this page instead, or paste into the box below.";
+        return;
+      }
       try { applyText(await navigator.clipboard.readText(), 'the clipboard'); }
-      catch (e) { msg.textContent = " Couldn't read the clipboard here - paste into the box below instead."; }
+      catch (e) { msg.textContent = " The browser did not allow reading the clipboard (" + (e && e.name || 'blocked') + "). Press Ctrl/Cmd+V on this page instead, or paste into the box below."; }
     };
     // After you copy on AR BookFind and come back to this window, fill in automatically (when the browser already allows reading the clipboard).
     let lastClip = '';
@@ -1019,12 +1023,12 @@
       const tg = ev.target;
       if (tg && /^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName)) return;
       const t = (ev.clipboardData && ev.clipboardData.getData('text')) || '';
-      if (t && looksLikeAR(t)) { ev.preventDefault(); applyText(t, 'what you pasted'); wrap.scrollIntoView({ block: 'nearest' }); }
+      if (t) { ev.preventDefault(); applyText(t, 'what you pasted'); wrap.scrollIntoView({ block: 'nearest' }); }
     };
     document.addEventListener('paste', onPaste);
     wrap.append(edit, el('div', { style: 'margin-top:8px' }, save, msg),
-      el('div', { style: 'margin-top:8px' }, el('a', { href: 'https://www.arbookfind.com/', target: '_blank', rel: 'noopener noreferrer' }, 'Open AR BookFind'), ' ', arPop, ' ', arFrame, ' ', copy),
-      el('div', { style: 'margin-top:8px' }, fromClip, el('span', { className: 'small' }, ' or just press Ctrl/Cmd+V on this page after copying on AR BookFind (Ctrl/Cmd+A, then Ctrl/Cmd+C)')), paste, arHolder);
+      el('div', { style: 'margin-top:8px' }, el('a', { href: 'https://www.arbookfind.com/', target: '_blank', rel: 'noopener noreferrer' }, 'Open AR BookFind'), ' ', arPop, ' ', copy),
+      el('div', { style: 'margin-top:8px' }, fromClip, el('span', { className: 'small' }, ' or just press Ctrl/Cmd+V on this page after copying on AR BookFind (Ctrl/Cmd+A, then Ctrl/Cmd+C)')), paste);
     return wrap;
   }
 

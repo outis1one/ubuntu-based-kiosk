@@ -1050,14 +1050,16 @@ def op_out():
     cos = koha("GET", "/checkouts", query={"_per_page": "500", "_order_by": "due_date"}, headers={"x-koha-embed": "item"}) or []
     rows = _loan_rows(cos)
     names, contact = {}, {}
-    for pid in sorted({r["patron_id"] for r in rows}):
+
+    def one(pid):
         try:
             p = koha("GET", "/patrons/%d" % pid)
-            names[pid] = _patron_name(p)
-            contact[pid] = (p.get("phone") or "", p.get("email") or "")
+            return pid, _patron_name(p), (p.get("phone") or "", p.get("email") or "")
         except KohaError:
-            names[pid] = "?"
-            contact[pid] = ("", "")
+            return pid, "?", ("", "")
+    with ThreadPoolExecutor(max_workers=4) as ex:        # one lookup per person, side by side
+        for pid, nm, ct in ex.map(one, sorted({r["patron_id"] for r in rows})):
+            names[pid], contact[pid] = nm, ct
     today = _dt.date.today()
     for r in rows:
         r["who"] = names.get(r["patron_id"], "?")
@@ -1241,7 +1243,7 @@ def op_more(biblio_id):
     isbn = re.sub(r"[^0-9Xx]", "", (b.get("isbn") or "").split(" ")[0].split("|")[0])
     title = (b.get("title") or "").rstrip(" /:")
     out = {"links": [], "description": "", "subjects": [], "first_published": "", "isbn": isbn,
-           "ar": _ar_load().get(_isbn13(isbn) or "", {})}
+           "ar": _ar_lookup(_ar_load(), biblio_id, isbn)}
     q = urllib.parse.quote(title + " " + (b.get("author") or ""))
     if isbn:
         out["links"] = [
@@ -1337,18 +1339,27 @@ def _interest_code(v):
     return ""
 
 
+def _ar_lookup(d, biblio_id, isbn_raw):
+    """A book's reading level: filed under its own number (every book has one), else under its ISBN (imports, older entries)."""
+    return d.get("b%d" % biblio_id) or d.get(_isbn13(isbn_raw) or "") or {}
+
+
 def op_ar_set(payload):
-    key = _isbn13(payload.get("isbn"))
+    bid = payload.get("biblio_id")
+    keys = (["b%d" % bid] if isinstance(bid, int) else []) + ([_isbn13(payload.get("isbn"))] if _isbn13(payload.get("isbn")) else [])
     level, points, quiz = _num(payload.get("level")), _num(payload.get("points")), re.sub(r"[^0-9]", "", str(payload.get("quiz") or ""))[:8]
     interest = _interest_code(payload.get("interest"))
-    if not key or level is None or points is None:
-        return 400, {"status": "invalid", "message": "Level and points are numbers like 4.5 and 6."}
+    if not keys:
+        return 400, {"status": "invalid", "message": "Which book is this for?"}
+    if level is None or points is None:
+        return 400, {"status": "invalid", "message": "Level and points need to be numbers like 5.4 and 6.0."}
     with LOCK:
         d = _ar_load()
-        if level or points or quiz or interest:
-            d[key] = {"level": level, "points": points, "quiz": quiz, "interest": interest}
-        else:
-            d.pop(key, None)
+        for key in keys:                       # under the book's own number, and its ISBN too so another copy/edition shares it
+            if level or points or quiz or interest:
+                d[key] = {"level": level, "points": points, "quiz": quiz, "interest": interest}
+            else:
+                d.pop(key, None)
         _ar_save(d)
     return 200, {"status": "saved"}
 
@@ -1407,7 +1418,7 @@ def export_csv():
         items = koha("GET", "/items", query={"q": json.dumps({"biblio_id": ids}), "_per_page": "2000"}) or []
         for b in books:
             isbn = b.get("isbn") or ""
-            a = ar.get(_isbn13(isbn) or "", {})
+            a = _ar_lookup(ar, b["biblio_id"], isbn)
             mine = [i for i in items if i["biblio_id"] == b["biblio_id"]] or [{}]
             for i in mine:
                 w.writerow([(b.get("title") or "").rstrip(" /:"), b.get("author") or "", isbn, b.get("copyright_date") or "",
@@ -2390,7 +2401,7 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Content-Security-Policy",
                          "default-src 'self'; img-src 'self' https: data:; "
-                         "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-src https://www.arbookfind.com")
+                         "style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'")
         for k, v in (extra or {}).items():
             self.send_header(k, v)
         self.end_headers()

@@ -368,3 +368,15 @@ login, visitors the guest login. A staff member already signed in to Koha is let
 that browser; **Sign out** is at the bottom of the menu. The cookie is signed, HttpOnly and, over HTTPS, Secure; changing the admin or guest password
 signs everyone out. Scripts can still use HTTP Basic. The kiosk's tab signs in through `/kiosk` (the tab saved by an earlier version, `/add/#find`,
 lands there too), which sets the cookie and redirects to the clean address, so the kiosk's guest password never stays in the page's address.
+
+### Speed
+
+Pages used to stall for about a second on every second request: Koha's Plack server (Starman) does not cope with Apache re-using a kept-alive
+connection to it. The staff site's web server now closes that connection after each request (`SetEnv proxy-nokeepalive`), and the busiest lookups
+(who has what out) run side by side. Typical pages answer in 0.1-0.3 s even on a small machine. Reading levels are filed under the book's own number
+(and its ISBN), so a book without an ISBN can have them too; after pasting from AR BookFind the page says how many characters it received and what it found
+(or what the text began with if nothing matched), so a wrong copy is easy to spot.
+
+**AR pop-up:** the "Show it here" (AR BookFind inside the page) option was removed: browsers block AR BookFind's cookies when it is shown inside another site, so it
+never worked reliably. **Open AR BookFind beside this page** opens it in a window next to the book, copies the title for you, and closes that window by itself once a paste has
+filled the fields (a paste that finds nothing leaves it open).
