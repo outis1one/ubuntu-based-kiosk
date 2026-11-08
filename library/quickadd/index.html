@@ -981,13 +981,39 @@
     copy.onclick = async () => { await copyTitle(); copy.textContent = 'Copied ✓'; setTimeout(() => copy.textContent = 'Copy title', 1500); };
     const paste = el('textarea', { rows: 3, placeholder: 'Paste the AR BookFind book page here (open the book there, select all, copy, paste): the fields above fill in by themselves',
       'aria-label': 'Pasted AR BookFind text', style: css + ';width:100%;margin-top:6px' });
-    paste.oninput = () => {
-      const f = parseAR(paste.value);
+    // Only the four fields are taken from what was copied; the rest of the text is thrown away, never stored.
+    const looksLikeAR = t => /Book\s*Level|AR\s*Points|Interest\s*Level/i.test(t);
+    const norm = x => x.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const applyText = (t, from) => {
+      const f = parseAR(t);
+      if (!(f.level || f.points || f.quiz || f.interest)) { msg.textContent = t.trim() ? " Couldn't find a level or points in that text." : ''; return false; }
       if (f.level) lvl.value = f.level; if (f.points) pts.value = f.points; if (f.quiz) quiz.value = f.quiz; if (f.interest) inter.value = f.interest;
-      msg.textContent = (f.level || f.points || f.quiz || f.interest) ? ' Filled in from what you pasted - check it, then Save.' : (paste.value.trim() ? " Couldn't find a level or points in that text." : '');
+      const words = norm(b.title).split(' ').filter(w => w.length > 3).slice(0, 3);
+      const same = !words.length || words.every(w => norm(t).includes(w));
+      msg.textContent = ' Filled in from ' + from + ' - check it' + (same ? '' : ' (that text does not mention "' + b.title + '": is it the right book?)') + ', then Save.';
+      return true;
     };
+    paste.oninput = () => applyText(paste.value, 'what you pasted');
+    const fromClip = el('button', { type: 'button' }, 'Fill from clipboard');
+    fromClip.onclick = async () => {
+      try { applyText(await navigator.clipboard.readText(), 'the clipboard'); }
+      catch (e) { msg.textContent = " Couldn't read the clipboard here - paste into the box below instead."; }
+    };
+    // After you copy on AR BookFind and come back to this window, fill in automatically (when the browser already allows reading the clipboard).
+    let lastClip = '';
+    const onFocus = async () => {
+      if (!document.contains(wrap)) { window.removeEventListener('focus', onFocus); return; }
+      try {
+        const perm = navigator.permissions && await navigator.permissions.query({ name: 'clipboard-read' });
+        if (!perm || perm.state !== 'granted') return;
+        const t = await navigator.clipboard.readText();
+        if (t && t !== lastClip && looksLikeAR(t)) { lastClip = t; applyText(t, 'the clipboard'); }
+      } catch (e) {}
+    };
+    window.addEventListener('focus', onFocus);
     wrap.append(edit, el('div', { style: 'margin-top:8px' }, save, msg),
-      el('div', { style: 'margin-top:8px' }, el('a', { href: 'https://www.arbookfind.com/', target: '_blank', rel: 'noopener noreferrer' }, 'Open AR BookFind'), ' ', arPop, ' ', arFrame, ' ', copy), paste, arHolder);
+      el('div', { style: 'margin-top:8px' }, el('a', { href: 'https://www.arbookfind.com/', target: '_blank', rel: 'noopener noreferrer' }, 'Open AR BookFind'), ' ', arPop, ' ', arFrame, ' ', copy),
+      el('div', { style: 'margin-top:8px' }, fromClip, el('span', { className: 'small' }, ' after copying on AR BookFind (Ctrl/Cmd+A, then Ctrl/Cmd+C)')), paste, arHolder);
     return wrap;
   }
 

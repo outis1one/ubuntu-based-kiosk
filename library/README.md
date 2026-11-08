@@ -352,3 +352,7 @@ Interest Level: Middle Grades (MG 4-8) / AR Points: 6.0` is understood). *Export
 Covers are looked for in Open Library (ISBN-13 and ISBN-10) and then Google Books. If none is found: **Find another cover** (Google
 Books for this ISBN plus other Open Library editions), **Upload a picture**, or **Use this address** (right-click the cover anywhere,
 *Copy image address*, paste; https addresses of public sites only).
+
+**Fewer steps for AR:** copy the book's page on AR BookFind (Ctrl/Cmd+A, Ctrl/Cmd+C), come back to the book page and press **Fill from
+clipboard** (or just return to the window: where the browser already allows clipboard reading it fills in by itself). Only the four AR fields
+are kept; everything else you copied is discarded, and a warning appears if the text does not mention the book's title.
