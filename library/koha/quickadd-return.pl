@@ -12,6 +12,7 @@ use Digest::SHA qw( sha256_hex );
 use C4::Context;
 use C4::Circulation qw( AddReturn );
 use Koha::Items;
+use Koha::Patrons;
 
 my $q = CGI->new;
 
@@ -43,9 +44,17 @@ eval {
     ( $doreturn, $messages, undef, $borrower ) = AddReturn( $barcode, $branch );
     1;
 } or reply( $q, '200 OK', { status => 'failed', error => "$@" } );
+my $hold_for = '';
+if ( ref $messages eq 'HASH' && ref $messages->{ResFound} ) {
+    my $r   = $messages->{ResFound};
+    my $bn  = eval { $r->can('borrowernumber') ? $r->borrowernumber : undef } // ( ref $r eq 'HASH' ? $r->{borrowernumber} : undef );
+    my $pt  = $bn ? Koha::Patrons->find($bn) : undef;
+    $hold_for = join ' ', grep { length } $pt->firstname, $pt->surname if $pt;
+}
 reply(
     $q, '200 OK',
     {
+        hold_for => $hold_for,
         status   => $doreturn && $was_out ? 'returned' : ( $doreturn || exists $messages->{NotIssued} ) ? 'not_out' : 'failed',
         patron   => $borrower ? ( join ' ', grep { length } $borrower->{firstname}, $borrower->{surname} ) : '',
         messages => [ sort keys %{ $messages || {} } ],

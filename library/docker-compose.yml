@@ -46,8 +46,8 @@ services:
       KOHA_ITEM_TYPES: ${ITEM_TYPES:-}
     ports:
       # The public catalogue is off by default (loopback only); set OPAC_BIND=0.0.0.0 in .env to expose it.
-      - "${OPAC_BIND:-127.0.0.1}:${OPAC_PORT:-8080}:80"
-      - "${BIND_ADDR:-0.0.0.0}:${STAFF_PORT:-8081}:8081"
+      - "${OPAC_BIND:-127.0.0.1}:${OPAC_PORT:-8097}:80"
+      - "${BIND_ADDR:-0.0.0.0}:${STAFF_PORT:-8098}:8081"
     volumes:
       - koha-data:/var/lib/koha
 
@@ -67,17 +67,36 @@ services:
       VIEWER_USER: ${VIEWER_USER:-guest}
       VIEWER_PASSWORD: ${VIEWER_PASSWORD:-}
       KOHA_LIBRARY: ${LIBRARY_CODE:-HOME}
-      OPAC_PORT: ${OPAC_PORT:-8080}
-      STAFF_PORT: ${STAFF_PORT:-8081}
+      OPAC_PORT: ${OPAC_PORT:-8097}
+      STAFF_PORT: ${STAFF_PORT:-8098}
       OPAC_URL: ${OPAC_URL:-}
       STAFF_URL: ${STAFF_URL:-}
       QUICKADD_SOURCES: ${QUICKADD_SOURCES:-z3950:lx2.loc.gov:210/LCDB,openlibrary}
     ports:
-      - "${BIND_ADDR:-0.0.0.0}:${QUICKADD_PORT:-8082}:8082"
+      - "${BIND_ADDR:-0.0.0.0}:${QUICKADD_PORT:-8099}:8082"
     volumes:
       - quickadd-data:/data
+
+  # HTTPS with an automatic certificate (and so the live camera on phones): only started when
+  # `./install.sh --domain <name>` has set COMPOSE_PROFILES=caddy in .env.
+  caddy:
+    profiles: ["caddy"]
+    image: caddy:2
+    container_name: library-caddy
+    restart: unless-stopped
+    depends_on:
+      - koha
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
 
 volumes:
   db-data:
   koha-data:
   quickadd-data:
+  caddy-data:
+  caddy-config:

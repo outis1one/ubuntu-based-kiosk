@@ -12,9 +12,9 @@ it never overwrites your `.env` (passwords) or your data.
 
 | What | Address | Login |
 |---|---|---|
-| **Your library**: add books, find a book, people, lending, labels, settings | `http://<this machine>:8081` | `admin` and the generated password |
-| **Add books** (scan an ISBN, or use the phone camera) | `http://<this machine>:8081/add/` | same login (asked once more) |
-| **Public catalogue** (search only, for a kiosk or visitors) | `http://<this machine>:8080` | none |
+| **Your library**: add books, find a book, people, lending, labels, settings | `http://<this machine>:8098` | `admin` and the generated password |
+| **Add books** (scan an ISBN, or use the phone camera) | `http://<this machine>:8098/add/` | same login (asked once more) |
+| **Public catalogue** (search only, for a kiosk or visitors) | `http://<this machine>:8097` | none |
 
 For home use you only need the first address: sign in to **Your library**, and use the **Add books**
 button on its home page. The Add books page has a **Find a book** tab (title, author or ISBN, with the
@@ -24,7 +24,7 @@ staff sites the same URL shapes, so they cannot share one address; Add books can
 
 Ports move up to the next free number if one is taken; the final addresses are printed
 at the end and by `sudo ./install.sh --status`. Add books is also reachable directly on its own port
-(`8082`), which is handy behind a proxy but not needed otherwise.
+(`8099`), which is handy behind a proxy but not needed otherwise.
 
 ## What it is made of
 
@@ -210,10 +210,19 @@ Staff who are signed in to the library site (and allowed to edit the catalogue) 
 
 ## The home page (the Room for Books site at `/add/`)
 
+**One address.** `http://<ip>:<port>/` (and later `https://your-domain/` behind Caddy) opens this page; there is no separate
+port to remember. Koha's own staff screens live on the same address at `/cgi-bin/koha/mainpage.pl`, reached from the menu
+(*Koha (full staff screens)*). Everyone signs in at the same prompt: staff with the admin login, borrowers with their card number
+and password, the guest with the guest login.
+
 One simple page: a **Look up** box (books by title, author or ISBN, and people by name or card number), four big buttons
 (**Check out**, **Return**, **Add books**, **Add a person**) and **Recently added** books with their covers. The **menu**
 (top right) holds the rest: browse all books, lend / return, people and library cards, barcodes and settings, export / import,
 and a link to Koha's own staff screens. Borrowers and the read-only guest see just the lookup, recent books and (borrowers) My books.
+
+**One search box for everything:** it matches a book's title, author, ISBN, **tags**, **shelf / room** and **collection** (type `kids`, `garage`, `to read`...), and people by name or card number.
+
+**Scanning into the search box:** a USB or Bluetooth scanner just types into it and presses Enter (a book's barcode or ISBN finds the book; a library card finds the person). The **Scan** button next to it uses the phone camera: a live view over HTTPS, or a photo on plain HTTP. The same three ways (type, scanner, camera) work on Add books, Lend / return and Return.
 
 **Adding by title:** on Add books, scan or type an ISBN to add it straight away; type a title or author instead and you get a list
 of matches (cover, author, year, publisher) from Open Library and the Library of Congress to choose from. Books you already have
@@ -285,3 +294,69 @@ points, quiz number and interest level fill in by themselves; check them and pre
 The book page's AR box has **Open beside this page** (a pop-up window next to the book) and **Show it here** (AR BookFind inside the
 page; some browsers block its cookies inside another page, then use the pop-up). Either copies the title first so you can paste
 it into AR's search; AR's own page cannot be pre-filled from here.
+
+### Same ports on every install
+
+New installs of this stack use the same three ports whether you install it from the kiosk add-on or from `ubuntu-post-install`:
+**8098** is the one to use (the Room for Books home page, with Koha behind the menu), 8099 is Add books direct, and 8097 is the
+public catalogue, which stays closed. If one is taken, the next free port is used and the installer prints it. Existing installs
+keep the ports they already have.
+
+## HTTPS with Caddy (and the live camera scanner)
+
+Phones only allow a live camera on an HTTPS page. One command adds Caddy in front of the library:
+
+```bash
+# a real domain that points at this machine (ports 80 and 443 reachable): the certificate is automatic
+sudo ./install.sh --domain library.example.com
+
+# a name only your own network knows (library.home.lan): Caddy makes its own certificate authority
+sudo ./install.sh --domain library.home.lan --lan-tls     # then install caddy-root.crt on your phones
+```
+
+It writes `Caddyfile`, starts a `caddy` container (the compose `caddy` profile), sets `STAFF_URL=https://<name>` and closes the plain-HTTP
+ports to the network (`BIND_ADDR=127.0.0.1`; add `--keep-direct` to leave them open). Then use `https://<name>/`: everything works
+as before, and the **Live scan** buttons appear on Add books and Lend / return. Behind your own Caddy instead, point it at the library
+port: `library.example.com { reverse_proxy <this machine>:8098 }` and set `STAFF_URL=https://library.example.com` in `.env`.
+
+### Editing, holds, history, overdue list, covers
+
+- **Edit details** on a book's page: title, subtitle, author, publisher, year, pages, ISBN and summary, saved straight into Koha
+  (copies, barcodes and loans are untouched).
+- **Holds**: staff place a hold for a person from the book page (name or card number); a signed-in borrower sees **Hold this
+  book for me** when every copy is out, and can cancel their own holds on **My books**. Returning a book that someone is waiting
+  for says so (*ON HOLD for Pat - put it aside*).
+- **History**: *Borrowing history* on a book (who had it, when) and *Past books* for a person (staff), and *Books I have
+  borrowed before* for a borrower.
+- **Overdue list** (menu): overdue books grouped by person with phone and email, days late, a **Print this list** button and a
+  ready-written email reminder link. The home page shows a banner when anything is overdue.
+- **Covers** are fetched once from Open Library when a book is added (or the first time one is shown) and kept in the data
+  volume (`covers/`), so browsers never contact another site and covers still show offline. A book with no cover found shows a
+  coloured title tile and is retried after a week.
+
+### Changing a cover
+
+On a book's page, **Change cover**: **Upload a picture** (from a phone it offers the camera or photos; it is shrunk to fit), **Remove
+cover** (it is not fetched again unless you ask), **Try the ISBN again** (asks Open Library afresh), or **Find another cover** (a
+grid of covers from other editions of the same title: click one to use it). A book without an ISBN can still have an uploaded
+cover. Covers live in the data volume (`covers/`), so they are backed up with it.
+
+### AR fields, and finding covers
+
+The book page has **ATOS book level**, **Interest level** (Lower Grades / Middle Grades / Middle Grades Plus / Upper Grades), **AR points**
+and **Quiz number** fields, shown to everyone as a one-line summary ("ATOS book level 5.4 - Middle Grades (MG 4-8) - 6.0 AR points").
+Copy a book's page on AR BookFind, paste it in the box, and the fields fill in by themselves (the format `ATOS Book Level: 5.4 /
+Interest Level: Middle Grades (MG 4-8) / AR Points: 6.0` is understood). *Export / import* uses the same columns (`atos book level`,
+`interest level`, `ar points`, `quiz number`).
+
+Covers are looked for in Open Library (ISBN-13 and ISBN-10) and then Google Books. If none is found: **Find another cover** (Google
+Books for this ISBN plus other Open Library editions), **Upload a picture**, or **Use this address** (right-click the cover anywhere,
+*Copy image address*, paste; https addresses of public sites only).
+
+**Fewer steps for AR:** copy the book's page on AR BookFind (Ctrl/Cmd+A, Ctrl/Cmd+C), come back to the book page and press **Fill from
+clipboard** (or just return to the window: where the browser already allows clipboard reading it fills in by itself). Only the four AR fields
+are kept; everything else you copied is discarded, and a warning appears if the text does not mention the book's title.
+
+**The quickest AR route:** *Open AR BookFind beside this page* (the title is copied for you) -> in AR BookFind press Ctrl/Cmd+V and Enter, open the book,
+Ctrl/Cmd+A then Ctrl/Cmd+C -> back here press **Ctrl/Cmd+V** anywhere on the book page (no need to click a field). The four AR fields fill in; if the copied text
+lists several books, the one matching this title is used.

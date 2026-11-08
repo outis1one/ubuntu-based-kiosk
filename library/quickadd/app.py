@@ -10,6 +10,7 @@ Standard library only; Z39.50 is done by shelling out to yaz-client.
 """
 import base64
 import hashlib
+from concurrent.futures import ThreadPoolExecutor
 import hmac
 import json
 import os
@@ -249,7 +250,7 @@ class KohaError(Exception):
         self.status, self.body = status, body
 
 
-def koha(method, path, body=None, ctype="application/json", headers=None, query=None):
+def koha(method, path, body=None, ctype="application/json", headers=None, query=None, raw=False):
     url = KOHA_API + path + ("?" + urllib.parse.urlencode(query) if query else "")
     data = body if isinstance(body, bytes) else (json.dumps(body).encode() if body is not None else None)
     h = {"Authorization": "Basic " + base64.b64encode(("%s:%s" % (USER, PASSWORD)).encode()).decode(),
@@ -259,8 +260,10 @@ def koha(method, path, body=None, ctype="application/json", headers=None, query=
     h.update(headers or {})
     try:
         with urllib.request.urlopen(urllib.request.Request(url, data=data, method=method, headers=h), timeout=30) as r:
-            raw = r.read()
-            return json.loads(raw) if raw else None
+            payload = r.read()
+            if raw:
+                return payload
+            return json.loads(payload) if payload else None
     except urllib.error.HTTPError as e:
         raise KohaError(e.code, e.read().decode("utf8", "replace"))
     except (urllib.error.URLError, OSError) as e:
@@ -573,6 +576,7 @@ def commit(plan, scanned=None):
             raise
     entry = entry_for(plan["code"], plan["title"], plan["author"], item, biblio_id, plan["source"])
     remember(entry)
+    prefetch_cover(plan["code"])
     return dict(entry, status="added")
 
 
@@ -770,10 +774,29 @@ def _shape_book(b, items, where):
     shelves = sorted({where.get(i.get("location"), "") for i in mine} - {""})
     colls = {c["value"]: c["label"] for c in get_collections()}
     collections = sorted({colls.get(i.get("collection_code"), "") for i in mine} - {""})
-    return {"tags": _tags_load().get(str(b["biblio_id"]), []), "collections": collections, "id": b["biblio_id"], "title": (b.get("title") or "").rstrip(" /:"), "author": b.get("author") or "",
+    return {"cover": cover_key(b.get("isbn"), b["biblio_id"]), "tags": _tags_load().get(str(b["biblio_id"]), []), "collections": collections, "id": b["biblio_id"], "title": (b.get("title") or "").rstrip(" /:"), "author": b.get("author") or "",
             "year": b.get("copyright_date") or "", "isbn": b.get("isbn") or "", "type": b.get("item_type") or "",
             "copies": len(mine), "out": out, "shelves": shelves,
             "callnumber": next((i.get("callnumber") for i in mine if i.get("callnumber")), "") or ""}
+
+
+def _extra_matches(term):
+    """Book ids whose tag, shelf/room or collection name contains the search words (so one box finds them all)."""
+    t = term.lower()
+    ids = {int(k) for k, v in _tags_load().items() if any(t in x.lower() for x in v)}
+    locs = [l["value"] for l in get_locations() if t in l["label"].lower() or t == l["value"].lower()]
+    colls = [c["value"] for c in get_collections() if t in c["label"].lower() or t == c["value"].lower()]
+    conds = ([{"location": locs}] if locs else []) + ([{"collection_code": colls}] if colls else [])
+    if re.fullmatch(r"[A-Za-z0-9-]{3,40}", term):          # a scanned item barcode finds its book
+        conds.append({"external_id": term})
+    if conds:
+        try:
+            its = koha("GET", "/items", query={"q": json.dumps(conds[0] if len(conds) == 1 else {"-or": conds}),
+                                               "_per_page": str(ITEM_FILTER_CAP)}) or []
+            ids |= {i["biblio_id"] for i in its}
+        except KohaError:
+            pass
+    return sorted(ids)[:ITEM_FILTER_CAP]
 
 
 def op_library(qs):
@@ -790,7 +813,11 @@ def op_library(qs):
     conds = []
     if term:
         like = {"-like": "%" + term + "%"}
-        conds.append({"-or": [{"title": like}, {"author": like}, {"isbn": like}, {"ean": like}]})
+        match = [{"title": like}, {"author": like}, {"isbn": like}, {"ean": like}]
+        extra = _extra_matches(term)
+        if extra:
+            match.append({"biblio_id": extra})
+        conds.append({"-or": match})
     if tag:
         ids_t = sorted(int(k) for k, v in _tags_load().items() if any(t.lower() == tag.lower() for t in v))
         if not ids_t:
@@ -852,9 +879,18 @@ def _checkout_info(item_ids, names):
     return out
 
 
-def op_book(biblio_id, staff):
-    b = koha("GET", "/biblios/%d" % biblio_id)
-    items = koha("GET", "/biblios/%d/items" % biblio_id) or []
+def op_book(biblio_id, staff, patron_id=None):
+    # independent Koha calls run side by side (each takes a fraction of a second on small machines)
+    with ThreadPoolExecutor(max_workers=3) as ex:
+        f_bib = ex.submit(koha, "GET", "/biblios/%d" % biblio_id)
+        f_items = ex.submit(koha, "GET", "/biblios/%d/items" % biblio_id)
+        f_holds = ex.submit(koha, "GET", "/holds", query={"q": json.dumps({"biblio_id": biblio_id}), "_per_page": "50"})
+        b = f_bib.result()
+        items = f_items.result() or []
+        try:
+            raw_holds = f_holds.result() or []
+        except KohaError:
+            raw_holds = []
     where = {l["value"]: l["label"] for l in get_locations()}
     out = _checkout_info([i["item_id"] for i in items if item_status(i) == "Checked out"], staff)
     copies = []
@@ -867,13 +903,21 @@ def op_book(biblio_id, staff):
         if staff and c["status"] == "Checked out":
             c["out"] = out.get(i["item_id"])
         copies.append(c)
-    return {"id": b["biblio_id"], "title": (b.get("title") or "").rstrip(" /:"), "subtitle": b.get("subtitle") or "",
+    res = {"cover": cover_key(b.get("isbn"), b["biblio_id"]), "id": b["biblio_id"], "title": (b.get("title") or "").rstrip(" /:"), "subtitle": b.get("subtitle") or "",
             "author": b.get("author") or "", "year": b.get("copyright_date") or b.get("publication_year") or "",
             "isbn": b.get("isbn") or "", "publisher": b.get("publisher") or "", "pages": b.get("pages") or "",
             "edition": b.get("edition_statement") or "", "summary": b.get("abstract") or b.get("notes") or "",
             "series": b.get("series_title") or "", "type": b.get("item_type") or "", "copies": copies,
             "shelves": get_locations(), "collections": get_collections(),
             "tags": _tags_load().get(str(b["biblio_id"]), []), "all_tags": tag_counts()}
+    holds = _hold_rows(raw_holds)
+    if staff:
+        res["holds"] = holds
+    elif patron_id is not None:
+        res["my_hold"] = next((h["hold_id"] for h in holds if h["patron_id"] == patron_id), None)
+        res["can_hold"] = True
+    res["hold_count"] = len(holds)
+    return res
 
 
 def op_item_update(payload):
@@ -985,7 +1029,9 @@ def _loan_rows(cos):
         due = (c.get("due_date") or "")[:10]
         rows.append({"checkout_id": c["checkout_id"], "patron_id": c["patron_id"], "barcode": it.get("external_id") or "",
                      "biblio_id": it.get("biblio_id"), "title": t[0], "author": t[1], "isbn": t[2], "due": due,
-                     "overdue": bool(due) and due < today, "renewals": c.get("renewals_count") or 0})
+                     "overdue": bool(due) and due < today, "renewals": c.get("renewals_count") or 0,
+                     "checkout_date": (c.get("checkout_date") or "")[:10],
+                     "returned": (c.get("checkin_date") or "")[:10]})
     return rows
 
 
@@ -1003,14 +1049,23 @@ def op_out():
     """Everything checked out right now, soonest due first (overdue on top)."""
     cos = koha("GET", "/checkouts", query={"_per_page": "500", "_order_by": "due_date"}, headers={"x-koha-embed": "item"}) or []
     rows = _loan_rows(cos)
-    names = {}
+    names, contact = {}, {}
     for pid in sorted({r["patron_id"] for r in rows}):
         try:
-            names[pid] = _patron_name(koha("GET", "/patrons/%d" % pid))
+            p = koha("GET", "/patrons/%d" % pid)
+            names[pid] = _patron_name(p)
+            contact[pid] = (p.get("phone") or "", p.get("email") or "")
         except KohaError:
             names[pid] = "?"
+            contact[pid] = ("", "")
+    today = _dt.date.today()
     for r in rows:
         r["who"] = names.get(r["patron_id"], "?")
+        r["phone"], r["email"] = contact.get(r["patron_id"], ("", ""))
+        try:
+            r["days_late"] = max(0, (today - _dt.date.fromisoformat(r["due"])).days)
+        except ValueError:
+            r["days_late"] = 0
     return {"loans": rows}
 
 
@@ -1268,10 +1323,24 @@ def _num(v, maxlen=8):
     return v if re.fullmatch(r"[0-9]{0,4}(\.[0-9]{1,2})?", v) else None
 
 
+def _interest_code(v):
+    """'Middle Grades (MG 4-8)', 'mg+', 'Upper Grades' ... -> LG / MG / MG+ / UG (or '')."""
+    t = str(v or "").upper()
+    if "MG+" in t or "MIDDLE GRADES PLUS" in t:
+        return "MG+"
+    if re.search(r"\bLG\b", t) or "LOWER GRADES" in t:
+        return "LG"
+    if re.search(r"\bMG\b", t) or "MIDDLE GRADES" in t:
+        return "MG"
+    if re.search(r"\bUG\b", t) or "UPPER GRADES" in t:
+        return "UG"
+    return ""
+
+
 def op_ar_set(payload):
     key = _isbn13(payload.get("isbn"))
     level, points, quiz = _num(payload.get("level")), _num(payload.get("points")), re.sub(r"[^0-9]", "", str(payload.get("quiz") or ""))[:8]
-    interest = re.sub(r"[^A-Za-z+]", "", str(payload.get("interest") or ""))[:4].upper()
+    interest = _interest_code(payload.get("interest"))
     if not key or level is None or points is None:
         return 400, {"status": "invalid", "message": "Level and points are numbers like 4.5 and 6."}
     with LOCK:
@@ -1298,7 +1367,7 @@ def op_ar_import(payload):
                 return head.index(n)
         return None
     cint = col("interest", "interestlevel", "il")
-    ci, cl, cp, cq = col("isbn", "isbn13"), col("level", "arlevel", "bl", "booklevel"), col("points", "arpoints", "pts"), col("quiz", "quizno", "quiznumber")
+    ci, cl, cp, cq = col("isbn", "isbn13"), col("level", "arlevel", "bl", "booklevel", "atos", "atoslevel", "atosbooklevel"), col("points", "arpoints", "pts"), col("quiz", "quizno", "quiznumber")
     if ci is None or (cl is None and cp is None and cq is None):
         return 400, {"status": "invalid", "message": "Need a header row with an isbn column and at least one of: level, points, quiz."}
     done = skipped = 0
@@ -1314,7 +1383,7 @@ def op_ar_import(payload):
             old = d.get(key, {})
             d[key] = {"level": lv or old.get("level", ""), "points": pt or old.get("points", ""),
                       "quiz": re.sub(r"[^0-9]", "", get(cq))[:8] or old.get("quiz", ""),
-                      "interest": re.sub(r"[^A-Za-z+]", "", get(cint))[:4].upper() or old.get("interest", "")}
+                      "interest": _interest_code(get(cint)) or old.get("interest", "")}
             done += 1
         _ar_save(d)
     return 200, {"status": "imported", "count": done, "skipped": skipped}
@@ -1328,7 +1397,7 @@ def export_csv():
     ar = _ar_load()
     out = io.StringIO()
     w = csv.writer(out)
-    w.writerow(["title", "author", "isbn", "year", "barcode", "call number", "shelf", "collection", "status", "ar level", "ar points", "ar quiz", "ar interest"])
+    w.writerow(["title", "author", "isbn", "year", "barcode", "call number", "shelf", "collection", "status", "atos book level", "ar points", "quiz number", "interest level"])
     page = 1
     while True:
         books = koha("GET", "/biblios", query={"_per_page": "200", "_page": str(page), "_order_by": "title"}) or []
@@ -1465,7 +1534,11 @@ def op_me(pid):
     p = koha("GET", "/patrons/%d" % pid)
     cos = koha("GET", "/checkouts", query={"q": json.dumps({"patron_id": pid}), "_per_page": "200", "_order_by": "due_date"},
                headers={"x-koha-embed": "item"}) or []
-    return {"name": _patron_name(p), "card": p.get("cardnumber") or "", "loans": _loan_rows(cos)}
+    try:
+        holds = holds_of_patron(pid)
+    except KohaError:
+        holds = []
+    return {"name": _patron_name(p), "card": p.get("cardnumber") or "", "loans": _loan_rows(cos), "holds": holds}
 
 
 def op_me_renew(pid, payload):
@@ -1622,6 +1695,474 @@ def op_lookup(term):
     return {"candidates": have}
 
 
+# ------------------------------------------------------------ edit a book's details
+def _marc_set(rec, tag, code, value, ind1=" ", ind2=" "):
+    """Set (or clear, when value is empty) one subfield; never leaves an empty datafield behind."""
+    ns = "{%s}" % NS["m"]
+    df = rec.find("m:datafield[@tag='%s']" % tag, NS)
+    if not value:
+        if df is not None:
+            for sf in df.findall("m:subfield[@code='%s']" % code, NS):
+                df.remove(sf)
+            if not df.findall("m:subfield", NS):
+                rec.remove(df)
+        return
+    if df is None:
+        df = ET.SubElement(rec, ns + "datafield", tag=tag, ind1=ind1, ind2=ind2)
+    sf = df.find("m:subfield[@code='%s']" % code, NS)
+    if sf is None:
+        sf = ET.SubElement(df, ns + "subfield", code=code)
+    sf.text = value
+
+
+def op_book_edit(payload):
+    bid = payload.get("biblio_id")
+    if not isinstance(bid, int):
+        return 400, {"status": "invalid"}
+
+    def clean(k, n):
+        return re.sub(r"\s+", " ", str(payload.get(k) or "")).strip()[:n]
+    title = clean("title", 250)
+    if not title:
+        return 400, {"status": "invalid", "message": "A book needs a title."}
+    isbn = clean("isbn", 20)
+    if isbn and not clean_code(isbn):
+        return 400, {"status": "invalid", "message": "That ISBN does not look right (10 or 13 digits)."}
+    summary = re.sub(r"[ \t]+", " ", str(payload.get("summary") or "")).strip()[:2000]
+    with LOCK:
+        xml = koha("GET", "/biblios/%d" % bid, headers={"Accept": "application/marcxml+xml"}, raw=True)
+        rec = parse_marc(xml.decode("utf-8"))
+        _marc_set(rec, "245", "a", title, "1", "0")
+        _marc_set(rec, "245", "b", clean("subtitle", 250))
+        # author: keep whichever of 100/110 the record already uses
+        atag = "110" if rec.find("m:datafield[@tag='110']", NS) is not None and rec.find("m:datafield[@tag='100']", NS) is None else "100"
+        _marc_set(rec, atag, "a", clean("author", 150), "1" if atag == "100" else "2", " ")
+        ptag = "264" if rec.find("m:datafield[@tag='264']", NS) is not None or rec.find("m:datafield[@tag='260']", NS) is None else "260"
+        pind2 = "1" if ptag == "264" else " "
+        _marc_set(rec, ptag, "b", clean("publisher", 100), " ", pind2)
+        _marc_set(rec, ptag, "c", clean("year", 12), " ", pind2)
+        _marc_set(rec, "300", "a", clean("pages", 40))
+        _marc_set(rec, "520", "a", summary)
+        if isbn:
+            _marc_set(rec, "020", "a", clean_code(isbn))
+        koha("PUT", "/biblios/%d" % bid, ET.tostring(rec, encoding="utf-8"), "application/marcxml+xml")
+    return 200, {"status": "saved"}
+
+
+# --------------------------------------------------------------------- holds
+def _hold_rows(holds):
+    names = {}
+    out = []
+    for h in sorted(holds, key=lambda x: (x.get("priority") or 99, x.get("hold_id") or 0)):
+        pid = h["patron_id"]
+        if pid not in names:
+            try:
+                names[pid] = _patron_name(koha("GET", "/patrons/%d" % pid))
+            except KohaError:
+                names[pid] = "?"
+        out.append({"hold_id": h["hold_id"], "patron_id": pid, "who": names[pid], "date": (h.get("hold_date") or "")[:10],
+                    "waiting": h.get("status") in ("W", "T"), "position": h.get("priority") or 0, "biblio_id": h["biblio_id"]})
+    return out
+
+
+def _hold_error(e):
+    try:
+        msg = json.loads(e.body).get("error") or ""
+    except ValueError:
+        msg = ""
+    low = msg.lower()
+    if "toomanyholds" in low.replace(" ", "").replace("_", "") and "record" in low:
+        return "There is already a hold on this book for that person."
+    if "already" in low or "exist" in low:
+        return "There is already a hold on this book for that person."
+    return msg or "Koha would not place that hold."
+
+
+def _place_hold(patron_id, biblio_id):
+    try:
+        koha("POST", "/holds", {"patron_id": patron_id, "biblio_id": biblio_id, "pickup_library_id": LIBRARY})
+    except KohaError as e:
+        return 200, {"status": "refused", "message": _hold_error(e)}
+    return 200, {"status": "placed"}
+
+
+def op_hold_add(payload):
+    pid, bid = payload.get("patron_id"), payload.get("biblio_id")
+    if not isinstance(pid, int) or not isinstance(bid, int):
+        return 400, {"status": "invalid"}
+    return _place_hold(pid, bid)
+
+
+def op_hold_cancel(payload, only_patron=None):
+    hid = payload.get("hold_id")
+    if not isinstance(hid, int):
+        return 400, {"status": "invalid"}
+    found = koha("GET", "/holds", query={"q": json.dumps({"hold_id": hid}), "_per_page": "1"}) or []
+    if not found:
+        return 404, {"status": "error", "message": "That hold no longer exists."}
+    if only_patron is not None and found[0].get("patron_id") != only_patron:
+        return 403, {"status": "error", "message": "That is not your hold."}
+    koha("DELETE", "/holds/%d" % hid)
+    return 200, {"status": "cancelled"}
+
+
+def op_me_hold(pid, payload):
+    bid = payload.get("biblio_id")
+    if not isinstance(bid, int):
+        return 400, {"status": "invalid"}
+    return _place_hold(pid, bid)
+
+
+def holds_of_patron(pid):
+    rows = _hold_rows(koha("GET", "/holds", query={"q": json.dumps({"patron_id": pid}), "_per_page": "100"}) or [])
+    for r in rows:
+        try:
+            b = koha("GET", "/biblios/%d" % r["biblio_id"])
+            r["title"], r["author"] = (b.get("title") or "").rstrip(" /:"), b.get("author") or ""
+        except KohaError:
+            r["title"], r["author"] = "?", ""
+    return rows
+
+
+# ------------------------------------------------------------------- history
+def _attach_items(cos):
+    """Old (returned) loans cannot be embedded with their item by Koha reliably; look the items up ourselves."""
+    ids = sorted({c["item_id"] for c in cos if c.get("item_id")})
+    if not ids:
+        return cos
+    items = {i["item_id"]: i for i in (koha("GET", "/items", query={"q": json.dumps({"item_id": ids}), "_per_page": str(len(ids) + 1)}) or [])}
+    for c in cos:
+        c["item"] = items.get(c.get("item_id"))
+    return [c for c in cos if c.get("item")]
+
+
+def op_history(qs):
+    """Past loans (returned) of one book or one person, newest first."""
+    def one(k):
+        return (qs.get(k) or [""])[0]
+    query = {"_per_page": "60", "_order_by": "-checkout_date", "checked_in": "1"}
+    if one("biblio").isdigit():
+        items = koha("GET", "/biblios/%s/items" % one("biblio")) or []
+        ids = [i["item_id"] for i in items]
+        if not ids:
+            return {"loans": []}
+        query["q"] = json.dumps({"item_id": ids})
+    elif one("patron").isdigit():
+        query["q"] = json.dumps({"patron_id": int(one("patron"))})
+    else:
+        return {"loans": []}
+    cos = _attach_items(koha("GET", "/checkouts", query=query) or [])
+    rows = _loan_rows(cos)
+    names = {}
+    for r in rows:
+        if r["patron_id"] not in names:
+            try:
+                names[r["patron_id"]] = _patron_name(koha("GET", "/patrons/%d" % r["patron_id"]))
+            except KohaError:
+                names[r["patron_id"]] = "?"
+        r["who"] = names[r["patron_id"]]
+    return {"loans": rows}
+
+
+def op_me_history(pid):
+    cos = koha("GET", "/checkouts", query={"q": json.dumps({"patron_id": pid}), "_per_page": "60", "_order_by": "-checkout_date",
+                                           "checked_in": "1"}) or []
+    return {"loans": _loan_rows(_attach_items(cos))}
+
+
+# --------------------------------------------------------------- cover images
+# Covers are fetched once, when a book is added (or the first time one is shown), and kept on disk, so the
+# browser never contacts another site and covers still show offline.
+COVER_DIR = os.path.join(DATA_DIR, "covers")
+_COVER_MISS = {}                    # key -> time of the last failed fetch (not retried for a week)
+COVER_MAX = 1_500_000
+
+
+def cover_key(isbn_raw, biblio_id):
+    """Covers are filed by ISBN-13; a book without an ISBN gets b<id> (it can only have an uploaded cover)."""
+    return _isbn13(isbn_raw) or "b%d" % biblio_id
+
+
+def norm_cover_key(raw):
+    if re.fullmatch(r"b[0-9]{1,9}", raw or ""):
+        return raw
+    return _isbn13(raw)
+
+
+def cover_path(key):
+    return os.path.join(COVER_DIR, key + ".jpg")
+
+
+def _no_cover_marker(key):
+    return os.path.join(COVER_DIR, key + ".none")
+
+
+def _sniff(data):
+    """MIME type of a JPEG/PNG/GIF/WebP picture, else None (a 1px or tiny placeholder does not count)."""
+    if not 1500 < len(data) <= COVER_MAX:
+        return None
+    if data[:3] == b"\xff\xd8\xff":
+        return "image/jpeg"
+    if data[:8] == b"\x89PNG\r\n\x1a\n":
+        return "image/png"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "image/webp"
+    return None
+
+
+def _is_jpeg(data):          # kept for the callers that only ever accept a picture
+    return _sniff(data) is not None
+
+
+def _http_image(url):
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "library-quickadd/1.0"}), timeout=10) as r:
+            return r.read(COVER_MAX + 1)
+    except (urllib.error.URLError, OSError):
+        return b""
+
+
+_GB_PLACEHOLDER = {"hash": None}
+
+
+def google_cover(isbn):
+    """Google Books' front-cover image for an ISBN. Google answers an unknown ISBN with a 'not available' picture,
+    so a picture identical to that placeholder counts as no cover."""
+    url = "https://books.google.com/books/content?vid=ISBN:%s&printsec=frontcover&img=1&zoom=1"
+    data = _http_image(url % isbn)
+    if not _sniff(data):
+        return b""
+    if _GB_PLACEHOLDER["hash"] is None:
+        ph = _http_image(url % "0000000000")
+        _GB_PLACEHOLDER["hash"] = hashlib.sha256(ph).hexdigest() if ph else ""
+    if hashlib.sha256(data).hexdigest() == _GB_PLACEHOLDER["hash"]:
+        return b""
+    return data
+
+
+def _isbn10_of(isbn13):
+    return isbn13_to_10(isbn13) if isbn13 and len(isbn13) == 13 else None
+
+
+def find_cover_online(key):
+    """Try each source in turn; returns (bytes, source name) or (b'', '')."""
+    tries = [("Open Library (ISBN-13)", lambda: _http_image("https://covers.openlibrary.org/b/isbn/%s-L.jpg?default=false" % key))]
+    i10 = _isbn10_of(key)
+    if i10:
+        tries.append(("Open Library (ISBN-10)", lambda: _http_image("https://covers.openlibrary.org/b/isbn/%s-L.jpg?default=false" % i10)))
+    tries.append(("Google Books", lambda: google_cover(key)))
+    for name, fn in tries:
+        data = fn()
+        if _sniff(data):
+            return data, name
+    return b"", ""
+
+
+def _write_cover(key, data):
+    os.makedirs(COVER_DIR, exist_ok=True)
+    tmp = cover_path(key) + ".tmp"
+    with open(tmp, "wb") as f:
+        f.write(data)
+    os.replace(tmp, cover_path(key))
+    try:
+        os.remove(_no_cover_marker(key))
+    except OSError:
+        pass
+
+
+def fetch_cover(key, save=True):
+    """The cover's JPEG bytes (kept on disk when save) or None. Only ISBN keys are looked up online."""
+    try:
+        return open(cover_path(key), "rb").read()
+    except OSError:
+        pass
+    if key.startswith("b") or os.path.exists(_no_cover_marker(key)):       # uploaded-only, or deliberately removed
+        return None
+    if time.time() - _COVER_MISS.get(key, 0) < 7 * 86400:
+        return None
+    data, _src = find_cover_online(key)
+    if not data:
+        _COVER_MISS[key] = time.time()
+        return None
+    if save:
+        try:
+            _write_cover(key, data)
+        except OSError:
+            pass
+    return data
+
+
+def cover_etag(key):
+    try:
+        st = os.stat(cover_path(key))
+        return '"%x-%x"' % (int(st.st_mtime), st.st_size)
+    except OSError:
+        return None
+
+
+def op_cover_upload(key_raw, data):
+    key = norm_cover_key(key_raw)
+    if not key:
+        return 400, {"status": "invalid", "message": "Bad cover name."}
+    if not _sniff(data):
+        return 415, {"status": "error", "message": "Please choose a picture (JPEG, PNG, GIF or WebP) under 1.5 MB."}
+    with LOCK:
+        _write_cover(key, data)
+    return 200, {"status": "saved"}
+
+
+def op_cover_delete(payload):
+    key = norm_cover_key(payload.get("key"))
+    if not key:
+        return 400, {"status": "invalid"}
+    with LOCK:
+        try:
+            os.remove(cover_path(key))
+        except OSError:
+            pass
+        os.makedirs(COVER_DIR, exist_ok=True)
+        open(_no_cover_marker(key), "w").close()          # do not fetch it again behind your back
+    return 200, {"status": "deleted"}
+
+
+def op_cover_refetch(payload):
+    """Search again by ISBN: forget any removal and any earlier miss, and ask Open Library afresh."""
+    key = norm_cover_key(payload.get("key"))
+    if not key or key.startswith("b"):
+        return 400, {"status": "invalid", "message": "This book has no ISBN to look up."}
+    with LOCK:
+        try:
+            os.remove(_no_cover_marker(key))
+        except OSError:
+            pass
+        _COVER_MISS.pop(key, None)
+        try:
+            os.remove(cover_path(key))
+        except OSError:
+            pass
+    data, src = find_cover_online(key)
+    if not data:
+        _COVER_MISS[key] = time.time()
+        return 200, {"status": "none", "tried": "Open Library (ISBN-13 and ISBN-10) and Google Books"}
+    with LOCK:
+        _write_cover(key, data)
+    return 200, {"status": "found", "source": src}
+
+
+def _ol_search_covers(term, limit=24):
+    url = "https://openlibrary.org/search.json?" + urllib.parse.urlencode(
+        {"q": term, "limit": str(limit), "fields": "title,author_name,first_publish_year,cover_i"})
+    try:
+        with urllib.request.urlopen(urllib.request.Request(url, headers={"User-Agent": "library-quickadd/1.0"}), timeout=10) as r:
+            return json.load(r).get("docs") or [], True
+    except (urllib.error.URLError, OSError, ValueError):
+        return [], False
+
+
+def op_cover_candidates(biblio_id):
+    """Other covers to choose from: this ISBN's Google Books picture, then Open Library editions matching the
+    title and author (and, if that finds little, the title alone)."""
+    b = koha("GET", "/biblios/%d" % biblio_id)
+    title = (b.get("title") or "").rstrip(" /:")
+    author = b.get("author") or ""
+    isbn = _isbn13(b.get("isbn"))
+    out, seen, answered = [], set(), False
+    if isbn and google_cover(isbn):
+        out.append({"id": "gb-" + isbn, "title": title, "author": author, "year": "", "source": "Google Books (this ISBN)"})
+    main = re.sub(r"^(the|a|an) ", "", title.lower()).split(":")[0]
+    for term in ((title + " " + author).strip(), main):
+        docs, ok = _ol_search_covers(term)
+        answered = answered or ok
+        for d in docs:
+            cid = d.get("cover_i")
+            if isinstance(cid, int) and cid not in seen:
+                seen.add(cid)
+                out.append({"id": "ol-%d" % cid, "title": d.get("title") or "", "author": ", ".join((d.get("author_name") or [])[:2]),
+                            "year": str(d.get("first_publish_year") or ""), "source": "Open Library"})
+        if len(out) >= 8:
+            break
+    msg = "" if out else ("No other covers found. Upload a picture or paste an image address instead." if answered
+                          else "Open Library did not answer - try again, or upload a picture.")
+    return {"covers": out[:20], "message": msg}
+
+
+def _cover_bytes(cid, size="L"):
+    m = re.fullmatch(r"(ol|gb)-([0-9]{1,13})", cid or "")
+    if not m:
+        return b""
+    if m.group(1) == "ol":
+        return _http_image("https://covers.openlibrary.org/b/id/%s-%s.jpg" % (m.group(2), size))
+    return google_cover(m.group(2))
+
+
+def op_cover_pick(payload):
+    key, cid = norm_cover_key(payload.get("key")), payload.get("cover")
+    if not key or not isinstance(cid, str):
+        return 400, {"status": "invalid"}
+    data = _cover_bytes(cid, "L")
+    if not _sniff(data):
+        return 200, {"status": "error", "message": "Could not download that cover - try another."}
+    with LOCK:
+        _write_cover(key, data)
+    return 200, {"status": "saved"}
+
+
+def _public_host(host):
+    """True only if every address the name resolves to is a public one (no loopback, LAN or link-local targets)."""
+    import ipaddress, socket
+    try:
+        infos = socket.getaddrinfo(host, 443, proto=socket.IPPROTO_TCP)
+    except OSError:
+        return False
+    return bool(infos) and all(ipaddress.ip_address(i[4][0]).is_global for i in infos)
+
+
+class _NoRedirect(urllib.request.HTTPRedirectHandler):
+    def redirect_request(self, *a, **k):
+        return None
+
+
+def op_cover_from_url(payload):
+    """Use a picture from a web address (for example copied from AR BookFind: right-click the cover, 'Copy image address')."""
+    key, url = norm_cover_key(payload.get("key")), str(payload.get("url") or "").strip()
+    if not key:
+        return 400, {"status": "invalid"}
+    opener = urllib.request.build_opener(_NoRedirect)
+    data = b""
+    for _ in range(4):                                   # follow a few redirects, checking each hop
+        u = urllib.parse.urlparse(url)
+        if u.scheme != "https" or not u.hostname or u.port not in (None, 443) or not _public_host(u.hostname):
+            return 200, {"status": "error", "message": "That needs to be an https:// address of a picture on the public internet."}
+        try:
+            with opener.open(urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 library-quickadd"}), timeout=10) as r:
+                data = r.read(COVER_MAX + 1)
+            break
+        except urllib.error.HTTPError as e:
+            loc = e.headers.get("Location") if e.code in (301, 302, 303, 307, 308) else None
+            if not loc:
+                return 200, {"status": "error", "message": "The site would not give that picture (error %d)." % e.code}
+            url = urllib.parse.urljoin(url, loc)
+        except (urllib.error.URLError, OSError):
+            return 200, {"status": "error", "message": "Could not reach that address."}
+    if not _sniff(data):
+        return 200, {"status": "error", "message": "That address is not a picture I can use (JPEG, PNG, GIF or WebP, under 1.5 MB)."}
+    with LOCK:
+        _write_cover(key, data)
+    return 200, {"status": "saved"}
+
+
+def cover_preview(cid):
+    return _cover_bytes(cid, "M")
+
+
+def prefetch_cover(code):
+    isbn = _isbn13(code)
+    if isbn:
+        threading.Thread(target=fetch_cover, args=(isbn,), daemon=True).start()
+
+
 # ------------------------------------------------------------ photo scanning
 MAX_IMAGE = 12 * 1024 * 1024
 ZBAR_TIMEOUT = 20
@@ -1717,8 +2258,10 @@ class Handler(BaseHTTPRequestHandler):
         self.send_response(code)
         self.send_header("Content-Type", ctype)
         self.send_header("Content-Length", str(len(body)))
-        self.send_header("Cache-Control", "no-store")
+        if "Cache-Control" not in (extra or {}):
+            self.send_header("Cache-Control", "no-store")
         self.send_header("X-Content-Type-Options", "nosniff")
+        self.send_header("Permissions-Policy", "camera=(self), microphone=()")
         self.send_header("Referrer-Policy", "no-referrer")
         self.send_header("Content-Security-Policy",
                          "default-src 'self'; img-src 'self' https: data:; "
@@ -1753,7 +2296,11 @@ class Handler(BaseHTTPRequestHandler):
             # Otherwise: a patron signing in with their card number (or userid) and password.
             addr = self.client_address[0]
             if SSO_SECRET and hmac.compare_digest(self.headers.get("X-Quickadd-Proxy", "").encode(), SSO_SECRET.encode()):
-                addr = self.headers.get("X-Forwarded-For", "").split(",")[-1].strip() or addr
+                # Behind Caddy the list reads "<visitor>, <Caddy>" (Caddy adds the visitor, the staff site's web server
+                # adds Caddy), so the visitor is the one before the last. Used only to count failed sign-ins per
+                # visitor, never to vouch for anyone.
+                hops = [h.strip() for h in self.headers.get("X-Forwarded-For", "").split(",") if h.strip()]
+                addr = (hops[-2] if len(hops) >= 2 else hops[-1]) if hops else addr
             self.addr = addr
             pid = patron_login(u, p, addr)
             if pid:
@@ -1794,7 +2341,7 @@ class Handler(BaseHTTPRequestHandler):
         if self.path == "/healthz":
             return self._send(200, b"ok", "text/plain")
         path = self.path.split("?")[0]
-        if not self._guard(need_admin=path not in ("/", "/api/state", "/api/search", "/api/library", "/api/me") and not path.startswith(("/api/book/", "/api/more/"))):
+        if not self._guard(need_admin=path not in ("/", "/api/state", "/api/search", "/api/library", "/api/me", "/api/me/history") and not path.startswith(("/api/book/", "/api/more/", "/api/cover/"))):
             return
         if path == "/":
             return self._send(200, INDEX, "text/html; charset=utf-8")
@@ -1827,6 +2374,49 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(200, op_lookup(q))
             except KohaError:
                 return self._send(502, {"status": "error", "message": "Koha is not answering yet - try again in a minute."})
+        m = re.match(r"^/api/cover/(b[0-9]{1,9}|[0-9]{9}[0-9Xx]|[0-9]{13})$", path)
+        if m:
+            key = norm_cover_key(m.group(1).upper() if not m.group(1).startswith("b") else m.group(1))
+            tmp = "tmp=1" in (urllib.parse.urlparse(self.path).query or "")          # search suggestions are not kept
+            data = fetch_cover(key, save=not tmp) if key else None
+            if not data:
+                return self._send(404, b"no cover", "text/plain", {"Cache-Control": "private, max-age=600"})
+            etag = cover_etag(key)
+            if etag and self.headers.get("If-None-Match") == etag:
+                self.send_response(304)
+                self.send_header("ETag", etag)
+                self.send_header("Cache-Control", "private, no-cache")
+                self.end_headers()
+                return
+            extra = {"Cache-Control": "private, no-cache"}
+            if etag:
+                extra["ETag"] = etag
+            return self._send(200, data, _sniff(data) or "image/jpeg", extra)
+        if path == "/api/cover-candidates":
+            qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+            try:
+                return self._send(200, op_cover_candidates(int((qs.get("biblio") or ["0"])[0])))
+            except (ValueError, KohaError):
+                return self._send(502, {"covers": [], "message": "Koha is not answering yet - try again."})
+        m = re.match(r"^/api/cover-preview/((?:ol|gb)-[0-9]{1,13})$", path)
+        if m:
+            data = cover_preview(m.group(1))
+            mime = _sniff(data)
+            if not mime:
+                return self._send(404, b"no cover", "text/plain")
+            return self._send(200, data, mime, {"Cache-Control": "private, max-age=3600"})
+        if path == "/api/history":
+            try:
+                return self._send(200, op_history(urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)))
+            except KohaError:
+                return self._send(502, {"status": "error"})
+        if path == "/api/me/history":
+            if self.role != "patron":
+                return self._send(403, {"status": "error"})
+            try:
+                return self._send(200, op_me_history(self.patron_id))
+            except KohaError:
+                return self._send(502, {"status": "error"})
         if path == "/api/me":
             if self.role != "patron":
                 return self._send(403, {"status": "error", "message": "Sign in with a library card to see your books."})
@@ -1862,7 +2452,7 @@ class Handler(BaseHTTPRequestHandler):
                 m = re.match(r"^/api/book/(\d{1,9})$", path)
                 if not m:
                     return self._send(404, {"error": "not found"})
-                return self._send(200, op_book(int(m.group(1)), self.role == "admin"))
+                return self._send(200, op_book(int(m.group(1)), self.role == "admin", self.patron_id if self.role == "patron" else None))
             except KohaError as e:
                 return self._send(404 if e.status == 404 else 502, {"status": "error", "message":
                                   "Koha is not answering yet - try again in a minute." if e.status == 503
@@ -1889,6 +2479,10 @@ class Handler(BaseHTTPRequestHandler):
                     code, body = op_me_renew(self.patron_id, payload)
                 elif self.path == "/api/me/password":
                     code, body = op_me_password(self.patron_id, self.addr, payload)
+                elif self.path == "/api/me/hold":
+                    code, body = op_me_hold(self.patron_id, payload)
+                elif self.path == "/api/me/hold/cancel":
+                    code, body = op_hold_cancel(payload, only_patron=self.patron_id)
                 else:
                     return self._send(404, {"error": "not found"})
                 return self._send(code, body)
@@ -1899,6 +2493,13 @@ class Handler(BaseHTTPRequestHandler):
         if not self._guard():
             return
         try:
+            if self.path.split("?")[0] == "/api/cover/upload":
+                length = int(self.headers.get("Content-Length", "0"))
+                if not 0 < length <= COVER_MAX:
+                    return self._send(413, {"status": "error", "message": "That picture is too large (1.5 MB at most)."})
+                qs = urllib.parse.parse_qs(urllib.parse.urlparse(self.path).query)
+                code, body = op_cover_upload((qs.get("key") or [""])[0], self.rfile.read(length))
+                return self._send(code, body)
             if self.path.split("?")[0] == "/api/scan":
                 length = int(self.headers.get("Content-Length", "0"))
                 if not 0 < length <= MAX_IMAGE:
@@ -1918,7 +2519,7 @@ class Handler(BaseHTTPRequestHandler):
                    "/api/barcodes/reserve": op_reserve, "/api/barcodes/assign": op_assign,
                    "/api/item/update": op_item_update, "/api/item/delete": op_item_delete,
                    "/api/item/copy": op_item_copy, "/api/book/delete": op_book_delete,
-                   "/api/value/add": op_value_add, "/api/tags/set": op_tags_set, "/api/patron/reset-login": op_reset_login, "/api/logins/all": op_logins_all, "/api/ar/set": op_ar_set, "/api/ar/import": op_ar_import, "/api/checkout": op_checkout, "/api/return": op_return, "/api/renew": op_renew, "/api/patron/add": op_patron_add}
+                   "/api/value/add": op_value_add, "/api/cover/delete": op_cover_delete, "/api/cover/refetch": op_cover_refetch, "/api/cover/pick": op_cover_pick, "/api/cover/from-url": op_cover_from_url, "/api/book/edit": op_book_edit, "/api/hold/add": op_hold_add, "/api/hold/cancel": op_hold_cancel, "/api/tags/set": op_tags_set, "/api/patron/reset-login": op_reset_login, "/api/logins/all": op_logins_all, "/api/ar/set": op_ar_set, "/api/ar/import": op_ar_import, "/api/checkout": op_checkout, "/api/return": op_return, "/api/renew": op_renew, "/api/patron/add": op_patron_add}
             fn = ops.get(self.path)
             if not fn:
                 return self._send(404, {"error": "not found"})

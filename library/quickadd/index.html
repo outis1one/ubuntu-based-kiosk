@@ -185,6 +185,7 @@
         <div class="menulabel">Admin</div>
         <a id="tab-lend" href="#lend">Lend / return</a>
         <a id="tab-add" href="#add">Add books</a>
+        <a id="tab-overdue" href="#overdue">Overdue list</a>
         <a id="tab-people" href="#people">People and library cards</a>
         <a id="tab-settings" href="#settings">Barcodes and settings</a>
         <a id="tab-export" href="#export">Export / import</a>
@@ -197,10 +198,14 @@
   <section id="view-home" hidden>
     <form class="find-form big" id="homeform" autocomplete="off" role="search">
       <label class="sr" for="hq">Look up a book or a person</label>
-      <input id="hq" type="search" placeholder="Look up a book (title, author, ISBN)" enterkeyhint="search" autocomplete="off">
+      <input id="hq" type="search" placeholder="Search books, authors, tags, shelves, people" enterkeyhint="search" autocomplete="off">
       <button class="primary" type="submit">Look up</button>
+      <button type="button" id="homescan" aria-label="Scan a barcode with the camera">&#128247; Scan</button>
     </form>
+    <div id="homescanmsg" class="small" aria-live="polite"></div>
     <div id="homeresults" aria-live="polite"></div>
+    <div id="homemine" hidden></div>
+    <div id="homeoverdue" hidden></div>
     <div class="bigacts" id="homeacts">
       <a class="bigact" href="#lend"><strong>Check out</strong><span>Scan a card, then the books</span></a>
       <a class="bigact" href="#return"><strong>Return</strong><span>Scan the books coming back</span></a>
@@ -219,7 +224,7 @@
   <section id="view-library" hidden>
     <form class="find-form" id="findform" autocomplete="off">
       <label class="sr" for="q">Title, author or ISBN</label>
-      <input id="q" type="search" placeholder="Search title, author or ISBN" enterkeyhint="search">
+      <input id="q" type="search" placeholder="Search title, author, ISBN, tag or shelf" enterkeyhint="search">
       <button class="primary" type="submit">Search</button>
     </form>
     <div class="filters">
@@ -314,6 +319,7 @@
     <div class="copybox"><strong id="mename"></strong> <span class="badge" id="mecard"></span>
       <div class="small">What you have borrowed, and when it is due.</div></div>
     <div id="meloans" aria-live="polite"></div>
+    <div id="meextra"></div>
     <details class="settings" id="mepw"><summary>Change my password</summary>
       <form class="manual" id="mepwform" autocomplete="off">
         <input type="password" name="old" placeholder="Current password" autocomplete="current-password" required aria-label="Current password">
@@ -322,6 +328,12 @@
       </form>
       <div id="mepwresult" class="small" aria-live="polite"></div>
     </details>
+  </section>
+
+  <section id="view-overdue" hidden>
+    <p class="noprint"><a href="#home">&larr; Home</a> &nbsp; <button type="button" id="printoverdue" class="primary">Print this list</button></p>
+    <h2 id="overduehead">Overdue books</h2>
+    <div id="overduelist" aria-live="polite"></div>
   </section>
 
   <section id="view-cards" hidden>
@@ -447,7 +459,7 @@
     const img = el('img', { className: 'cover', alt: '', hidden: true });
     if (code && /^\d{10,13}$/.test(code)) {
       img.onload = () => { if (img.naturalWidth > 1) img.hidden = false; };
-      img.src = 'https://covers.openlibrary.org/b/isbn/' + code + '-M.jpg?default=false';
+      img.src = 'api/cover/' + code;
     }
     return img;
   }
@@ -739,7 +751,7 @@
     const rows = r.candidates.map(c => {
       const btn = el('button', { type: 'button', className: c.have ? '' : 'primary' }, c.have ? 'Add another copy' : 'Add this one');
       btn.onclick = () => { $('result').replaceChildren(); add(c.isbn, c.have ? { copy: true } : {}); };
-      const img = el('img', { className: 'cv', alt: '', loading: 'lazy', src: 'https://covers.openlibrary.org/b/isbn/' + c.isbn + '-S.jpg?default=false' });
+      const img = el('img', { className: 'cv', alt: '', loading: 'lazy', src: 'api/cover/' + c.isbn + '?tmp=1' });
       img.onerror = () => { img.style.visibility = 'hidden'; };
       return el('div', { className: 'cand' }, img, el('div', { className: 't' }, el('strong', {}, c.title),
         el('div', { className: 'meta' }, [c.author, c.year, c.publisher].filter(Boolean).join(' · ')),
@@ -772,10 +784,12 @@
   function art(b, cls) {
     const a = el('span', { className: cls || 'art' }, b.title);
     a.style.setProperty('--tint', tint(b.title));
-    if (b.isbn && /^\d{10,13}$/.test(b.isbn.replace(/\D/g, '').slice(0, 13))) {
-      const img = el('img', { alt: '', hidden: true, loading: 'lazy' });
-      img.onload = () => { if (img.naturalWidth > 1) img.hidden = false; };
-      img.src = 'https://covers.openlibrary.org/b/isbn/' + b.isbn.replace(/\D/g, '').slice(0, 13) + '-M.jpg?default=false';
+    const key = b.cover || (b.isbn ? b.isbn.replace(/[^0-9Xx]/g, '').slice(0, 13) : '');
+    if (/^(b\d+|\d{13}|\d{9}[\dXx])$/.test(key)) {
+      // (not `hidden`: a lazy-loaded image that is not rendered is never fetched at all)
+      const img = el('img', { alt: '', loading: 'lazy', style: 'opacity:0' });
+      img.onload = () => { if (img.naturalWidth > 1) img.style.opacity = '1'; };
+      img.src = 'api/cover/' + key + (b.coverv ? '?t=' + b.coverv : '');
       a.append(img);
     }
     return a;
@@ -863,6 +877,16 @@
     api('/api/more/' + id).then(m => fillMore(moreBox, b, m)).catch(() => moreBox.remove());
     for (const c of b.copies) box.append(copyBox(b, c, refresh));
     if (!b.copies.length) box.append(el('div', { className: 'small' }, 'No copies recorded.'));
+    box.append(holdsBox(b), ...(viewer ? [] : [historyBox('biblio=' + b.id, 'Borrowing history')]));
+    if (!viewer) {
+      const edit = el('button', { type: 'button' }, 'Edit details');
+      edit.onclick = () => { const f = editForm(b, refresh); edit.replaceWith(f); f.querySelector('input').focus(); };
+      const covBtn = el('button', { type: 'button' }, 'Change cover');
+      const panel = el('div', { className: 'copybox', hidden: true, style: 'width:100%' });
+      covBtn.onclick = () => { panel.hidden = !panel.hidden; if (!panel.hidden && !panel.firstChild) coverPanel(panel, b, head); };
+      head.querySelector('.body').append(el('div', { className: 'actions' }, edit, covBtn), panel);
+      if (reopenCover) { reopenCover = false; panel.hidden = false; coverPanel(panel, b, head); }
+    }
     if (!viewer) {
       const more = el('button', { type: 'button' }, 'Add another copy');
       more.onclick = async () => { more.disabled = true; const r = await api('/api/item/copy', { biblio_id: b.id }); if (r.status === 'added') refresh(); else more.disabled = false; };
@@ -896,18 +920,52 @@
     return sel;
   }
 
-  // Reading level (AR): typed in here or imported from a CSV. AR BookFind itself is only a link: it has no
-  // public feed and its terms forbid automated look-ups.
+  // Reading level (AR BookFind): ATOS book level, interest level, AR points, quiz number. AR BookFind has no public feed and
+  // its terms forbid automated look-ups, so you copy the book's page there and paste it here; the fields fill themselves.
+  const INTEREST = { LG: 'Lower Grades (LG K-3)', MG: 'Middle Grades (MG 4-8)', 'MG+': 'Middle Grades Plus (MG+ 6 and up)', UG: 'Upper Grades (UG 9-12)' };
+  function arSummary(ar) {
+    const bits = [];
+    if (ar.level) bits.push('ATOS book level ' + ar.level);
+    if (ar.interest) bits.push(INTEREST[ar.interest] || ar.interest);
+    if (ar.points) bits.push(ar.points + ' AR points');
+    if (ar.quiz) bits.push('quiz ' + ar.quiz);
+    return bits.join(' · ');
+  }
+  function parseAR(t) {
+    const g = re => (t.match(re) || [])[1] || '';
+    let interest = '';
+    const il = (t.match(/Interest\s*Level:?\s*([^\n\r]{0,60})/i) || [])[1] || '';
+    if (/MG\s*\+|Middle Grades Plus/i.test(il)) interest = 'MG+';
+    else if (/\bLG\b|Lower Grades/i.test(il)) interest = 'LG';
+    else if (/\bMG\b|Middle Grades/i.test(il)) interest = 'MG';
+    else if (/\bUG\b|Upper Grades/i.test(il)) interest = 'UG';
+    return { level: g(/(?:ATOS\s*)?Book\s*Level:?\s*([0-9]{1,2}(?:\.[0-9]{1,2})?)/i), points: g(/(?:AR\s*)?Points:?\s*([0-9]{1,3}(?:\.[0-9]{1,2})?)/i),
+             quiz: g(/Quiz\s*(?:No\.?|Number|#)\s*:?\s*([0-9]{3,6})/i), interest };
+  }
   function arBox(b, m) {
     const ar = m.ar || {};
-    const f = (ph, v, w) => el('input', { type: 'text', placeholder: ph, value: v || '', 'aria-label': ph, inputMode: 'decimal', style: 'width:' + w + 'em;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)' });
-    const lvl = f('Level', ar.level, 5), pts = f('Points', ar.points, 5), quiz = f('Quiz no.', ar.quiz, 7), inter = f('Interest (LG/MG/UG)', ar.interest, 9);
     const wrap = el('div', { className: 'small', style: 'margin-top:10px;border-top:1px solid var(--line);padding-top:8px' });
-    const copy = el('button', { type: 'button' }, 'Copy title');
-    copy.onclick = async () => { try { await navigator.clipboard.writeText(b.title); copy.textContent = 'Copied ✓'; } catch (e) { copy.textContent = 'Copy failed'; } setTimeout(() => copy.textContent = 'Copy title', 1500); };
-    const open = el('a', { href: 'https://www.arbookfind.com/', target: '_blank', rel: 'noopener noreferrer' }, 'Open AR BookFind');
+    const sumEl = el('span', {}, arSummary(ar) || 'not recorded');
+    wrap.append(el('strong', {}, 'Accelerated Reader: '), sumEl);
+    if (viewer) return wrap;
+    const field = (label, input) => el('label', { className: 'small', style: 'display:flex;flex-direction:column;gap:2px;min-width:7em' }, label, input);
+    const css = 'font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)';
+    const lvl = el('input', { type: 'text', value: ar.level || '', inputMode: 'decimal', placeholder: 'e.g. 5.4', style: css + ';width:6em', 'aria-label': 'ATOS book level' });
+    const pts = el('input', { type: 'text', value: ar.points || '', inputMode: 'decimal', placeholder: 'e.g. 6.0', style: css + ';width:6em', 'aria-label': 'AR points' });
+    const quiz = el('input', { type: 'text', value: ar.quiz || '', inputMode: 'numeric', placeholder: 'optional', style: css + ';width:7em', 'aria-label': 'Quiz number' });
+    const inter = el('select', { style: css, 'aria-label': 'Interest level' }, el('option', { value: '' }, '(not set)'), ...Object.entries(INTEREST).map(([k, v]) => el('option', { value: k }, v)));
+    inter.value = ar.interest || '';
+    const edit = el('div', { style: 'display:flex;flex-wrap:wrap;gap:10px;margin-top:8px;align-items:flex-end' },
+      field('ATOS book level', lvl), field('Interest level', inter), field('AR points', pts), field('Quiz number', quiz));
+    const save = el('button', { type: 'button', className: 'primary' }, 'Save');
+    const msg = el('span', {});
+    save.onclick = async () => {
+      const r = await api('/api/ar/set', { isbn: m.isbn, level: lvl.value, points: pts.value, quiz: quiz.value, interest: inter.value });
+      msg.textContent = r.status === 'saved' ? ' Saved ✓' : ' ' + (r.message || 'Could not save.');
+      if (r.status === 'saved') sumEl.textContent = arSummary({ level: lvl.value, points: pts.value, quiz: quiz.value, interest: inter.value }) || 'not recorded';
+    };
     const copyTitle = async () => { try { await navigator.clipboard.writeText(b.title); } catch (e) {} };
-    const arPop = el('button', { type: 'button' }, 'Open beside this page');
+    const arPop = el('button', { type: 'button' }, 'Open AR BookFind beside this page');
     arPop.onclick = async () => { await copyTitle();
       const w = Math.min(560, Math.floor(screen.availWidth / 2)), h = screen.availHeight - 80;
       window.open('https://www.arbookfind.com/', 'arbookfind', 'popup=yes,width=' + w + ',height=' + h + ',left=' + (screen.availWidth - w) + ',top=40'); };
@@ -918,28 +976,178 @@
       arFrame.textContent = 'Hide it';
       arHolder.replaceChildren(el('iframe', { src: 'https://www.arbookfind.com/', title: 'AR BookFind', loading: 'lazy', referrerPolicy: 'no-referrer',
         style: 'width:100%;height:520px;border:1px solid var(--line);border-radius:8px;margin-top:8px;background:#fff' }),
-        el('div', { className: 'small' }, 'If it keeps asking who you are, your browser is blocking its cookies inside another page: use "Open beside this page" instead.')); };
-    if (viewer) { wrap.append(el('strong', {}, 'Reading level: '), ar.level ? 'AR ' + ar.level + (ar.points ? ', ' + ar.points + ' points' : '') + (ar.interest ? ', interest ' + ar.interest : '') : 'not recorded'); return wrap; }
-    const save = el('button', { type: 'button', className: 'primary' }, 'Save');
-    const msg = el('span', {});
-    save.onclick = async () => {
-      const r = await api('/api/ar/set', { isbn: m.isbn, level: lvl.value, points: pts.value, quiz: quiz.value, interest: inter.value });
-      msg.textContent = r.status === 'saved' ? ' Saved ✓' : ' ' + (r.message || 'Could not save.');
+        el('div', { className: 'small' }, 'If it keeps asking who you are, your browser is blocking its cookies inside another page: use the pop-up instead.')); };
+    const copy = el('button', { type: 'button' }, 'Copy title');
+    copy.onclick = async () => { await copyTitle(); copy.textContent = 'Copied ✓'; setTimeout(() => copy.textContent = 'Copy title', 1500); };
+    const paste = el('textarea', { rows: 3, placeholder: 'Paste the AR BookFind book page here (open the book there, select all, copy, paste): the fields above fill in by themselves',
+      'aria-label': 'Pasted AR BookFind text', style: css + ';width:100%;margin-top:6px' });
+    // Only the four fields are taken from what was copied; the rest of the text is thrown away, never stored.
+    const looksLikeAR = t => /Book\s*Level|AR\s*Points|Interest\s*Level/i.test(t);
+    const norm = x => x.toLowerCase().replace(/[^a-z0-9 ]+/g, ' ').replace(/\s+/g, ' ').trim();
+    const applyText = (t, from) => {
+      // A results page can list several books: read from this book's title onward when it appears in the text.
+      const at = t.toLowerCase().indexOf(b.title.toLowerCase().split(':')[0].trim());
+      const f = parseAR(at >= 0 ? t.slice(at, at + 1800) : t);
+      if (!(f.level || f.points || f.quiz || f.interest)) { msg.textContent = t.trim() ? " Couldn't find a level or points in that text." : ''; return false; }
+      if (f.level) lvl.value = f.level; if (f.points) pts.value = f.points; if (f.quiz) quiz.value = f.quiz; if (f.interest) inter.value = f.interest;
+      const words = norm(b.title).split(' ').filter(w => w.length > 3).slice(0, 3);
+      const same = !words.length || words.every(w => norm(t).includes(w));
+      msg.textContent = ' Filled in from ' + from + ' - check it' + (same ? '' : ' (that text does not mention "' + b.title + '": is it the right book?)') + ', then Save.';
+      return true;
     };
-    // Easiest path: on AR BookFind's book page select everything (Ctrl/Cmd+A), copy, and paste it here.
-    const paste = el('textarea', { rows: 2, placeholder: 'Paste the AR BookFind book page here (select all, copy, paste)', 'aria-label': 'Pasted AR BookFind text',
-      style: 'width:100%;margin-top:6px;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)' });
-    paste.oninput = () => {
-      const t = paste.value, g = re => (t.match(re) || [])[1] || '';
-      const found = { level: g(/Book\s*Level:?\s*([0-9]{1,2}(?:\.[0-9]{1,2})?)/i), points: g(/(?:AR\s*)?Points:?\s*([0-9]{1,3}(?:\.[0-9]{1,2})?)/i),
-                      quiz: g(/Quiz\s*(?:No\.?|Number|#)\s*:?\s*([0-9]{3,6})/i), interest: g(/Interest\s*Level:?\s*(LG|MG\+?|UG)/i) };
-      if (found.level) lvl.value = found.level; if (found.points) pts.value = found.points; if (found.quiz) quiz.value = found.quiz; if (found.interest) inter.value = found.interest;
-      msg.textContent = (found.level || found.points || found.quiz) ? ' Filled in from what you pasted - check it, then Save.' : (t.trim() ? " Couldn't find a level or points in that text." : '');
+    paste.oninput = () => applyText(paste.value, 'what you pasted');
+    const fromClip = el('button', { type: 'button' }, 'Fill from clipboard');
+    fromClip.onclick = async () => {
+      try { applyText(await navigator.clipboard.readText(), 'the clipboard'); }
+      catch (e) { msg.textContent = " Couldn't read the clipboard here - paste into the box below instead."; }
     };
-    wrap.append(el('strong', {}, 'Reading level (AR): '), lvl, ' ', pts, ' ', quiz, ' ', inter, ' ', save, msg, paste,
-      el('div', { style: 'margin-top:6px' }, open, ' ', arPop, ' ', arFrame, ' ', copy),
-      el('div', { className: 'small' }, 'Search for the title there, select the whole book page, copy, and paste it below. (The title is copied for you when you open it.)'), arHolder);
+    // After you copy on AR BookFind and come back to this window, fill in automatically (when the browser already allows reading the clipboard).
+    let lastClip = '';
+    const onFocus = async () => {
+      if (!document.contains(wrap)) { window.removeEventListener('focus', onFocus); return; }
+      try {
+        const perm = navigator.permissions && await navigator.permissions.query({ name: 'clipboard-read' });
+        if (!perm || perm.state !== 'granted') return;
+        const t = await navigator.clipboard.readText();
+        if (t && t !== lastClip && looksLikeAR(t)) { lastClip = t; applyText(t, 'the clipboard'); }
+      } catch (e) {}
+    };
+    window.addEventListener('focus', onFocus);
+    // Ctrl/Cmd+V anywhere on the page (not in a text box) fills the fields: no button, no permission prompt, works on plain HTTP too.
+    const onPaste = ev => {
+      if (!document.contains(wrap)) { document.removeEventListener('paste', onPaste); return; }
+      const tg = ev.target;
+      if (tg && /^(INPUT|TEXTAREA|SELECT)$/.test(tg.tagName)) return;
+      const t = (ev.clipboardData && ev.clipboardData.getData('text')) || '';
+      if (t && looksLikeAR(t)) { ev.preventDefault(); applyText(t, 'what you pasted'); wrap.scrollIntoView({ block: 'nearest' }); }
+    };
+    document.addEventListener('paste', onPaste);
+    wrap.append(edit, el('div', { style: 'margin-top:8px' }, save, msg),
+      el('div', { style: 'margin-top:8px' }, el('a', { href: 'https://www.arbookfind.com/', target: '_blank', rel: 'noopener noreferrer' }, 'Open AR BookFind'), ' ', arPop, ' ', arFrame, ' ', copy),
+      el('div', { style: 'margin-top:8px' }, fromClip, el('span', { className: 'small' }, ' or just press Ctrl/Cmd+V on this page after copying on AR BookFind (Ctrl/Cmd+A, then Ctrl/Cmd+C)')), paste, arHolder);
     return wrap;
+  }
+
+  let reopenCover = false;
+  // Change a book's cover: upload your own picture, remove it, ask Open Library again by ISBN, or pick another edition's cover.
+  function coverPanel(panel, b, head) {
+    const key = b.cover; const stamp = Date.now();
+    const msg = el('div', { className: 'small', role: 'status', style: 'margin-top:6px' });
+    const preview = el('div', { style: 'width:110px;flex:none' });
+    const showCurrent = () => { preview.replaceChildren(art(Object.assign({}, b, { coverv: Date.now() }), 'art')); preview.firstChild.style.cssText = 'position:relative;display:flex;aspect-ratio:2/3;width:100%;border-radius:6px;overflow:hidden;background:var(--tint);color:#fff;padding:6px;align-items:flex-end;font-weight:700;font-size:.8rem'; };
+    const done = text => { msg.textContent = text; showCurrent(); head.replaceChild(art(Object.assign({}, b, { coverv: Date.now() })), head.firstChild); };
+    const file = el('input', { type: 'file', accept: 'image/*', hidden: true, 'aria-label': 'Choose a cover picture' });
+    const up = el('button', { type: 'button', className: 'primary' }, 'Upload a picture');
+    up.onclick = () => file.click();
+    file.onchange = async () => {
+      const f = file.files[0]; file.value = ''; if (!f) return;
+      msg.textContent = 'Uploading…';
+      try {
+        const blob = await shrink(f, 1000);
+        const r = await fetch('api/cover/upload?key=' + encodeURIComponent(key), { method: 'POST', headers: { 'Content-Type': 'image/jpeg', 'X-Quickadd': '1' }, body: blob });
+        const j = await r.json(); done(j.status === 'saved' ? 'Cover saved.' : (j.message || 'Could not save that picture.'));
+      } catch (e) { msg.textContent = 'Could not read that picture - try a JPEG or PNG.'; }
+    };
+    const rm = el('button', { type: 'button', className: 'danger' }, 'Remove cover');
+    rm.onclick = async () => { if (!confirm('Remove this cover?')) return; await api('/api/cover/delete', { key }); done('Cover removed. It will not be fetched again unless you search again.'); };
+    const again = el('button', { type: 'button' }, 'Try the ISBN again');
+    again.hidden = key.startsWith('b');
+    again.onclick = async () => { msg.textContent = 'Looking…'; const r = await api('/api/cover/refetch', { key }); done(r.status === 'found' ? 'Found a cover (' + r.source + ').' : 'No cover found for that ISBN (tried ' + (r.tried || 'the usual sources') + '). Try Find another cover, upload a picture, or use an image address.'); };
+    const grid = el('div', { style: 'display:flex;flex-wrap:wrap;gap:10px;margin-top:10px' });
+    const other = el('button', { type: 'button' }, 'Find another cover');
+    other.onclick = async () => {
+      msg.textContent = 'Searching Open Library…'; grid.replaceChildren();
+      const r = await api('/api/cover-candidates?biblio=' + b.id);
+      msg.textContent = (r.covers || []).length ? 'Choose one:' : (r.message || 'No other covers found. Upload a picture instead.');
+      grid.replaceChildren(...(r.covers || []).map(c => { const bt = el('button', { type: 'button', title: [c.title, c.author, c.year, c.source].filter(Boolean).join(' · '), style: 'padding:3px;background:var(--card)' },
+        el('img', { src: 'api/cover-preview/' + c.id, alt: c.title, loading: 'lazy', style: 'width:84px;height:124px;object-fit:cover;display:block' }));
+        bt.onclick = async () => { msg.textContent = 'Saving…'; const x = await api('/api/cover/pick', { key, cover: c.id }); grid.replaceChildren(); done(x.status === 'saved' ? 'Cover saved.' : (x.message || 'Could not use that one.')); };
+        return bt; }));
+    };
+    const urlIn = el('input', { type: 'url', placeholder: 'https://… address of a cover picture', 'aria-label': 'Address of a cover picture', style: 'flex:1;min-width:12em;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink)' });
+    const useUrl = el('button', { type: 'button' }, 'Use this address');
+    useUrl.onclick = async () => { if (!urlIn.value.trim()) return; msg.textContent = 'Fetching…'; const r = await api('/api/cover/from-url', { key, url: urlIn.value.trim() });
+      if (r.status === 'saved') { urlIn.value = ''; done('Cover saved.'); } else msg.textContent = r.message || 'Could not use that address.'; };
+    showCurrent();
+    panel.replaceChildren(el('strong', {}, 'Cover'), el('div', { style: 'display:flex;gap:14px;flex-wrap:wrap;margin-top:8px' }, preview,
+      el('div', { style: 'flex:1;min-width:200px' }, el('div', { className: 'actions', style: 'margin-top:0' }, up, other, again, rm, file),
+        el('div', { className: 'small', style: 'margin-top:6px' }, 'A phone offers its camera or photos for the upload. On AR BookFind (or any site) you can right-click a cover, choose Copy image address, and paste it below.'),
+        el('div', { style: 'display:flex;gap:8px;margin-top:6px;flex-wrap:wrap' }, urlIn, useUrl), msg, grid)));
+  }
+
+  function editForm(b, refresh) {
+    const f = el('form', { className: 'manual', style: 'width:100%' });
+    const inp = (name, label, val, extra = {}) => el('label', { className: 'small' }, label, el('input', Object.assign({ name, value: val || '', 'aria-label': label }, extra)));
+    f.append(inp('title', 'Title', b.title, { required: true }), inp('subtitle', 'Subtitle', b.subtitle), inp('author', 'Author', b.author),
+      inp('publisher', 'Publisher', b.publisher), inp('year', 'Year', b.year), inp('pages', 'Pages', b.pages), inp('isbn', 'ISBN', b.isbn));
+    const sum = el('textarea', { name: 'summary', rows: 4, 'aria-label': 'Summary', style: 'padding:10px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);font:inherit;width:100%' });
+    sum.value = b.summary || '';
+    const msg = el('span', { className: 'small' });
+    const cancel = el('button', { type: 'button' }, 'Cancel'); cancel.onclick = refresh;
+    f.append(el('label', { className: 'small' }, 'Summary', sum), el('div', { className: 'actions' }, el('button', { className: 'primary', type: 'submit' }, 'Save changes'), cancel, msg));
+    f.onsubmit = async ev => {
+      ev.preventDefault();
+      const r = await api('/api/book/edit', Object.assign({ biblio_id: b.id }, Object.fromEntries(new FormData(f))));
+      if (r.status === 'saved') refresh(); else msg.textContent = ' ' + (r.message || 'Could not save.');
+    };
+    return f;
+  }
+
+  // Holds: staff can place one for a person; a signed-in borrower can ask for the book for themselves.
+  function holdsBox(b) {
+    const box = el('div', { className: 'copybox' });
+    const onShelf = b.copies.some(c => c.status === 'On shelf');
+    const reload = () => loadBook(b.id);
+    const parts = [el('strong', {}, 'Holds: ')];
+    if (!viewer) {
+      const hs = b.holds || [];
+      parts.push(hs.length ? '' : el('span', { className: 'small' }, 'none'));
+      hs.forEach(h => {
+        const x = el('button', { type: 'button', style: 'margin-left:6px' }, 'Cancel');
+        x.onclick = async () => { await api('/api/hold/cancel', { hold_id: h.hold_id }); reload(); };
+        parts.push(el('div', { className: 'loan' }, el('span', { className: 't' }, '#' + h.position + ' ' + h.who, el('span', { className: 'small' }, ' · since ' + fmtDue(h.date) + (h.waiting ? ' · ready for pickup' : ''))), x));
+      });
+      const who = el('input', { type: 'search', placeholder: 'Place a hold for… (name or card)', 'aria-label': 'Place a hold for', autocomplete: 'off',
+        style: 'font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:8px;background:var(--card);color:var(--ink);min-width:14em' });
+      const res = el('div', {});
+      who.onkeydown = async ev => {
+        if (ev.key !== 'Enter') return; ev.preventDefault();
+        const r = await api('/api/patrons?q=' + encodeURIComponent(who.value.trim()));
+        res.replaceChildren(...(r.patrons || []).slice(0, 6).map(p => { const bt = el('button', { type: 'button' }, 'Hold for ' + p.name + ' (' + p.card + ')');
+          bt.onclick = async () => { const x = await api('/api/hold/add', { patron_id: p.id, biblio_id: b.id }); if (x.status === 'placed') reload(); else res.replaceChildren(el('div', { className: 'card warn' }, el('div', { className: 'body' }, x.message || 'Could not place the hold.'))); };
+          return el('div', { style: 'margin:4px 0' }, bt); }), ...((r.patrons || []).length ? [] : [el('div', { className: 'small' }, 'Nobody matches.')]));
+      };
+      parts.push(el('div', { style: 'margin-top:8px' }, who), res);
+    } else if (isPatron) {
+      if (b.my_hold) {
+        const x = el('button', { type: 'button' }, 'Cancel my hold');
+        x.onclick = async () => { await api('/api/me/hold/cancel', { hold_id: b.my_hold }); reload(); };
+        parts.push(el('span', {}, 'You have asked for this book (' + b.hold_count + (b.hold_count === 1 ? ' hold' : ' holds') + ' in all). '), x);
+      } else if (onShelf) parts.push(el('span', { className: 'small' }, 'There is a copy on the shelf now.'));
+      else {
+        const bt = el('button', { type: 'button', className: 'primary' }, 'Hold this book for me');
+        bt.onclick = async () => { bt.disabled = true; const x = await api('/api/me/hold', { biblio_id: b.id }); if (x.status === 'placed') reload(); else { bt.disabled = false; alert(x.message || 'Could not place the hold.'); } };
+        parts.push(el('span', { className: 'small' }, 'Every copy is out. '), bt);
+      }
+    } else { box.hidden = true; }
+    box.replaceChildren(...parts);
+    return box;
+  }
+
+  // Past loans of a book or a person (staff), loaded when opened.
+  function historyBox(query, title) {
+    const d = el('details', { className: 'settings' }, el('summary', {}, title));
+    const body = el('div', { style: 'margin-top:8px' }); d.append(body);
+    let loaded = false;
+    d.ontoggle = async () => {
+      if (!d.open || loaded) return; loaded = true; body.textContent = 'Loading…';
+      const r = await api('/api/history?' + query);
+      body.replaceChildren(...((r.loans || []).length ? r.loans.map(l => el('div', { className: 'loan' }, el('span', { className: 't' },
+        query.startsWith('biblio') ? el('strong', {}, l.who) : el('a', { href: '#book/' + l.biblio_id }, l.title),
+        el('div', { className: 'small' }, 'Borrowed ' + fmtDue(l.checkout_date) + (l.returned ? ' · returned ' + fmtDue(l.returned) : '')))))
+        : [el('div', { className: 'small' }, 'Nothing yet.')]));
+    };
+    return d;
   }
 
   // Tags: any number per book, free words ("to read", "kids", "signed"...). Click one to see every book with it.
@@ -1028,7 +1236,8 @@
   async function doReturn(code, box) {
     box.textContent = 'Returning…';
     let r; try { r = await api('/api/return', { barcode: code }); } catch (e) { r = { status: 'error', message: 'Could not reach the service.' }; }
-    if (r.status === 'returned') { beep(SOUND.added); say(box, 'ok', 'Returned: ' + (r.title || code) + (r.patron ? ' (from ' + r.patron + ')' : '')); }
+    if (r.status === 'returned' && r.hold_for) { beep(SOUND.duplicate); say(box, 'warn', 'Returned: ' + (r.title || code) + ' - ON HOLD for ' + r.hold_for + '. Put it aside for pickup.'); }
+    else if (r.status === 'returned') { beep(SOUND.added); say(box, 'ok', 'Returned: ' + (r.title || code) + (r.patron ? ' (from ' + r.patron + ')' : '')); }
     else if (r.status === 'not_out') { beep(SOUND.duplicate); say(box, 'warn', (r.title || code) + ' was not checked out.'); }
     else if (r.status === 'unknown_barcode') { beep(SOUND.notfound); say(box, 'warn', 'No book has the barcode ' + code + '.'); }
     else { beep(SOUND.error); say(box, 'bad', r.message || 'Could not return that.'); }
@@ -1064,6 +1273,30 @@
     if (hit.length === 1) { beep(SOUND.added); location.hash = '#lend/' + hit[0].id; }
     else { beep(SOUND.notfound); $('whostatus').textContent = 'No library card matches ' + codes[0] + '.'; }
   };
+
+  async function loadOverdue() {
+    let r; try { r = await api('/api/out'); } catch (e) { return; }
+    const late = (r.loans || []).filter(l => l.overdue);
+    $('overduehead').textContent = 'Overdue books - ' + new Date().toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' });
+    if (!late.length) { $('overduelist').replaceChildren(el('div', { className: 'card ok' }, el('div', { className: 'body' }, 'Nothing is overdue.'))); return; }
+    const byWho = {};
+    late.forEach(l => (byWho[l.patron_id] = byWho[l.patron_id] || []).push(l));
+    $('overduelist').replaceChildren(...Object.values(byWho).map(ls => {
+      const p = ls[0];
+      const body = 'Hello ' + p.who + ',\n\nThese library books are overdue:\n' + ls.map(l => ' - ' + l.title + ' (due ' + fmtDue(l.due) + ')').join('\n') + '\n\nPlease bring them back when you can. Thank you!';
+      return el('div', { className: 'copybox' }, el('strong', {}, p.who), el('span', { className: 'small' }, ' ' + [p.phone, p.email].filter(Boolean).join(' · ')),
+        ...ls.map(l => el('div', { className: 'loan' }, el('span', { className: 'badge' }, l.barcode), el('span', { className: 't' }, l.title),
+          el('span', { className: 'chip late' }, l.days_late + (l.days_late === 1 ? ' day late' : ' days late') + ' · due ' + fmtDue(l.due)))),
+        p.email ? el('div', { className: 'small noprint' }, el('a', { href: 'mailto:' + p.email + '?subject=' + encodeURIComponent('Overdue library books') + '&body=' + encodeURIComponent(body) }, 'Write an email reminder')) : '');
+    }));
+  }
+  $('printoverdue').onclick = () => window.print();
+  async function loadHomeOverdue() {
+    let r; try { r = await api('/api/out'); } catch (e) { return; }
+    const n = (r.loans || []).filter(l => l.overdue).length;
+    const box = $('homeoverdue'); box.hidden = !n;
+    if (n) box.replaceChildren(el('a', { href: '#overdue', className: 'card warn', style: 'display:block;text-decoration:none;color:inherit' }, el('div', { className: 'body' }, el('strong', {}, n + (n === 1 ? ' book is overdue' : ' books are overdue')), ' - see the list')));
+  }
 
   async function loadOut() {
     let r; try { r = await api('/api/out'); } catch (e) { return; }
@@ -1128,6 +1361,7 @@
     const loans = p.loans.length ? p.loans.map(l => loanRow(l, false)) : [el('div', { className: 'small' }, 'Nothing checked out to ' + p.name + ' yet.')];
     $('patronbox').replaceChildren(el('div', { className: 'title', style: 'margin-top:10px' }, p.name, ' ', el('span', { className: 'badge' }, p.card || 'no card')),
       form, el('div', { className: 'cam-row' }, bookCam, ' ', bookLive), out, el('h2', {}, 'Has out'), ...loans,
+      historyBox('patron=' + p.id, 'Past books'),
       el('div', { className: 'small', style: 'margin-top:8px' }, el('a', { href: '#card/' + p.id }, 'Print library card'), ' · ',
         el('a', { href: '#lend' }, 'Choose someone else')));
     if (!quiet) scan.focus();
@@ -1243,21 +1477,51 @@
   };
   $('printcard').onclick = () => window.print();
 
-  async function loadMine() {
-    let r; try { r = await api('/api/me'); } catch (e) { r = {}; }
-    if (!r.loans) { $('meloans').textContent = r.message || 'Could not load your books.'; return; }
-    $('mename').textContent = r.name; $('mecard').textContent = r.card;
+  // A borrower's loans: title, who wrote it, when it was borrowed, when it is due (days left / overdue), renewals, Renew.
+  function renderLoans(target, r, reload) {
     const today = new Date(); today.setHours(12, 0, 0, 0);
     const rows = r.loans.map(l => {
       const days = Math.round((new Date(l.due + 'T12:00:00') - today) / 86400000);
       const when = l.overdue ? 'Overdue by ' + (-days) + (days === -1 ? ' day' : ' days') : days === 0 ? 'Due today' : 'Due ' + fmtDue(l.due) + ' (in ' + days + (days === 1 ? ' day)' : ' days)');
       const ren = el('button', { type: 'button' }, 'Renew');
       ren.onclick = async () => { ren.disabled = true; const x = await api('/api/me/renew', { checkout_id: l.checkout_id });
-        if (x.status === 'renewed') loadMine(); else { ren.disabled = false; alert(x.message || 'That one cannot be renewed.'); } };
-      return el('div', { className: 'loan' }, el('span', { className: 't' }, el('a', { href: '#book/' + l.biblio_id }, l.title), el('div', { className: 'small' }, l.author)),
-        el('span', { className: 'chip ' + (l.overdue ? 'late' : 'in') }, when), ren);
+        if (x.status === 'renewed') reload(); else { ren.disabled = false; alert(x.message || 'That one cannot be renewed (the limit is reached, or someone is waiting for it).'); } };
+      const facts = ['Borrowed ' + fmtDue(l.checkout_date), l.renewals ? 'renewed ' + (l.renewals === 1 ? 'once' : l.renewals + ' times') : ''].filter(Boolean).join(' · ');
+      return el('div', { className: 'loan' }, el('span', { className: 't' }, el('a', { href: '#book/' + l.biblio_id }, l.title),
+          el('div', { className: 'small' }, [l.author, facts].filter(Boolean).join(' · '))),
+        el('span', { className: 'chip ' + (l.overdue ? 'late' : days <= 3 ? 'out' : 'in') }, when), ren);
     });
-    $('meloans').replaceChildren(...(rows.length ? rows : [el('div', { className: 'card ok' }, el('div', { className: 'body' }, 'You have nothing checked out right now.'))]));
+    const late = r.loans.filter(l => l.overdue).length;
+    const head = r.loans.length ? 'You have ' + r.loans.length + (r.loans.length === 1 ? ' book' : ' books') + ' out' + (late ? ', ' + late + ' overdue' : '') + '.' : 'You have nothing checked out right now.';
+    target.replaceChildren(el('div', { className: 'card ' + (late ? 'warn' : 'ok') }, el('div', { className: 'body' }, el('strong', {}, head))), ...rows);
+  }
+  async function loadMine() {
+    let r; try { r = await api('/api/me'); } catch (e) { r = {}; }
+    if (!r.loans) { $('meloans').textContent = r.message || 'Could not load your books.'; return; }
+    $('mename').textContent = r.name; $('mecard').textContent = r.card;
+    renderLoans($('meloans'), r, loadMine);
+    const extra = [];
+    if ((r.holds || []).length) {
+      extra.push(el('h2', {}, 'My holds'), ...r.holds.map(h => { const x = el('button', { type: 'button' }, 'Cancel');
+        x.onclick = async () => { await api('/api/me/hold/cancel', { hold_id: h.hold_id }); loadMine(); };
+        return el('div', { className: 'loan' }, el('span', { className: 't' }, el('a', { href: '#book/' + h.biblio_id }, h.title), el('div', { className: 'small' }, h.author)),
+          el('span', { className: 'chip ' + (h.waiting ? 'in' : 'out') }, h.waiting ? 'Ready for pickup' : 'In the queue (#' + h.position + ')'), x); }));
+    }
+    const past = el('details', { className: 'settings' }, el('summary', {}, 'Books I have borrowed before'));
+    const pb = el('div', { style: 'margin-top:8px' }); past.append(pb);
+    let ld = false;
+    past.ontoggle = async () => { if (!past.open || ld) return; ld = true; pb.textContent = 'Loading…'; const h = await api('/api/me/history');
+      pb.replaceChildren(...((h.loans || []).length ? h.loans.map(l => el('div', { className: 'loan' }, el('span', { className: 't' }, el('a', { href: '#book/' + l.biblio_id }, l.title),
+        el('div', { className: 'small' }, 'Borrowed ' + fmtDue(l.checkout_date) + (l.returned ? ' · returned ' + fmtDue(l.returned) : ''))))) : [el('div', { className: 'small' }, 'Nothing yet.')])); };
+    $('meextra').replaceChildren(...extra, past);
+  }
+  async function loadHomeMine() {
+    let r; try { r = await api('/api/me'); } catch (e) { return; }
+    if (!r.loans) return;
+    const box = $('homemine'); box.hidden = false;
+    const inner = el('div', {});
+    box.replaceChildren(el('h2', {}, 'Hello, ' + r.name), inner);
+    renderLoans(inner, r, loadHomeMine);
   }
   $('mepwform').onsubmit = async ev => {
     ev.preventDefault(); const f = ev.target; const r = await api('/api/me/password', Object.fromEntries(new FormData(f)));
@@ -1287,6 +1551,16 @@
     else parts.push(el('div', { className: 'small' }, 'No book matches "' + term + '".' + (viewer ? '' : ' ') ), viewer ? '' : el('a', { href: '#add' }, 'Add it'));
     box.replaceChildren(...parts);
   }
+  // Scan a barcode into the search box: a book's barcode or ISBN finds the book, a library card (barcode or phone QR) finds the person.
+  // A USB/Bluetooth scanner just types into the box and presses Enter, so it needs nothing special.
+  $('homescan').onclick = async () => {
+    const found = code => { $('hq').value = code; homeLookup(code); };
+    if (liveOK) { liveScan('sticker', 'Hold a book barcode, ISBN or library card in the frame', async code => { found(code); }, false); return; }
+    const codes = await takePhoto('sticker', $('homescanmsg'));
+    if (codes === null) { $('homescanmsg').textContent = ''; return; }
+    if (!codes.length) { $('homescanmsg').textContent = "Couldn't read a barcode from that photo - move closer and try again."; return; }
+    $('homescanmsg').textContent = ''; found(codes[0]);
+  };
   $('homeform').onsubmit = ev => { ev.preventDefault(); homeLookup($('hq').value.trim()); };
   let recentLoaded = 0;
   async function loadRecent() {
@@ -1314,19 +1588,21 @@
     else if ((m = h.match(/^card\/(\d+)$/))) view = 'card';
     else if (h === 'cards') view = 'cards';
     else if (h === 'export') view = 'library';
-    for (const v of ['home', 'library', 'book', 'add', 'lend', 'people', 'card', 'cards', 'mine']) $('view-' + v).hidden = v !== view;
-    const tab = { home: 'home', library: 'library', book: 'library', add: 'add', lend: 'lend', people: 'people', card: 'people', cards: 'people', mine: 'mine' }[view];
-    for (const t of ['home', 'library', 'add', 'lend', 'people', 'mine', 'settings', 'export']) $('tab-' + t).classList.toggle('on', t === tab && !(t === 'add' && h === 'settings'));
+    else if (h === 'overdue') view = 'overdue';
+    for (const v of ['home', 'library', 'book', 'add', 'lend', 'people', 'card', 'cards', 'mine', 'overdue']) $('view-' + v).hidden = v !== view;
+    const tab = { home: 'home', library: 'library', book: 'library', add: 'add', lend: 'lend', people: 'people', card: 'people', cards: 'people', mine: 'mine', overdue: 'overdue' }[view];
+    for (const t of ['home', 'library', 'add', 'lend', 'people', 'mine', 'settings', 'export', 'overdue']) $('tab-' + t).classList.toggle('on', t === tab && !(t === 'add' && h === 'settings'));
     $('tab-mine').hidden = !isPatron;
     $('menu-admin').hidden = viewer;
     $('footstaff').hidden = viewer;
     $('csvtools').hidden = viewer;
-    const names = { home: 'Home', library: 'Browse', book: 'Book', add: 'Add books', lend: 'Lend / return', people: 'People', card: 'Library card', cards: 'Library cards', mine: 'My books' };
+    const names = { home: 'Home', library: 'Browse', book: 'Book', add: 'Add books', lend: 'Lend / return', people: 'People', card: 'Library card', cards: 'Library cards', mine: 'My books', overdue: 'Overdue list' };
     document.title = (view === 'home' ? '' : names[view] + ' - ') + 'Room for Books';
     window.scrollTo(0, 0);
-    if (view === 'home') { $('homeacts').hidden = viewer; $('patronacts').hidden = !isPatron; loadRecent(); if (h === 'find') $('hq').focus(); }
+    if (view === 'home') { $('homeacts').hidden = viewer; $('patronacts').hidden = !isPatron; $('homemine').hidden = !isPatron; if (isPatron) loadHomeMine(); if (!viewer) loadHomeOverdue(); loadRecent(); if (h === 'find') $('hq').focus(); }
     else if (view === 'book') loadBook(m[1]);
     else if (view === 'mine') loadMine();
+    else if (view === 'overdue') loadOverdue();
     else if (view === 'add') { if (h === 'settings') { $('settings').open = true; $('settings').scrollIntoView(); } else $('code').focus(); }
     else if (view === 'lend') { loadOut(); curPatron = null; $('patronbox').replaceChildren();
       if (m && m[1]) openPatron(m[1]); else if (h === 'return') $('ret').focus(); else { $('whoresults').replaceChildren(); $('who').focus(); } }
@@ -1347,8 +1623,8 @@
     // The public catalogue is off by default: only link to it when a public address was configured.
     $('lnk-opac').hidden = !s.opac_url;
     if (s.opac_url) $('lnk-opac').href = s.opac_url + '/';
-    $('lnk-staff').href = staffRoot() + '/';
-    $('lnk-staff').hidden = viewer; $('footkoha').href = staffRoot() + '/';
+    $('lnk-staff').href = staffRoot() + '/cgi-bin/koha/mainpage.pl';
+    $('lnk-staff').hidden = viewer; $('footkoha').href = staffRoot() + '/cgi-bin/koha/mainpage.pl';
     $('footname').textContent = 'Room for Books' + (s.library_name ? ' · ' + s.library_name : '');
     $('lnk-labels').href = staffRoot() + '/cgi-bin/koha/labels/label-edit-range.pl';
     if (s.locations && s.locations.length) {
