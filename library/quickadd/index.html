@@ -985,14 +985,14 @@
     if (!terms[want]) want = terms.isbn13 ? 'isbn13' : 'title';
     const termBtns = {};
     const mark = () => { for (const [k, btn] of Object.entries(termBtns)) { btn.className = k === want ? 'primary' : ''; btn.setAttribute('aria-pressed', String(k === want)); }
-      if (typeof arPop !== 'undefined') arPop.textContent = 'Open AR BookFind beside this page (copies ' + terms[want][1] + ')'; };
+      if (typeof arPop !== 'undefined') arPop.replaceChildren('Look up on AR BookFind', el('span', { className: 'small', style: 'display:block;font-weight:400' }, 'copies ' + terms[want][1] + ' and opens it beside this page')); };
     const choose = async k => { want = k; try { localStorage.setItem('rfb-ar-term', k); } catch (e) {} mark(); await copyText(terms[k][0], terms[k][1]); };
     const copyDefault = () => copyText(terms[want][0], terms[want][1]);
-    var arPop = el('button', { type: 'button' }, 'Open AR BookFind beside this page');
+    var arPop = el('button', { type: 'button', style: 'text-align:left' }, 'Look up on AR BookFind');
     arPop.onclick = async () => { await copyDefault();
       const w = Math.min(560, Math.floor(screen.availWidth / 2)), h = screen.availHeight - 80;
       arWin = window.open('https://www.arbookfind.com/', 'arbookfind', 'popup=yes,width=' + w + ',height=' + h + ',left=' + (screen.availWidth - w) + ',top=40');
-      if (!arWin) msg.textContent = ' The browser blocked the pop-up: allow pop-ups for this site, or use the link to open AR BookFind in a tab.'; };
+      if (!arWin) msg.textContent = ' The browser blocked the pop-up: allow pop-ups for this site and press the button again.'; };
     const copyBtns = [];
     const addTerm = (k, label) => { const x = el('button', { type: 'button' }, label); x.onclick = () => choose(k); termBtns[k] = x; copyBtns.push(x); };
     if (isbn13) addTerm('isbn13', 'Copy ISBN-13');
@@ -1053,8 +1053,8 @@
     };
     document.addEventListener('paste', onPaste);
     wrap.append(edit, el('div', { style: 'margin-top:8px' }, save, msg),
-      el('div', { style: 'margin-top:8px' }, el('a', { href: 'https://www.arbookfind.com/', target: '_blank', rel: 'noopener noreferrer' }, 'Open AR BookFind'), ' ', arPop, ' ', ...copyBtns.flatMap(x => [x, ' ']), copy, copiedNote,
-        el('div', { className: 'small' }, isbn13 ? 'The highlighted button is what opening AR BookFind from here copies (your last choice is remembered). If AR BookFind finds nothing with the ISBN, press Copy title.' : 'This book has no ISBN, so the title is copied.')),
+      el('div', { style: 'margin-top:8px' }, arPop, ' ', ...copyBtns.flatMap(x => [x, ' ']), copy, copiedNote,
+        el('div', { className: 'small' }, isbn13 ? 'The highlighted button is what the look-up copies (your last choice is remembered). If AR BookFind finds nothing with the ISBN, press Copy title and search again.' : 'This book has no ISBN, so the title is copied.')),
       el('div', { style: 'margin-top:8px' }, fromClip, el('span', { className: 'small' }, ' or just press Ctrl/Cmd+V on this page after copying on AR BookFind (Ctrl/Cmd+A, then Ctrl/Cmd+C)')), paste);
     return wrap;
   }
@@ -1221,7 +1221,7 @@
     if (m.subjects && m.subjects.length) parts.push(el('div', { style: 'margin:8px 0' }, ...m.subjects.map(t => el('span', { className: 'chip', style: 'margin:0 6px 6px 0;display:inline-block' }, t))));
     if (m.first_published) parts.push(el('div', { className: 'small' }, 'First published: ' + m.first_published));
     const row = el('div', { className: 'small', style: 'margin-top:8px' }, 'Look it up: ');
-    (m.links || []).forEach((l, i) => { if (i) row.append(' · '); row.append(el('a', { href: l.url, target: '_blank', rel: 'noopener noreferrer' }, l.label)); });
+    (m.links || []).filter(l => !l.note).forEach((l, i) => { if (i) row.append(' · '); row.append(el('a', { href: l.url, target: '_blank', rel: 'noopener noreferrer' }, l.label)); });
     parts.push(row);
     if ((m.links || []).some(l => l.note)) parts.push(arBox(b, m));
     box.replaceChildren(...parts);

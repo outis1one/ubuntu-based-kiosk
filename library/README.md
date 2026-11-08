@@ -386,3 +386,5 @@ and *Copy title* buttons sit beside it, for when AR BookFind finds nothing with 
 
 **Which search term the AR pop-up copies:** the button beside it that is highlighted (*Copy ISBN-13*, *Copy ISBN-10* or *Copy title*). Clicking one copies it and makes it the choice; *Open AR BookFind*
 then copies that same term instead of resetting to the ISBN-13, and the choice is remembered on this device. The Open button's label says what it will copy.
+
+**One AR button:** the plain "Open AR BookFind" links are gone. **Look up on AR BookFind** (its caption says which term it copies) is the only way in; it opens the site in a window beside the book.
