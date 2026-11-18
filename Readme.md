@@ -10,9 +10,10 @@
 ## Build a bootable install ISO (one line)
 
 Paste this into a terminal on an amd64 Ubuntu/Debian machine. It fetches the
-repo, installs any missing build tools, then asks **which Ubuntu LTS** (the
-list comes from Ubuntu's own release list, so new LTS releases appear by
-themselves) and **online or offline**, and builds the ISO:
+repo, installs any missing build tools, then asks **online or offline** and
+whether to **use the latest Ubuntu LTS** (if not, it lists the latest three;
+the list comes from Ubuntu's own release list, so new LTS releases appear by
+themselves), and builds the ISO:
 
 ```bash
 git clone --depth 1 https://github.com/outis1one/ubuntu-based-kiosk.git && ubuntu-based-kiosk/iso/build-iso.sh --install-deps

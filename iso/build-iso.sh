@@ -38,8 +38,8 @@
 #   --install-deps        Install missing build tools with apt without asking.
 #   --release VER         Ubuntu LTS release to download, e.g. 24.04 (picks the
 #                         newest point release). Without it, a terminal run
-#                         lists the supported LTS releases (24.04 and newer)
-#                         and asks, defaulting to the newest; a non-terminal
+#                         offers the newest LTS (y/n),
+#                         then the latest three to pick from; a non-terminal
 #                         run uses the newest.
 #   --output PATH         Output ISO (default: iso/build/ubuntu-<ver>-kiosk-amd64.iso)
 #
@@ -266,18 +266,20 @@ if [[ -z "$SRC_ISO" && -z "$RELEASE" ]]; then
     (( ${#lts[@]} )) || die "no Ubuntu LTS releases found - pass --release VER"
     RELEASE="${lts[0]}"
     if (( ${#lts[@]} > 1 )) && [[ -t 0 ]]; then
-        echo "Which Ubuntu LTS release?"
-        for i in "${!lts[@]}"; do
-            echo "  $((i+1))) Ubuntu ${lts[$i]} LTS$([[ $i == 0 ]] && echo ' (newest)')"
-        done
-        read -r -p "Choose [1-${#lts[@]}, default 1]: " reply
-        reply="${reply:-1}"
-        if [[ "$reply" =~ ^[0-9]+$ ]] && (( reply >= 1 && reply <= ${#lts[@]} )); then
-            RELEASE="${lts[reply-1]}"
-        elif printf '%s\n' "${lts[@]}" | grep -qxF "$reply"; then
-            RELEASE="$reply"
-        else
-            die "not one of the choices: $reply"
+        read -r -p "Use the latest Ubuntu LTS ($RELEASE)? [Y/n] " reply
+        if [[ "${reply,,}" =~ ^(n|no)$ ]]; then
+            lts=("${lts[@]:0:3}")          # the latest three
+            echo "Which Ubuntu LTS release?"
+            for i in "${!lts[@]}"; do echo "  $((i+1))) Ubuntu ${lts[$i]} LTS"; done
+            read -r -p "Choose [1-${#lts[@]}, default 1]: " reply
+            reply="${reply:-1}"
+            if [[ "$reply" =~ ^[0-9]+$ ]] && (( reply >= 1 && reply <= ${#lts[@]} )); then
+                RELEASE="${lts[reply-1]}"
+            elif printf '%s\n' "${lts[@]}" | grep -qxF "$reply"; then
+                RELEASE="$reply"
+            else
+                die "not one of the choices: $reply"
+            fi
         fi
     fi
 fi
