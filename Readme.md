@@ -16,8 +16,11 @@ the list comes from Ubuntu's own release list, so new LTS releases appear by
 themselves), and builds the ISO:
 
 ```bash
-git clone --depth 1 https://github.com/outis1one/ubuntu-based-kiosk.git && ubuntu-based-kiosk/iso/build-iso.sh --install-deps
+(git -C ubuntu-based-kiosk pull --ff-only || git clone --depth 1 https://github.com/outis1one/ubuntu-based-kiosk.git) && ubuntu-based-kiosk/iso/build-iso.sh --install-deps
 ```
+
+Safe to run again: if `ubuntu-based-kiosk` is already there it is updated
+instead of cloned.
 
 The ISO lands in `ubuntu-based-kiosk/iso/build/`; write it to a USB stick and
 boot. More options, GitHub-hosted builds and fully hands-off installs:
