@@ -36,8 +36,11 @@
 #
 #   --iso PATH            Use this Ubuntu Server ISO instead of downloading.
 #   --install-deps        Install missing build tools with apt without asking.
-#   --release VER         Ubuntu release to download (default: 26.04 - picks
-#                         the newest 26.04.x live-server-amd64 point release).
+#   --release VER         Ubuntu LTS release to download, e.g. 24.04 (picks the
+#                         newest point release). Without it, a terminal run
+#                         offers the newest LTS (y/n),
+#                         then the latest three to pick from; a non-terminal
+#                         run uses the newest.
 #   --output PATH         Output ISO (default: iso/build/ubuntu-<ver>-kiosk-amd64.iso)
 #
 #   Installed system:
@@ -70,6 +73,9 @@
 #   --repo-url URL        git remote recorded in the copied repo, used by
 #                         Advanced -> Upgrade (default: this checkout's
 #                         origin, else the upstream GitHub repo).
+#   --online              Plain ISO; the kiosk needs internet on first boot.
+#                         (With neither --online nor --offline, a terminal
+#                         run asks which one you want; default offline.)
 #   --offline             Also bundle everything install.sh downloads (~520 MB:
 #                         every apt package incl. the CUPS, LMS/Squeezelite,
 #                         Asterisk Intercom, VNC, WireGuard and hotspot addons,
@@ -93,7 +99,9 @@ BUILD_DIR="$SCRIPT_DIR/build"
 DEFAULT_REPO_URL="https://github.com/outis1one/ubuntu-based-kiosk.git"
 
 SRC_ISO=""
-RELEASE="26.04"
+RELEASE=""
+# Oldest release offered (the kiosk targets Ubuntu 24.04 and newer).
+MIN_RELEASE="24.04"
 OUTPUT=""
 ADMIN_USER=""
 ADMIN_PASS="${KIOSK_ADMIN_PASSWORD:-}"
@@ -107,6 +115,7 @@ AUTO_NETWORK=0
 NO_CONFIRM=0
 UNATTENDED=0
 OFFLINE=0
+OFFLINE_SET=0
 INSTALL_DEPS=0
 REPO_URL=""
 
@@ -153,7 +162,8 @@ while [[ $# -gt 0 ]]; do
         --unattended) UNATTENDED=1; shift ;;
         --fully-automatic) AUTO_STORAGE=1; AUTO_NETWORK=1; NO_CONFIRM=1; UNATTENDED=1; shift ;;
         --repo-url) REPO_URL="$2"; shift 2 ;;
-        --offline) OFFLINE=1; shift ;;
+        --offline) OFFLINE=1; OFFLINE_SET=1; shift ;;
+        --online) OFFLINE=0; OFFLINE_SET=1; shift ;;
         --install-deps) INSTALL_DEPS=1; shift ;;
         -h|--help) usage 0 ;;
         *) echo "Unknown option: $1" >&2; usage 1 ;;
@@ -163,6 +173,23 @@ done
 ################################################################################
 # Validate
 ################################################################################
+
+# Prompts read from the terminal itself, so they still work when stdin is
+# piped (e.g. `curl ... | bash`). No terminal at all (CI): take the defaults.
+if { : </dev/tty; } 2>/dev/null; then HAVE_TTY=1; else HAVE_TTY=0; fi
+ask() { read -r -p "$1" "$2" </dev/tty; }
+
+# Neither --online nor --offline given: ask (when run from a terminal).
+if (( ! OFFLINE_SET )) && (( HAVE_TTY )); then
+    echo "Build which kind of ISO?"
+    echo "  1) Online  (~2.8 GB) - the kiosk machine needs internet on first boot"
+    echo "  2) Offline (~3.3 GB) - bundles every package; installs with no internet"
+    ask "Choose [1/2, default 2]: " reply
+    case "${reply:-2}" in
+        1|online|o|O) OFFLINE=0 ;;
+        *) OFFLINE=1 ;;
+    esac
+fi
 
 # Build tools: command -> the apt package that provides it.
 declare -A DEP_PKG=([xorriso]=xorriso [curl]=curl [git]=git [openssl]=openssl [sha256sum]=coreutils)
@@ -230,6 +257,37 @@ trap 'rm -rf "$WORK"' EXIT
 ################################################################################
 # Source ISO - download and verify unless one was given
 ################################################################################
+
+# Which Ubuntu LTS? Asked from Ubuntu's own release list, so new LTS
+# releases (28.04, ...) show up without any change here. Default: newest.
+if [[ -z "$SRC_ISO" && -z "$RELEASE" ]]; then
+    info "Looking up Ubuntu LTS releases..."
+    meta="$(curl -fsSL https://changelogs.ubuntu.com/meta-release-lts)" \
+        || die "couldn't fetch the Ubuntu release list - pass --release VER (e.g. --release 24.04)"
+    mapfile -t lts < <(awk -v min="$MIN_RELEASE" '
+        /^Version:/ { v=$2; sub(/\.[0-9]+$/, "", v)
+                      if (v ~ /^[0-9][0-9]\.04$/) print v }' <<<"$meta" \
+        | sort -uV | awk -v min="$MIN_RELEASE" '{ if ($1+0 >= min+0) print }' | sort -rV)
+    (( ${#lts[@]} )) || die "no Ubuntu LTS releases found - pass --release VER"
+    RELEASE="${lts[0]}"
+    if (( ${#lts[@]} > 1 )) && (( HAVE_TTY )); then
+        ask "Use the latest Ubuntu LTS ($RELEASE)? [Y/n] " reply
+        if [[ "${reply,,}" =~ ^(n|no)$ ]]; then
+            lts=("${lts[@]:0:3}")          # the latest three
+            echo "Which Ubuntu LTS release?"
+            for i in "${!lts[@]}"; do echo "  $((i+1))) Ubuntu ${lts[$i]} LTS"; done
+            ask "Choose [1-${#lts[@]}, default 1]: " reply
+            reply="${reply:-1}"
+            if [[ "$reply" =~ ^[0-9]+$ ]] && (( reply >= 1 && reply <= ${#lts[@]} )); then
+                RELEASE="${lts[reply-1]}"
+            elif printf '%s\n' "${lts[@]}" | grep -qxF "$reply"; then
+                RELEASE="$reply"
+            else
+                die "not one of the choices: $reply"
+            fi
+        fi
+    fi
+fi
 
 if [[ -z "$SRC_ISO" ]]; then
     base="https://releases.ubuntu.com/$RELEASE"

@@ -7,6 +7,24 @@
 
 ---
 
+## Build a bootable install ISO (one line)
+
+Paste this into a terminal on an amd64 Ubuntu/Debian machine. It fetches the
+repo, installs any missing build tools, then asks **online or offline** and
+whether to **use the latest Ubuntu LTS** (if not, it lists the latest three;
+the list comes from Ubuntu's own release list, so new LTS releases appear by
+themselves), and builds the ISO:
+
+```bash
+git clone --depth 1 https://github.com/outis1one/ubuntu-based-kiosk.git && ubuntu-based-kiosk/iso/build-iso.sh --install-deps
+```
+
+The ISO lands in `ubuntu-based-kiosk/iso/build/`; write it to a USB stick and
+boot. More options, GitHub-hosted builds and fully hands-off installs:
+[All-in-One Install ISO](#all-in-one-install-iso-ubuntu-server-2604--kiosk).
+
+---
+
 ## Target Systems
 
 - Ubuntu 24.04+ Server (minimal install recommended)
@@ -41,6 +59,10 @@ Home/office kiosk for reusing old hardware, displaying:
 
 ## Quick Install
 
+> **Prefer a bootable USB stick?** Skip the manual steps below and build a single
+> ISO that installs Ubuntu *and* the kiosk: see
+> [All-in-One Install ISO](#all-in-one-install-iso-ubuntu-server-2604--kiosk).
+
 ```bash
 # Install Ubuntu 24.04 Server
 # ***Do not use "kiosk" as a user name when installing, the script creates a restricted user named kiosk and the script will not install if the sudo user/user name when setting up the system is "kiosk".***
@@ -67,6 +89,33 @@ Instead of installing Ubuntu Server and then running the script, build a
 single ISO that does both: it installs Ubuntu Server 26.04, and on the first
 boot of the installed system it runs `./install.sh` automatically on the
 console.
+
+### Build it at a glance
+
+Everything is scripted - pick whichever suits you:
+
+| Where | Command | You do by hand |
+|---|---|---|
+| **GitHub** (no Linux machine needed) | `gh workflow run build-iso.yml -f mode=interactive` (or Actions → Build kiosk ISO → Run workflow) | Download the artifact, write it to USB |
+| **Any amd64 Ubuntu/Debian machine** | `iso/build-iso.sh --install-deps --offline` | Write it to USB |
+| **Hands-off kiosk** | `iso/build-iso.sh --install-deps --offline --fully-automatic --username NAME` | Write it to USB (**wipes a disk on boot**) |
+
+The script downloads the newest point release of the Ubuntu LTS you pick (default: the newest LTS; `--release 24.04` skips the question), checks it against
+Ubuntu's published `SHA256SUMS`, adds the autoinstall config, a copy of this
+repo and (with `--offline`) a package bundle, and writes the new ISO to
+`iso/build/`. Nothing else needs doing before you boot it.
+
+Build on GitHub from the command line (needs the [`gh` CLI](https://cli.github.com/)
+signed in; add `-R owner/repo` outside a checkout):
+
+```bash
+gh workflow run build-iso.yml -f mode=unattended-kiosk -f offline=true
+gh run watch                                  # wait for it (about 10 minutes)
+gh run download --dir kiosk-iso               # fetches the ISO + .sha256
+(cd kiosk-iso/* && sha256sum -c ./*.sha256)   # verify the download
+```
+
+### Build it by hand
 
 ```bash
 git clone https://github.com/outis1one/ubuntu-based-kiosk.git
