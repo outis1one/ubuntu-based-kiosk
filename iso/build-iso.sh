@@ -174,12 +174,17 @@ done
 # Validate
 ################################################################################
 
+# Prompts read from the terminal itself, so they still work when stdin is
+# piped (e.g. `curl ... | bash`). No terminal at all (CI): take the defaults.
+if { : </dev/tty; } 2>/dev/null; then HAVE_TTY=1; else HAVE_TTY=0; fi
+ask() { read -r -p "$1" "$2" </dev/tty; }
+
 # Neither --online nor --offline given: ask (when run from a terminal).
-if (( ! OFFLINE_SET )) && [[ -t 0 ]]; then
+if (( ! OFFLINE_SET )) && (( HAVE_TTY )); then
     echo "Build which kind of ISO?"
     echo "  1) Online  (~2.8 GB) - the kiosk machine needs internet on first boot"
     echo "  2) Offline (~3.3 GB) - bundles every package; installs with no internet"
-    read -r -p "Choose [1/2, default 2]: " reply
+    ask "Choose [1/2, default 2]: " reply
     case "${reply:-2}" in
         1|online|o|O) OFFLINE=0 ;;
         *) OFFLINE=1 ;;
@@ -265,13 +270,13 @@ if [[ -z "$SRC_ISO" && -z "$RELEASE" ]]; then
         | sort -uV | awk -v min="$MIN_RELEASE" '{ if ($1+0 >= min+0) print }' | sort -rV)
     (( ${#lts[@]} )) || die "no Ubuntu LTS releases found - pass --release VER"
     RELEASE="${lts[0]}"
-    if (( ${#lts[@]} > 1 )) && [[ -t 0 ]]; then
-        read -r -p "Use the latest Ubuntu LTS ($RELEASE)? [Y/n] " reply
+    if (( ${#lts[@]} > 1 )) && (( HAVE_TTY )); then
+        ask "Use the latest Ubuntu LTS ($RELEASE)? [Y/n] " reply
         if [[ "${reply,,}" =~ ^(n|no)$ ]]; then
             lts=("${lts[@]:0:3}")          # the latest three
             echo "Which Ubuntu LTS release?"
             for i in "${!lts[@]}"; do echo "  $((i+1))) Ubuntu ${lts[$i]} LTS"; done
-            read -r -p "Choose [1-${#lts[@]}, default 1]: " reply
+            ask "Choose [1-${#lts[@]}, default 1]: " reply
             reply="${reply:-1}"
             if [[ "$reply" =~ ^[0-9]+$ ]] && (( reply >= 1 && reply <= ${#lts[@]} )); then
                 RELEASE="${lts[reply-1]}"
