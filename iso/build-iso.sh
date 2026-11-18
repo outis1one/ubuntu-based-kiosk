@@ -70,6 +70,9 @@
 #   --repo-url URL        git remote recorded in the copied repo, used by
 #                         Advanced -> Upgrade (default: this checkout's
 #                         origin, else the upstream GitHub repo).
+#   --online              Plain ISO; the kiosk needs internet on first boot.
+#                         (With neither --online nor --offline, a terminal
+#                         run asks which one you want; default offline.)
 #   --offline             Also bundle everything install.sh downloads (~520 MB:
 #                         every apt package incl. the CUPS, LMS/Squeezelite,
 #                         Asterisk Intercom, VNC, WireGuard and hotspot addons,
@@ -107,6 +110,7 @@ AUTO_NETWORK=0
 NO_CONFIRM=0
 UNATTENDED=0
 OFFLINE=0
+OFFLINE_SET=0
 INSTALL_DEPS=0
 REPO_URL=""
 
@@ -153,7 +157,8 @@ while [[ $# -gt 0 ]]; do
         --unattended) UNATTENDED=1; shift ;;
         --fully-automatic) AUTO_STORAGE=1; AUTO_NETWORK=1; NO_CONFIRM=1; UNATTENDED=1; shift ;;
         --repo-url) REPO_URL="$2"; shift 2 ;;
-        --offline) OFFLINE=1; shift ;;
+        --offline) OFFLINE=1; OFFLINE_SET=1; shift ;;
+        --online) OFFLINE=0; OFFLINE_SET=1; shift ;;
         --install-deps) INSTALL_DEPS=1; shift ;;
         -h|--help) usage 0 ;;
         *) echo "Unknown option: $1" >&2; usage 1 ;;
@@ -163,6 +168,18 @@ done
 ################################################################################
 # Validate
 ################################################################################
+
+# Neither --online nor --offline given: ask (when run from a terminal).
+if (( ! OFFLINE_SET )) && [[ -t 0 ]]; then
+    echo "Build which kind of ISO?"
+    echo "  1) Online  (~2.8 GB) - the kiosk machine needs internet on first boot"
+    echo "  2) Offline (~3.3 GB) - bundles every package; installs with no internet"
+    read -r -p "Choose [1/2, default 2]: " reply
+    case "${reply:-2}" in
+        1|online|o|O) OFFLINE=0 ;;
+        *) OFFLINE=1 ;;
+    esac
+fi
 
 # Build tools: command -> the apt package that provides it.
 declare -A DEP_PKG=([xorriso]=xorriso [curl]=curl [git]=git [openssl]=openssl [sha256sum]=coreutils)

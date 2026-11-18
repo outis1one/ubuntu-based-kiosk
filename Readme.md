@@ -72,6 +72,18 @@ single ISO that does both: it installs Ubuntu Server 26.04, and on the first
 boot of the installed system it runs `./install.sh` automatically on the
 console.
 
+### One-line build
+
+Copy this into a terminal on an amd64 Ubuntu/Debian machine. It fetches the
+repo, installs any missing build tools, asks **online or offline**, and builds:
+
+```bash
+git clone --depth 1 https://github.com/outis1one/ubuntu-based-kiosk.git && ubuntu-based-kiosk/iso/build-iso.sh --install-deps
+```
+
+The ISO lands in `ubuntu-based-kiosk/iso/build/`. Add flags to the end for
+anything else (see the table below).
+
 ### Build it at a glance
 
 Everything is scripted - pick whichever suits you:
