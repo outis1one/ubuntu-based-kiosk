@@ -36,8 +36,11 @@
 #
 #   --iso PATH            Use this Ubuntu Server ISO instead of downloading.
 #   --install-deps        Install missing build tools with apt without asking.
-#   --release VER         Ubuntu release to download (default: 26.04 - picks
-#                         the newest 26.04.x live-server-amd64 point release).
+#   --release VER         Ubuntu LTS release to download, e.g. 24.04 (picks the
+#                         newest point release). Without it, a terminal run
+#                         lists the supported LTS releases (24.04 and newer)
+#                         and asks, defaulting to the newest; a non-terminal
+#                         run uses the newest.
 #   --output PATH         Output ISO (default: iso/build/ubuntu-<ver>-kiosk-amd64.iso)
 #
 #   Installed system:
@@ -96,7 +99,9 @@ BUILD_DIR="$SCRIPT_DIR/build"
 DEFAULT_REPO_URL="https://github.com/outis1one/ubuntu-based-kiosk.git"
 
 SRC_ISO=""
-RELEASE="26.04"
+RELEASE=""
+# Oldest release offered (the kiosk targets Ubuntu 24.04 and newer).
+MIN_RELEASE="24.04"
 OUTPUT=""
 ADMIN_USER=""
 ADMIN_PASS="${KIOSK_ADMIN_PASSWORD:-}"
@@ -247,6 +252,35 @@ trap 'rm -rf "$WORK"' EXIT
 ################################################################################
 # Source ISO - download and verify unless one was given
 ################################################################################
+
+# Which Ubuntu LTS? Asked from Ubuntu's own release list, so new LTS
+# releases (28.04, ...) show up without any change here. Default: newest.
+if [[ -z "$SRC_ISO" && -z "$RELEASE" ]]; then
+    info "Looking up Ubuntu LTS releases..."
+    meta="$(curl -fsSL https://changelogs.ubuntu.com/meta-release-lts)" \
+        || die "couldn't fetch the Ubuntu release list - pass --release VER (e.g. --release 24.04)"
+    mapfile -t lts < <(awk -v min="$MIN_RELEASE" '
+        /^Version:/ { v=$2; sub(/\.[0-9]+$/, "", v)
+                      if (v ~ /^[0-9][0-9]\.04$/) print v }' <<<"$meta" \
+        | sort -uV | awk -v min="$MIN_RELEASE" '{ if ($1+0 >= min+0) print }' | sort -rV)
+    (( ${#lts[@]} )) || die "no Ubuntu LTS releases found - pass --release VER"
+    RELEASE="${lts[0]}"
+    if (( ${#lts[@]} > 1 )) && [[ -t 0 ]]; then
+        echo "Which Ubuntu LTS release?"
+        for i in "${!lts[@]}"; do
+            echo "  $((i+1))) Ubuntu ${lts[$i]} LTS$([[ $i == 0 ]] && echo ' (newest)')"
+        done
+        read -r -p "Choose [1-${#lts[@]}, default 1]: " reply
+        reply="${reply:-1}"
+        if [[ "$reply" =~ ^[0-9]+$ ]] && (( reply >= 1 && reply <= ${#lts[@]} )); then
+            RELEASE="${lts[reply-1]}"
+        elif printf '%s\n' "${lts[@]}" | grep -qxF "$reply"; then
+            RELEASE="$reply"
+        else
+            die "not one of the choices: $reply"
+        fi
+    fi
+fi
 
 if [[ -z "$SRC_ISO" ]]; then
     base="https://releases.ubuntu.com/$RELEASE"

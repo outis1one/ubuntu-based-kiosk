@@ -7,6 +7,23 @@
 
 ---
 
+## Build a bootable install ISO (one line)
+
+Paste this into a terminal on an amd64 Ubuntu/Debian machine. It fetches the
+repo, installs any missing build tools, then asks **which Ubuntu LTS** (the
+list comes from Ubuntu's own release list, so new LTS releases appear by
+themselves) and **online or offline**, and builds the ISO:
+
+```bash
+git clone --depth 1 https://github.com/outis1one/ubuntu-based-kiosk.git && ubuntu-based-kiosk/iso/build-iso.sh --install-deps
+```
+
+The ISO lands in `ubuntu-based-kiosk/iso/build/`; write it to a USB stick and
+boot. More options, GitHub-hosted builds and fully hands-off installs:
+[All-in-One Install ISO](#all-in-one-install-iso-ubuntu-server-2604--kiosk).
+
+---
+
 ## Target Systems
 
 - Ubuntu 24.04+ Server (minimal install recommended)
@@ -72,18 +89,6 @@ single ISO that does both: it installs Ubuntu Server 26.04, and on the first
 boot of the installed system it runs `./install.sh` automatically on the
 console.
 
-### One-line build
-
-Copy this into a terminal on an amd64 Ubuntu/Debian machine. It fetches the
-repo, installs any missing build tools, asks **online or offline**, and builds:
-
-```bash
-git clone --depth 1 https://github.com/outis1one/ubuntu-based-kiosk.git && ubuntu-based-kiosk/iso/build-iso.sh --install-deps
-```
-
-The ISO lands in `ubuntu-based-kiosk/iso/build/`. Add flags to the end for
-anything else (see the table below).
-
 ### Build it at a glance
 
 Everything is scripted - pick whichever suits you:
@@ -94,7 +99,7 @@ Everything is scripted - pick whichever suits you:
 | **Any amd64 Ubuntu/Debian machine** | `iso/build-iso.sh --install-deps --offline` | Write it to USB |
 | **Hands-off kiosk** | `iso/build-iso.sh --install-deps --offline --fully-automatic --username NAME` | Write it to USB (**wipes a disk on boot**) |
 
-The script downloads the current Ubuntu Server 26.04.x ISO, checks it against
+The script downloads the newest point release of the Ubuntu LTS you pick (default: the newest LTS; `--release 24.04` skips the question), checks it against
 Ubuntu's published `SHA256SUMS`, adds the autoinstall config, a copy of this
 repo and (with `--offline`) a package bundle, and writes the new ISO to
 `iso/build/`. Nothing else needs doing before you boot it.
